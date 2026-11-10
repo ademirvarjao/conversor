@@ -1,0 +1,11 @@
+{
+  "name": "conversor-custodio",
+  "version": "1.0.0",
+  "description": "Conversor web de conciliações financeiras (.pdf e .xlsx) com IA adaptativa de layouts",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m http.server 3000",
+    "start": "python3 -m http.server 8080"
+  },
+  "license": "MIT"
+}
