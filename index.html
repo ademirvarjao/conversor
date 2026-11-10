@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conversor Custódio — Conciliação Financeira Inteligente (.xlsx &amp; .pdf)</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="36" height="36" rx="9" fill="#0F2744" />
+            <path d="M9 11.5H27M9 18H27M9 24.5H19" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="25.5" cy="24.5" r="3.5" fill="#10B981" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">Conversor Custódio</h1>
+          <p class="brand-sub">Unificação de conciliações (.pdf e .xlsx) com IA Adaptativa de Layouts</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button id="btn-demo" class="btn btn-ghost" type="button" title="Testar com arquivos simulados de layout variável">
+          Testar Exemplo IA
+        </button>
+        <button id="btn-ai-memory" class="btn btn-outline-light" type="button">
+          <span class="ai-dot"></span>
+          <span>Memória da IA</span>
+          <span id="ai-profiles-badge" class="badge-pill">0 perfis</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-content">
+    <!-- Passo 1: Upload -->
+    <section class="card upload-section">
+      <div class="section-header">
+        <div>
+          <span class="step-tag">PASSO 1</span>
+          <h2>Importar Arquivos (.pdf e .xlsx)</h2>
+        </div>
+        <div class="section-actions">
+          <button id="btn-clear-files" class="btn btn-sm btn-ghost-dark hidden" type="button">Limpar Tudo</button>
+        </div>
+      </div>
+
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Selecionar ou arrastar arquivos PDF ou XLSX">
+        <input id="file-input" type="file" accept=".pdf,.xlsx" multiple class="sr-only" />
+        <div class="dropzone-icon" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <p class="dropzone-title">Arraste seus arquivos <strong>.pdf</strong> e <strong>.xlsx</strong> aqui ou <span class="link-like">clique para selecionar</span></p>
+        <p class="dropzone-hint">Você pode enviar vários arquivos juntos (ex: Pagamentos + Recebimentos). Tudo é processado localmente no navegador.</p>
+      </div>
+
+      <div id="files-list" class="files-grid hidden"></div>
+    </section>
+
+    <!-- Passo 2: Painel da IA Adaptativa -->
+    <section id="ai-trainer-section" class="card hidden">
+      <div class="section-header">
+        <div>
+          <span class="step-tag step-ai">PASSO 2 • IA ADAPTATIVA</span>
+          <h2 id="trainer-title">Mapeamento Inteligente de Layout</h2>
+        </div>
+        <div class="section-actions">
+          <button id="btn-llm-analyze" class="btn btn-sm btn-secondary hidden" type="button">Analisar via LLM</button>
+          <button id="btn-close-trainer" class="btn btn-sm btn-ghost-dark" type="button">Ocultar Painel</button>
+        </div>
+      </div>
+
+      <div id="trainer-alert" class="ai-alert hidden"></div>
+
+      <div class="trainer-meta-row">
+        <div class="field-group">
+          <label for="layout-name-input">Nome do Perfil de Layout (para a IA memorizar)</label>
+          <input id="layout-name-input" type="text" placeholder="Ex: Banco Itaú - Pagamentos" />
+        </div>
+        <div class="field-group">
+          <label for="rule-default-sign">Sinal padrão (para valores sem sinal explícito)</label>
+          <select id="rule-default-sign">
+            <option value="auto">Automático (manter sinal do arquivo)</option>
+            <option value="negative">Forçar Saída / Pagamento (-)</option>
+            <option value="positive">Forçar Entrada / Recebimento (+)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="mapping-table">
+          <thead>
+            <tr>
+              <th>Coluna Detectada</th>
+              <th>Amostra dos Dados</th>
+              <th>Diagnóstico da IA</th>
+              <th>Função no Conversor</th>
+              <th>Ordem Histórico</th>
+            </tr>
+          </thead>
+          <tbody id="mapping-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="rules-bar">
+        <label class="checkbox-label">
+          <input id="rule-remove-pipes" type="checkbox" checked />
+          <span>Substituir pipes (<code>|</code>) por espaço vazio</span>
+        </label>
+        <label class="checkbox-label">
+          <input id="rule-collapse-spaces" type="checkbox" checked />
+          <span>Normalizar espaços extras</span>
+        </label>
+        <div class="inline-replace">
+          <span>Substituição extra:</span>
+          <input id="rule-replace-from" type="text" placeholder="Texto/símbolo" />
+          <span>→</span>
+          <input id="rule-replace-to" type="text" placeholder="Novo texto" />
+        </div>
+      </div>
+
+      <div class="trainer-footer">
+        <p class="trainer-tip">Ao confirmar, a IA atualiza os pesos semânticos das colunas e memoriza este perfil para reconhecer automaticamente variações futuras.</p>
+        <button id="btn-train-apply" class="btn btn-primary" type="button">
+          Treinar IA e Aplicar Layout
+        </button>
+      </div>
+    </section>
+
+    <!-- Passo 3: Pré-visualização e Exportação -->
+    <section id="output-section" class="card hidden">
+      <div class="section-header">
+        <div>
+          <span class="step-tag step-out">PASSO 3 • RESULTADO UNIFICADO</span>
+          <h2>Planilha Consolidada (data | valor | historico)</h2>
+        </div>
+        <div class="export-actions">
+          <button id="btn-export-xlsx" class="btn btn-emerald" type="button">
+            Exportar .xlsx
+          </button>
+          <button id="btn-export-pdf" class="btn btn-navy" type="button">
+            Exportar .pdf
+          </button>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <span class="kpi-label">Total de Lançamentos</span>
+          <strong id="kpi-count" class="kpi-value">0</strong>
+          <span id="kpi-period" class="kpi-sub">-</span>
+        </div>
+        <div class="kpi-card kpi-in">
+          <span class="kpi-label">Recebimentos (+)</span>
+          <strong id="kpi-in" class="kpi-value">0,00</strong>
+          <span id="kpi-in-count" class="kpi-sub">0 registros</span>
+        </div>
+        <div class="kpi-card kpi-out">
+          <span class="kpi-label">Pagamentos (-)</span>
+          <strong id="kpi-out" class="kpi-value">0,00</strong>
+          <span id="kpi-out-count" class="kpi-sub">0 registros</span>
+        </div>
+        <div class="kpi-card kpi-net">
+          <span class="kpi-label">Saldo Líquido</span>
+          <strong id="kpi-net" class="kpi-value">0,00</strong>
+          <span id="kpi-skipped" class="kpi-sub">0 ignorados</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-box">
+          <input id="search-input" type="search" placeholder="Filtrar por histórico, data (dd/mm/aaaa) ou arquivo..." />
+        </div>
+        <div class="filter-pills" role="group" aria-label="Filtrar por tipo de lançamento">
+          <button class="pill active" data-filter="all" type="button">Todos</button>
+          <button class="pill" data-filter="in" type="button">Positivos (+)</button>
+          <button class="pill" data-filter="out" type="button">Negativos (-)</button>
+        </div>
+      </div>
+
+      <div class="table-wrap output-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-date">data</th>
+              <th class="col-val">valor</th>
+              <th class="col-hist">historico</th>
+            </tr>
+          </thead>
+          <tbody id="preview-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination-bar">
+        <span id="pagination-info" class="pagination-info">Exibindo 0 de 0</span>
+        <div class="pagination-btns">
+          <button id="btn-prev-page" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
+          <button id="btn-next-page" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal: Memória da IA & Configurações -->
+  <div id="ai-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h2 id="ai-modal-title">Memória da IA Adaptativa</h2>
+          <p class="modal-sub">Perfis aprendidos, vocabulário semântico e histórico de evolução</p>
+        </div>
+        <button id="btn-close-modal" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-stats">
+          <div class="mini-stat">
+            <span>Layouts Aprendidos</span>
+            <strong id="mem-stat-profiles">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Arquivos Processados</span>
+            <strong id="mem-stat-files">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Correções Assimiladas</span>
+            <strong id="mem-stat-corr">0</strong>
+          </div>
+          <div class="mini-stat">
+            <span>Tokens no Vocabulário</span>
+            <strong id="mem-stat-tokens">0</strong>
+          </div>
+        </div>
+
+        <div class="modal-tabs">
+          <button class="mtab active" data-mtab="profiles" type="button">Layouts Memorizados</button>
+          <button class="mtab" data-mtab="logs" type="button">Log de Aprendizado</button>
+          <button class="mtab" data-mtab="settings" type="button">Backup / LLM Opcional</button>
+        </div>
+
+        <div id="mtab-profiles" class="mtab-panel"></div>
+        <div id="mtab-logs" class="mtab-panel hidden"></div>
+        <div id="mtab-settings" class="mtab-panel hidden">
+          <div class="settings-block">
+            <h3>Portabilidade da Memória (GitHub / Equipe)</h3>
+            <p>Exporte a memória aprendida em JSON para versionar no seu repositório GitHub ou compartilhar entre máquinas.</p>
+            <div class="btn-row">
+              <button id="btn-export-memory" class="btn btn-sm btn-secondary" type="button">Exportar Memória (.json)</button>
+              <label class="btn btn-sm btn-ghost-dark" style="cursor:pointer;">
+                Importar Memória (.json)
+                <input id="import-memory-input" type="file" accept=".json" class="sr-only" />
+              </label>
+              <button id="btn-reset-memory" class="btn btn-sm btn-danger-outline" type="button">Resetar Memória</button>
+            </div>
+          </div>
+
+          <div class="settings-block">
+            <h3>Conector LLM Opcional (OpenAI / Gemini)</h3>
+            <p>O Conversor Custódio funciona 100% offline com IA local. Opcionalmente, informe uma chave própria para analisar layouts inéditos via nuvem (salva apenas no seu navegador).</p>
+            <div class="llm-grid">
+              <div class="field-group">
+                <label for="llm-provider">Provedor</label>
+                <select id="llm-provider">
+                  <option value="none">Desativado (IA Local apenas)</option>
+                  <option value="openai">OpenAI (gpt-4o-mini)</option>
+                  <option value="gemini">Google Gemini (2.0 Flash)</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label for="llm-apikey">API Key</label>
+                <input id="llm-apikey" type="password" placeholder="sk-... ou AIza..." autocomplete="off" />
+              </div>
+            </div>
+            <div class="btn-row" style="margin-top:10px;">
+              <button id="btn-save-llm" class="btn btn-sm btn-primary" type="button">Salvar Configuração</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Vendored Browser Libraries (Zero CDN dependency, works 100% on GitHub Pages) -->
+  <script src="./vendor/exceljs/exceljs.min.js"></script>
+  <script src="./vendor/jspdf/jspdf.umd.min.js"></script>
+  <script src="./vendor/jspdf/jspdf.plugin.autotable.min.js"></script>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
