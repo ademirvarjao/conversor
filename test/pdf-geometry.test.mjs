@@ -122,44 +122,104 @@ describe('buildTableFromTextLines — extrato bancário', () => {
       'EXTRATO DE CONTA CORRENTE - BANCO EXEMPLO',
       'CNPJ: 12.345.678/0001-99',
     ]);
-    assert.ok(table.skippedRows >= 2, `ignoradas: ${table.skippedRows}`);
+    const tudo = table.rows.flat().join(' | ');
+    assert.ok(!/CNPJ|EXTRATO DE CONTA|^TOTAL/i.test(tudo), `sobrou lixo: ${tudo}`);
+    assert.ok(table.skippedRows >= 1, `ignoradas: ${table.skippedRows}`);
   });
 });
 
-describe('buildTableFromTextLines — colunas separadas de entrada/saída', () => {
-  const pages = [
-    line(1, 700, [
-      ['Dt. Mov.', 40, 45],
-      ['Histórico', 100, 45],
-      ['Entrada (+)', 350, 55],
-      ['Saída (-)', 430, 45],
-      ['Saldo', 520, 35],
+describe('buildTableFromTextLines — extrato paginado com Pagto./Recbto.', () => {
+  // Geometria típica de extrato bancário: cada página repete o cabeçalho e o
+  // rodapé, os valores ficam alinhados à direita em colunas próprias e existe
+  // uma linha de contexto ("Conta Corrente : ...") logo acima dos lançamentos.
+  const larguraTexto = (texto) => texto.length * 4.6;
+  const valorDireita = (texto, fim) => {
+    const largura = larguraTexto(texto);
+    return [texto, fim - largura, largura];
+  };
+
+  const pagina = (numero, yTopo) => [
+    line(numero, yTopo + 55, [
+      ['Página :', 477, 30],
+      [String(numero), 529, 5],
+      ['/', 539, 3],
+      ['2', 564, 5],
     ]),
-    line(1, 680, [
-      ['02/09/2026', 40, 50],
-      ['TRANSFERENCIA RECEBIDA', 100, 120],
-      ['8.002,12', 350, 45],
-      ['8.002,12', 515, 45],
+    line(numero, yTopo + 40, [['EMPRESA EXEMPLO LTDA', 18, 180]]),
+    line(numero, yTopo, [
+      ['Lancto', 21, 30],
+      ['Data', 69, 20],
+      ['Beneficiário', 130, 52],
+      ['Histórico', 289, 39],
+      ['Pagto.', 420, 29],
+      ['Recbto.', 471, 34],
+      ['Saldo', 529, 25],
     ]),
-    line(1, 660, [
-      ['10/09/2026', 40, 50],
-      ['TARIFA MANUTENCAO', 100, 110],
-      ['45,90', 430, 45],
-      ['7.956,22', 515, 45],
+    line(numero, yTopo - 18, [
+      ['Conta Corrente :', 25, 95],
+      ['43812-5', 126, 44],
+      ['EMPRESA EXEMPLO LTDA', 224, 189],
     ]),
   ];
 
-  const table = buildTableFromTextLines(pages);
+  const lancamentos = [
+    // [data, beneficiário, histórico, valor assinado, saldo]
+    ['01/06/2026', 'FORNECEDOR ALFA', 'LINK DE PGT. 1 X', '-2.357,98', '-29.911,14'],
+    ['01/06/2026', 'CLIENTE BETA', 'VALOR RECEBIDO S/TITULO', '836,40', '-29.074,74'],
+    ['02/06/2026', 'CLIENTE GAMA', 'VALOR RECEBIDO S/TITULO', '27.639,00', '-1.435,74'],
+    ['03/06/2026', 'FORNECEDOR DELTA', 'PAGAMENTO TITULO', '-1.500,00', '-2.935,74'],
+    ['04/06/2026', 'CLIENTE EPSILON', 'VALOR RECEBIDO S/TITULO', '320,55', '-2.615,19'],
+    ['05/06/2026', 'FORNECEDOR ZETA', 'TARIFA', '-45,90', '-2.661,09'],
+  ];
 
-  it('mantém as colunas de entrada, saída e saldo separadas', () => {
-    assert.equal(table.columnCount, 5);
-    assert.deepEqual(table.headers, ['Dt. Mov.', 'Histórico', 'Entrada (+)', 'Saída (-)', 'Saldo']);
+  const linhaLancamento = (numero, y, indice, [data, beneficiario, historico, valor, saldo]) => {
+    const pagamento = valor.startsWith('-');
+    const valorAbsoluto = valor.replace('-', '');
+    return line(numero, y, [
+      [String(87564 + indice), 32, 22],
+      [data, 61, 40],
+      [beneficiario, 104, 102],
+      [historico, 212, 120],
+      pagamento ? valorDireita(valorAbsoluto, 460) : valorDireita(valorAbsoluto, 513),
+      valorDireita(saldo, 567),
+    ]);
+  };
+
+  const pages = [
+    ...pagina(1, 675),
+    ...lancamentos.slice(0, 4).map((item, indice) => linhaLancamento(1, 640 - indice * 20, indice, item)),
+    ...pagina(2, 675),
+    ...lancamentos.slice(4).map((item, indice) => linhaLancamento(2, 640 - indice * 20, indice + 4, item)),
+  ];
+
+  const table = buildTableFromTextLines(pages);
+  const indicePagto = table.headers.indexOf('Pagto.');
+  const indiceRecbto = table.headers.indexOf('Recbto.');
+
+  it('não mistura a linha de contexto da conta nos nomes das colunas', () => {
+    assert.ok(indicePagto >= 0, `headers: ${table.headers.join(' | ')}`);
+    assert.ok(indiceRecbto >= 0, `headers: ${table.headers.join(' | ')}`);
+    assert.notEqual(indicePagto, indiceRecbto);
+    for (const header of table.headers) {
+      assert.ok(!header.includes(':'), `cabeçalho contaminado: ${header}`);
+      assert.ok(!/Conta Corrente|Página/i.test(header), `cabeçalho contaminado: ${header}`);
+    }
   });
 
-  it('preenche com vazio a coluna ausente de cada lançamento', () => {
-    assert.equal(table.rows.length, 2);
-    assert.deepEqual(table.rows[0], ['02/09/2026', 'TRANSFERENCIA RECEBIDA', '8.002,12', '', '8.002,12']);
-    assert.deepEqual(table.rows[1], ['10/09/2026', 'TARIFA MANUTENCAO', '', '45,90', '7.956,22']);
+  it('mantém pagamentos e recebimentos em colunas distintas', () => {
+    assert.equal(table.rows.length, lancamentos.length);
+    assert.equal(table.rows[0][indicePagto], '2.357,98');
+    assert.equal(table.rows[0][indiceRecbto], '');
+    assert.equal(table.rows[1][indicePagto], '');
+    assert.equal(table.rows[1][indiceRecbto], '836,40');
+  });
+
+  it('não cola o cabeçalho da página seguinte na última linha da anterior', () => {
+    const tudo = table.rows.flat().join(' | ');
+    assert.ok(!/Página|EMPRESA EXEMPLO|Conta Corrente/i.test(tudo), `contaminado: ${tudo}`);
+    assert.equal(table.rows[4][1], '04/06/2026');
+    assert.equal(table.rows[4][indiceRecbto], '320,55');
+    assert.equal(table.rows[5][indicePagto], '45,90');
   });
 });
 
