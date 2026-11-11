@@ -1,6 +1,6 @@
 {
-  "name": "conversor-custodio",
-  "version": "1.3.0",
+  "name": "conversor",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Conversor web de conciliações financeiras (.pdf e .xlsx) com IA adaptativa de layouts",
