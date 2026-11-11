@@ -1592,32 +1592,29 @@ body {
 }
 
 /* -------------------------------------------------------------------------- */
-/*      Conciliação de clientes/fornecedores (Questor) — ícone e barra lateral */
+/*      Conciliação de clientes/fornecedores (Questor) — ícone e página       */
 /* -------------------------------------------------------------------------- */
 
-/* O ícone da marca é o atalho da conciliação. */
-.brand-icon.brand-button {
+/* O ícone da marca leva para a página do conciliador. */
+.brand-icon.brand-back {
   position: relative;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
+  display: inline-block;
   border-radius: 10px;
-  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
 
-.brand-icon.brand-button svg {
+.brand-icon.brand-back svg {
   display: block;
   border-radius: 9px;
 }
 
-.brand-icon.brand-button:hover,
-.brand-icon.brand-button:focus-visible {
+.brand-icon.brand-back:hover,
+.brand-icon.brand-back:focus-visible {
   transform: translateY(-1px) scale(1.04);
   box-shadow: 0 6px 18px rgba(56, 189, 248, 0.35);
 }
 
-.brand-icon.brand-button:focus-visible {
+.brand-icon.brand-back:focus-visible {
   outline: 2px solid #38bdf8;
   outline-offset: 3px;
 }
@@ -1653,98 +1650,131 @@ body {
   }
 }
 
-/* Barra lateral (drawer) que desliza da direita. */
-.cp-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(9, 20, 35, 0.55);
-  backdrop-filter: blur(2px);
-  display: flex;
-  justify-content: flex-end;
-  z-index: 120;
-}
-
-.cp-drawer {
-  width: min(820px, 100%);
-  height: 100%;
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  box-shadow: -18px 0 44px rgba(9, 20, 35, 0.28);
-  animation: cp-slide-in 0.24s ease-out;
-  overflow: hidden;
-}
-
-@keyframes cp-slide-in {
-  from {
-    transform: translateX(28px);
-    opacity: 0.4;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .cp-drawer {
-    animation: none;
-  }
-  .brand-icon.brand-button {
+  .brand-icon.brand-back {
     transition: none;
   }
 }
 
-.cp-drawer-head {
+/* -------------------------------------------------------------------------- */
+/*                  Página do conciliador (conciliador.html)                  */
+/* -------------------------------------------------------------------------- */
+
+.cp-main {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(135deg, #0f2744 0%, #16375b 100%);
-  color: #ffffff;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 22px;
+  padding-bottom: 40px;
 }
 
-.cp-drawer-tag {
-  display: inline-block;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+.cp-hero {
+  padding: 22px 24px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #0f2744 0%, #17395f 65%, #1e4a7a 100%);
+  color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 39, 68, 0.18);
+}
+
+.cp-hero .step-tag {
+  background: rgba(56, 189, 248, 0.18);
   color: #7dd3fc;
 }
 
-.cp-drawer-head h2 {
-  margin: 2px 0 4px;
-  font-size: 1.15rem;
+.cp-hero-title {
+  margin: 8px 0 6px;
+  font-size: 1.35rem;
   color: #ffffff;
 }
 
-.cp-drawer-sub {
+.cp-hero-sub {
   margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.45;
+  max-width: 90ch;
+  font-size: 0.9rem;
+  line-height: 1.55;
   color: #cbd5e1;
-  max-width: 60ch;
 }
 
-.cp-drawer-head .icon-btn {
-  color: #e2e8f0;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
+.cp-files-card .section-header {
+  margin-bottom: 12px;
 }
 
-.cp-drawer-head .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.18);
+.cp-cloud {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.cp-drawer-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 18px 22px 26px;
+.cp-cloud-state {
+  font-size: 0.74rem;
+  color: #cbd5e1;
+  white-space: nowrap;
 }
 
+.cp-cloud-state[data-tone='ok'] {
+  color: #6ee7b7;
+}
+
+.cp-cloud-state[data-tone='error'] {
+  color: #fca5a5;
+}
+
+.cp-result-card {
+  display: block;
+}
+
+.cp-result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cp-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 4px;
+}
+
+.cp-table-wrap {
+  overflow-x: auto;
+}
+
+.cp-table {
+  min-width: 760px;
+}
+
+@media (max-width: 900px) {
+  .cp-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cp-cloud-state {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .cp-main {
+    padding-top: 14px;
+  }
+  .cp-hero {
+    padding: 16px 18px;
+  }
+  .cp-hero-title {
+    font-size: 1.12rem;
+  }
+  .cp-file {
+    padding-left: 16px;
+    padding-top: 40px;
+  }
+  .cp-file-step {
+    top: 10px;
+  }
+  .cp-export-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .cp-export-row .export-actions {
+    flex-wrap: wrap;
+  }
+}
 
 .cp-files {
   display: grid;
@@ -1968,43 +1998,7 @@ body {
   max-width: 520px;
 }
 
-.cp-kpis {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 
-.cp-table-wrap {
-  overflow-x: auto;
-}
-
-.cp-table {
-  min-width: 720px;
-}
-
-@media (max-width: 720px) {
-  .cp-drawer {
-    width: 100%;
-  }
-  .cp-drawer-head {
-    padding: 14px 16px;
-  }
-  .cp-drawer-body {
-    padding: 14px 16px 22px;
-  }
-  .cp-file {
-    padding-left: 16px;
-    padding-top: 40px;
-  }
-  .cp-file-step {
-    top: 10px;
-  }
-  .cp-export-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .cp-export-row .export-actions {
-    flex-wrap: wrap;
-  }
-}
 
 .btn.btn-outline-dark {
   background: #ffffff;
@@ -2031,6 +2025,3 @@ body {
   font-weight: 600;
 }
 
-body.cp-drawer-open {
-  overflow: hidden;
-}

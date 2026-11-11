@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.8.1';
+export const APP_VERSION = '1.8.2';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -89,38 +89,4 @@ export const REQUIRED_ELEMENT_IDS = [
   'cloud-anon-key',
   'btn-cloud-save-config',
   'btn-cloud-test',
-  // Conciliação de clientes/fornecedores (cadastro Questor)
-  'btn-counterparty',
-  'cp-modal',
-  'btn-close-cp',
-  'cp-contacts-input',
-  'cp-contacts-status',
-  'cp-ledger-input',
-  'cp-ledger-status',
-  'btn-cp-run',
-  'cp-include-unmatched',
-  'cp-alert',
-  'cp-result',
-  'cp-kpi-count',
-  'cp-kpi-matched',
-  'cp-kpi-debit',
-  'cp-kpi-suppliers',
-  'cp-kpi-credit',
-  'cp-kpi-customers',
-  'cp-kpi-value',
-  'cp-kpi-review',
-  'cp-search',
-  'cp-tbody',
-  'cp-pagination-info',
-  'cp-btn-prev',
-  'cp-btn-next',
-  'cp-link-panel',
-  'btn-cp-link-close',
-  'cp-link-history',
-  'cp-link-search',
-  'cp-link-candidates',
-  'cp-learned',
-  'btn-cp-export-xlsx',
-  'btn-cp-export-pdf',
-  'btn-cp-export-csv',
 ];
