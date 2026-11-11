@@ -13,6 +13,7 @@
  */
 
 import { emptyCounterparties, sanitizeCounterparties } from './counterparty.js';
+import { SEED_PROFILES } from './seed-profiles.js';
 import {
   cleanWhitespace,
   normalizeText,
@@ -233,13 +234,14 @@ function createDefaultMemory() {
   return {
     version: MEMORY_VERSION,
     tokenWeights: JSON.parse(JSON.stringify(BASE_TOKEN_WEIGHTS)),
-    learnedProfiles: [],
+    // Layouts de extrato que já vêm treinados (Itaú e Bradesco).
+    learnedProfiles: sanitizeSeedProfiles(),
     learningLog: [
       {
         id: 'init-1',
         timestamp: new Date().toISOString(),
         type: 'system_init',
-        message: 'Motor de IA Adaptativa inicializado com ontologia financeira PT-BR.',
+        message: `Motor de IA Adaptativa inicializado com ontologia financeira PT-BR e ${SEED_PROFILES.length} layout(s) de extrato já treinado(s).`,
         details: 'Pronto para detectar novos layouts, aprender correções e memorizar regras.',
       },
     ],
@@ -337,11 +339,38 @@ function sanitizeProfile(rawProfile) {
     headers,
     mappings,
     rules,
+    builtIn: rawProfile.builtIn === true,
     usageCount: Math.max(1, Number(rawProfile.usageCount) || 1),
     correctionsCount: Math.max(0, Number(rawProfile.correctionsCount) || 0),
     createdAt: rawProfile.createdAt || new Date().toISOString(),
     lastUsedAt: rawProfile.lastUsedAt || new Date().toISOString(),
   };
+}
+
+/**
+ * Perfis de fábrica já normalizados no formato gravado em memória.
+ * Se um deles estiver inválido (cabeçalho ausente, papel desconhecido), é
+ * simplesmente descartado — o app continua funcionando com o classificador
+ * semântico.
+ */
+function sanitizeSeedProfiles() {
+  return SEED_PROFILES.map((profile, index) =>
+    sanitizeProfile({
+      ...profile,
+      createdAt: '2026-11-11T00:00:00.000Z',
+      lastUsedAt: '2026-11-11T00:00:00.000Z',
+      usageCount: 1,
+      id: profile.id || `seed-${index}`,
+    })
+  ).filter(Boolean);
+}
+
+/** Garante que os perfis de fábrica existam na memória carregada. */
+function withSeedProfiles(profiles) {
+  const existing = new Set(profiles.map((profile) => profile.id));
+  const missing = sanitizeSeedProfiles().filter((profile) => !existing.has(profile.id));
+  if (missing.length === 0) return profiles;
+  return [...missing, ...profiles].slice(0, MAX_PROFILES);
 }
 
 function defaultRules(defaultSign = 'auto') {
@@ -420,12 +449,11 @@ function adoptLegacyMemory() {
 export function normalizeMemory(rawMemory) {
   if (!isPlainObject(rawMemory)) return createDefaultMemory();
 
-  const profiles = Array.isArray(rawMemory.learnedProfiles)
-    ? rawMemory.learnedProfiles
-        .map(sanitizeProfile)
-        .filter(Boolean)
-        .slice(0, MAX_PROFILES)
-    : [];
+  const profiles = withSeedProfiles(
+    Array.isArray(rawMemory.learnedProfiles)
+      ? rawMemory.learnedProfiles.map(sanitizeProfile).filter(Boolean).slice(0, MAX_PROFILES)
+      : []
+  );
 
   const log = Array.isArray(rawMemory.learningLog)
     ? rawMemory.learningLog

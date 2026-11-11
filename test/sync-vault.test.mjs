@@ -209,7 +209,9 @@ test('o pacote leva só os modelos aprendidos — nunca a chave do LLM', () => {
   assert.equal(payload.v, 1);
   assert.equal(payload.updatedAt, '2026-11-11T00:00:00.000Z');
   assert.equal(payload.appVersion, '1.5.0');
-  assert.equal(payload.learnedProfiles.length, 1);
+  // A memória sempre leva também os layouts de fábrica (Itaú/Bradesco).
+  const learned = payload.learnedProfiles.filter((profile) => !profile.builtIn);
+  assert.equal(learned.length, 1);
   assert.deepEqual(payload.tokenWeights, memory.tokenWeights);
   assert.deepEqual(payload.stats, memory.stats);
   assert.equal(payload.learningLog.length, 1);
@@ -222,7 +224,7 @@ test('aplicar o pacote preserva a chave do LLM que já existe na máquina', () =
   const remote = buildVaultPayload(memoryWithProfile('Layout da equipe'));
 
   const merged = applyVaultPayload(local, remote);
-  assert.equal(merged.learnedProfiles[0].name, 'Layout da equipe');
+  assert.equal(merged.learnedProfiles.find((profile) => !profile.builtIn)?.name, 'Layout da equipe');
   assert.deepEqual(merged.tokenWeights, remote.tokenWeights);
   assert.equal(merged.optionalLlm.apiKey, 'sk-segredo-do-usuario', 'a chave local continua aqui');
   assert.equal(merged.optionalLlm.provider, 'openai');
@@ -292,12 +294,15 @@ test('envia cifrado e recupera o mesmo conteúdo', async () => {
   assert.equal(post.url.pathname, '/rest/v1/conversor_models');
 
   const pulled = await pullVault({ config: CONFIG, identity, fetchImpl: backend.fetchImpl, iterations: FAST });
-  assert.equal(pulled.payload.learnedProfiles[0].name, 'Itaú — Recebimentos');
+  assert.equal(
+    pulled.payload.learnedProfiles.find((profile) => !profile.builtIn)?.name,
+    'Itaú — Recebimentos'
+  );
   assert.deepEqual(pulled.payload.tokenWeights, memory.tokenWeights);
   assert.equal(pulled.payload.updatedAt, sent.updatedAt);
 
   const restored = applyVaultPayload(normalizeMemory({}), pulled.payload);
-  assert.equal(restored.learnedProfiles.length, 1);
+  assert.equal(restored.learnedProfiles.filter((profile) => !profile.builtIn).length, 1);
   assert.equal(restored.stats.totalFilesProcessed, 7);
 });
 
@@ -327,7 +332,10 @@ test('outra máquina recupera os modelos digitando a mesma chave', async () => {
     iterations: FAST,
   });
   assert.ok(pulled, 'achou o conteúdo da chave');
-  assert.equal(pulled.payload.learnedProfiles[0].name, 'Itaú — Recebimentos');
+  assert.equal(
+    pulled.payload.learnedProfiles.find((profile) => !profile.builtIn)?.name,
+    'Itaú — Recebimentos'
+  );
 });
 
 test('chaves diferentes não se enxergam (isolamento entre usuários)', async () => {
@@ -357,7 +365,7 @@ test('chaves diferentes não se enxergam (isolamento entre usuários)', async ()
   });
 
   const daAna = await pullVault({ config: CONFIG, identity: ana, fetchImpl: backend.fetchImpl, iterations: FAST });
-  assert.equal(daAna.payload.learnedProfiles[0].name, 'Layout da Ana');
+  assert.equal(daAna.payload.learnedProfiles.find((profile) => !profile.builtIn)?.name, 'Layout da Ana');
   assert.equal(backend.rows.size, 2, 'um cofre por chave');
 });
 
