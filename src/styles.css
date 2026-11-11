@@ -811,9 +811,19 @@ body {
   flex: 1 1 220px;
 }
 
-/* Portão de login da aba Nuvem. */
-.cloud-lock h3 {
+/* Portão de login da conexão do banco (área administrativa da aba Nuvem). */
+.cloud-admin h3 {
   margin-bottom: 6px;
+}
+
+.cloud-admin .cloud-account-tag {
+  background: #fff4e5;
+  border-color: #f0d6ae;
+  color: #8a5a12;
+}
+
+#cloud-lock-gate {
+  margin-bottom: 4px;
 }
 
 .cloud-lock-fields {
@@ -847,10 +857,6 @@ body {
 
 .cloud-lock-actions .cloud-hint {
   margin: 0;
-}
-
-.btn-key.is-locked .key-code {
-  letter-spacing: 0.12em;
 }
 
 .cloud-account-tag {
