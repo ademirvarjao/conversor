@@ -1298,6 +1298,36 @@ function setCloudStatus(message, tone = 'idle') {
   cloud.statusTone = tone;
 }
 
+/**
+ * Mantém a chave visível na barra superior: é ali que o usuário a encontra
+ * para copiar e levar para outro computador, sem precisar abrir o modal.
+ */
+function renderTopKey() {
+  const button = dom['btn-cloud-key'];
+  const codeEl = dom['cloud-key-code'];
+  if (!button || !codeEl) return;
+
+  const identity = cloud.identity;
+  const hasKey = !!identity;
+  const shown = hasKey ? formatAccessCode(identity.code) : '';
+
+  button.classList.toggle('is-empty', !hasKey);
+  codeEl.textContent = hasKey ? shown : 'criar agora';
+  if (dom['cloud-key-caption']) {
+    dom['cloud-key-caption'].textContent = hasKey ? 'Chave de acesso' : 'Chave para outro PC';
+  }
+
+  button.title = hasKey
+    ? `Clique para copiar a chave ${shown}. Você precisa dela para abrir seus modelos em outro computador.`
+    : 'Clique para criar sua chave de acesso. Você precisa dela para abrir seus modelos em outro computador.';
+  button.setAttribute(
+    'aria-label',
+    hasKey
+      ? `Sua chave de acesso é ${shown}. Clique para copiar. É com ela que você abre seus modelos em outro computador.`
+      : 'Criar chave de acesso. Você precisa dela para abrir seus modelos em outro computador.'
+  );
+}
+
 function describeLastSync(identity) {
   if (!identity?.lastSyncAt) return 'nenhuma sincronização ainda';
   const date = new Date(identity.lastSyncAt);
@@ -1320,6 +1350,8 @@ function renderCloudPanel() {
     // selecionar e copiar com Ctrl+C (inclusive no celular).
     dom['cloud-code-display'].value = identity ? formatAccessCode(identity.code) : '—';
   }
+
+  renderTopKey();
 
   const disableActions = !hasConfig || !identity || cloud.busy;
   for (const id of ['btn-cloud-push', 'btn-cloud-pull']) {
@@ -1455,13 +1487,38 @@ async function copyText(text) {
   } catch {
     /* permissão negada ou contexto inseguro */
   }
-  // Plano B: seleciona o campo para o usuário copiar com Ctrl+C.
+  // Plano B: quando o campo da aba Nuvem está visível, deixa a chave
+  // selecionada para o usuário copiar com Ctrl+C.
   const field = dom['cloud-code-display'];
-  if (field && typeof field.select === 'function') {
+  if (field && typeof field.select === 'function' && field.offsetParent !== null) {
     field.focus();
     field.select();
   }
   return false;
+}
+
+/** Cria a chave deste dispositivo, copia e já publica os modelos locais. */
+async function createAccessIdentity() {
+  try {
+    const code = generateAccessCode();
+    const identity = await restoreIdentityFromCode(code);
+    saveIdentity(identity);
+    cloud.identity = identity;
+    renderCloudPanel();
+
+    const shown = formatAccessCode(code);
+    const copied = await copyText(shown);
+    showToast(
+      copied
+        ? `Chave ${shown} criada e copiada. Você precisa dela para abrir seus modelos em outro computador.`
+        : `Chave ${shown} criada. Anote: você precisa dela para abrir seus modelos em outro computador.`
+    );
+
+    // Já publica o que existe localmente, para a nuvem refletir os modelos atuais.
+    if (cloud.config) await pushNow({ silent: true });
+  } catch (error) {
+    setCloudStatus(`Falha ao criar a chave: ${error.message}`, 'error');
+  }
 }
 
 function downloadKeyCard(identity) {
@@ -1518,27 +1575,36 @@ function bindCloudEvents() {
     }
   });
 
-  dom['btn-cloud-create']?.addEventListener('click', async () => {
-    await withCloudBusy(async () => {
-      try {
-        const code = generateAccessCode();
-        const identity = await restoreIdentityFromCode(code);
-        saveIdentity(identity);
-        cloud.identity = identity;
-        renderCloudPanel();
-        const shown = formatAccessCode(code);
-        const copied = await copyText(shown);
-        showToast(
-          copied
-            ? `Chave ${shown} criada e copiada. Guarde-a para recuperar em outra máquina.`
-            : `Chave ${shown} criada. Ela está selecionada na tela — copie e guarde.`
-        );
-        // Já publica o que existe localmente, para a equipe ver os modelos atuais.
-        if (cloud.config) await pushNow({ silent: true });
-      } catch (error) {
-        setCloudStatus(`Falha ao criar a chave: ${error.message}`, 'error');
-      }
-    });
+  dom['btn-cloud-create']?.addEventListener('click', () => withCloudBusy(createAccessIdentity));
+
+  // A chave na barra superior: cria quando ainda não existe, copia quando existe.
+  dom['btn-cloud-key']?.addEventListener('click', async () => {
+    if (!cloud.identity) {
+      await withCloudBusy(createAccessIdentity);
+      return;
+    }
+
+    const code = formatAccessCode(cloud.identity.code);
+    if (await copyText(code)) {
+      showToast(
+        `Chave ${code} copiada. Guarde: você precisa dela para abrir seus modelos em outro computador.`
+      );
+      return;
+    }
+
+    // Sem permissão de área de transferência: abre a aba onde a chave fica
+    // selecionável e avisa o usuário.
+    openAiModal();
+    activateModalTab('cloud');
+    dom['cloud-code-display']?.focus();
+    dom['cloud-code-display']?.select();
+    showToast(`Sua chave é ${code} — ela está selecionada, copie com Ctrl+C.`, 'warn');
+  });
+
+  dom['btn-cloud-key-info']?.addEventListener('click', () => {
+    showToast(
+      'A chave de acesso é a sua identidade, sem senha: é com ela que você abre seus modelos em outro computador. Guarde-a — se perdê-la, não é possível recuperar o que está na nuvem.'
+    );
   });
 
   dom['btn-cloud-recover']?.addEventListener('click', async () => {
