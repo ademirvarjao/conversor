@@ -16,8 +16,8 @@
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
     "serve": "node scripts/serve.mjs",
-    "test": "node --test \"test/**/*.test.mjs\"",
-    "test:watch": "node --test --watch \"test/**/*.test.mjs\""
+    "test": "node --test",
+    "test:watch": "node --test --watch"
   },
   "engines": {
     "node": ">=20"
