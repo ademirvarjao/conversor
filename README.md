@@ -87,6 +87,20 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 
 **Quirks por banco** que o reconhecimento já carrega: valor com sufixo `D`/`C` grudado no número (Banco do Brasil, Caixa), extrato do Itaú em **blocos de 3 linhas** com saldo só no fechamento do dia, seções de saldo que não entram na conferência (`SALDO INVEST FÁCIL`, `SALDO TOTAL DISPONÍVEL DIA`) e o Nubank sem coluna de saldo.
 
+### Extratos “em lista”: qualquer banco, qualquer layout (v1.18.0)
+O extrato do **Sicoob** derrubou a v1.17: o PDF vem num formato “em lista” — 4 colunas (`DATA | DOCUMENTO | HISTÓRICO | VALOR`), valor com `C`/`D` colado no número, **descrição quebrada em várias linhas depois do valor** e o saldo em linhas próprias (`SALDO ANTERIOR`, `SALDO DO DIA ===== >`), não em coluna. O app montava 6 colunas fantasma, jogava o valor na coluna errada e transformava resumo/rodapé em lançamento. O que mudou:
+
+- **As colunas vêm do cabeçalho, não da sorte.** O parser procura a linha de cabeçalho (só texto, ≥ 2 rótulos conhecidos), traça as fronteiras entre os rótulos e ancora os dados nelas. Se não houver cabeçalho confiável, cai no agrupamento por posição de antes. É o que impede a coluna fantasma quando um pedaço da descrição (“- STR”) começa 45 pt à direita do rótulo.
+- **Descrição em várias linhas** (antes ou depois do valor, como no Itaú e no Sicoob) é montada no bloco certo, na ordem vertical, e o documento pode ficar no histórico ou fora dele conforme o catálogo do banco.
+- **Sufixo `C`/`D`** (`54.607,59C`, `39,00D`) define o sentido do lançamento — e `0,00*` é zero, não código.
+- **Saldo em linha própria = checkpoint.** Quando o extrato não tem coluna de saldo, `SALDO ANTERIOR` / `SALDO DO DIA` viram checkpoints, e o treinador confere **saldo anterior + lançamentos = próximo saldo** (no Sicoob de set/2022: **7 conferências, todas fechando**, saldo final 0,20). As linhas de saldo também deixaram de virar lançamento quando o valor cai na mesma coluna dos movimentos.
+- **Ruído fora**: `RESUMO`, “SALDO EM CONTA CORRENTE(+)”, “TAXA CHEQUE ESPECIAL”, ouvidoria com telefone colado, `Page 2 of 2`, `about:blank` e a linha digitável da TED (20 dígitos) não entram mais — nem como linha, nem como “valor”.
+- **Duas correções no diagnóstico** que apareceram na revisão: o check de **sinal** só reclama de sinal *explícito* contrário à coluna (extratos imprimem `Pagto.`/`Recbto.` ambos positivos — eram 166 falsos positivos no Itaú Sul), e linha de **total/parcial** (“Parcial Cliente”) deixou de contar como falha de data.
+- **O reconhecimento do banco não estraga o que a IA já acertou.** Ele só reescreve colunas que estão **no padrão do banco**; coluna fora do padrão (`Pagto.`, `Recbto.`) mantém o papel que a análise local encontrou, e há uma rede de segurança que nunca deixa o arquivo terminar sem data ou sem valor. Foi o que apareceu no **Itaú Sul**: banco reconhecido, mas o extrato usa colunas próprias — antes o reconhecimento zerava os valores e o arquivo saía vazio (294 → 0 lançamentos). Agora: 294 lançamentos, saldo 291/291.
+- **PDF que não é extrato** (cadastro do Questor, por exemplo) agora explica o motivo em vez de só falhar.
+
+Números depois da revisão: **Itaú 567** lançamentos (saldo 20/20), **Bradesco 71** (saldo 71/71), **Itaú Sul 294** (saldo 291/291), **Sicoob 8** (saldo 7/7), todos os 8 arquivos de referência com as conferências em `ok`.
+
 ### Conciliação de clientes/fornecedores (v1.8.0)
 O **ícone da marca** na barra superior leva para uma **página própria** (`conciliador.html`), com fluxo separado da conciliação unificada para cruzar o **cadastro de contatos do Questor** com o extrato bancário. O ícone de volta (e o botão *Conversor*) retornam à página principal — as duas telas compartilham a mesma memória da IA.
 

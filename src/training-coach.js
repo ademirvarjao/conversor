@@ -88,6 +88,22 @@ export function reconcileBalances(parsedFile, analysis, transform = null) {
   const rows = Array.isArray(parsedFile?.rows) ? parsedFile.rows : [];
 
   if (!mapping) {
+    // Extratos “em lista” (Sicoob) não têm coluna de saldo: o saldo vem em
+    // linhas próprias (“SALDO ANTERIOR”, “SALDO DO DIA ===== >”) na mesma coluna
+    // dos valores. O parser guarda essas linhas como *checkpoints* e a conta
+    // fecha do mesmo jeito: saldo anterior + lançamentos = próximo saldo.
+    const checkpoints = (parsedFile?.checkpoints || []).filter(
+      (checkpoint) =>
+        Number.isFinite(checkpoint?.value) &&
+        !/\b(bloqueado|investimento|limite|cheque especial|previsao|previsão|disponivel|disponível|em conta)\b/.test(
+          normalizeText(checkpoint.label)
+        )
+    );
+
+    if (checkpoints.length >= 2) {
+      return reconcileCheckpoints(parsedFile, checkpoints, transform, analysis);
+    }
+
     return {
       available: false,
       reason: 'O arquivo não tem coluna de saldo — a conferência linha a linha fica de fora.',
@@ -224,6 +240,100 @@ export function reconcileBalances(parsedFile, analysis, transform = null) {
   };
 }
 
+/**
+ * Conferência por checkpoints (extratos sem coluna de saldo).
+ *
+ * Soma os lançamentos entre dois saldos impressos e compara com a diferença:
+ * `saldo(checkpoint N) - saldo(checkpoint N-1) = soma dos lançamentos no meio`.
+ */
+function reconcileCheckpoints(parsedFile, checkpoints, transform = null, analysis = null) {
+  const { records } = transform || transformRowsWithConfig(parsedFile, analysis);
+  const sorted = [...checkpoints].sort((a, b) => (a.rowIdx ?? 0) - (b.rowIdx ?? 0));
+
+  const anchora = sorted.find((checkpoint) => /^saldo\s+anterior\b/.test(normalizeText(checkpoint.label)));
+  const serie = anchora ? sorted.slice(sorted.indexOf(anchora)) : sorted;
+
+  if (serie.length < 2) {
+    return {
+      available: false,
+      reason: 'Só apareceu um saldo no arquivo — sem dois checkpoints não há o que conferir.',
+      checked: 0,
+      matched: 0,
+      divergences: [],
+      anchors: [],
+      firstSaldoCents: null,
+      lastSaldoCents: null,
+    };
+  }
+
+  const anchors = [];
+  const divergences = [];
+  let checked = 0;
+  let matched = 0;
+  let baseCents = toCents(serie[0].value);
+
+  anchors.push({
+    rowIdx: serie[0].rowIdx,
+    label: serie[0].label || 'Saldo anterior',
+    saldoCents: baseCents,
+    kind: 'inicial',
+  });
+
+  for (let index = 1; index < serie.length; index++) {
+    const checkpoint = serie[index];
+    const startRow = serie[index - 1].rowIdx ?? 0;
+    const endRow = checkpoint.rowIdx ?? Number.POSITIVE_INFINITY;
+
+    const between = records.filter((record) => {
+      const row = Number(record.sourceRow) - 1;
+      return row >= startRow && row < endRow;
+    });
+
+    const sumCents = between.reduce((total, record) => total + toCents(record.value), 0);
+    const saldoCents = toCents(checkpoint.value);
+    const expectedCents = baseCents + sumCents;
+    checked += 1;
+
+    if (expectedCents === saldoCents) {
+      matched += 1;
+      anchors.push({
+        rowIdx: checkpoint.rowIdx,
+        label: checkpoint.label || 'Saldo',
+        saldoCents,
+        kind: 'checkpoint',
+      });
+    } else {
+      const lastRecord = between[between.length - 1] || null;
+      divergences.push({
+        rowIdx: (checkpoint.rowIdx ?? 0) + 1,
+        dateBr: lastRecord?.dateBr || '',
+        history: lastRecord?.history || checkpoint.label || '',
+        valueCents: lastRecord ? toCents(lastRecord.value) : 0,
+        saldoCents,
+        expectedCents,
+        deltaCents: saldoCents - expectedCents,
+        transactions: between.length,
+        kind: between.length > 0 ? 'lancamento' : 'checkpoint',
+      });
+    }
+
+    baseCents = saldoCents;
+  }
+
+  return {
+    available: true,
+    columnHeader: 'Saldos impressos no extrato',
+    checked,
+    matched,
+    divergences,
+    anchors,
+    otherSeries: [],
+    firstSaldoCents: toCents(serie[0].value),
+    lastSaldoCents: baseCents,
+    mode: 'checkpoint',
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /*                              Correções                                     */
 /* -------------------------------------------------------------------------- */
@@ -237,16 +347,23 @@ function moneyStats(rows, colIdx) {
   let negativeCount = 0;
   let positiveCount = 0;
   let explicitSigns = 0;
+  let explicitNegative = 0;
+  let explicitPositive = 0;
   for (const row of rows) {
     const money = parseMoneyValue(row?.[colIdx]);
     if (money === null) continue;
     moneyCount += 1;
-    if (typeof money === 'object' && money.hasExplicitSign) explicitSigns += 1;
+    const explicit = typeof money === 'object' && money.hasExplicitSign;
+    if (explicit) {
+      explicitSigns += 1;
+      if (money.value < 0) explicitNegative += 1;
+      else if (money.value > 0) explicitPositive += 1;
+    }
     const value = typeof money === 'object' ? money.value : money;
     if (value < 0) negativeCount += 1;
     else if (value > 0) positiveCount += 1;
   }
-  return { moneyCount, negativeCount, positiveCount, explicitSigns };
+  return { moneyCount, negativeCount, positiveCount, explicitSigns, explicitNegative, explicitPositive };
 }
 
 /**
@@ -495,12 +612,15 @@ export function buildCoachReport(parsedFile, analysis, transform = null, options
   ).length;
   const sectionRows = skipped.filter((item) => /grupo/i.test(item.reason)).length;
 
-  // Sinal: negativo em crédito ou positivo em débito significa coluna trocada.
+  // Sinal: só é problema quando o valor traz um sinal EXPLÍCITO contrário à
+  // coluna (crédito com “-”, débito com “+”). Extratos imprimem as duas colunas
+  // positivas (Pagto./Recbto.) e o sentido vem do nome da coluna — reclamar
+  // disso enchia o diagnóstico de falso positivo (166 no Itaú Sul).
   let wrongSideSigns = 0;
   for (const mapping of mappings) {
     const stats = moneyStats(rows, mapping.colIdx);
-    if (mapping.role === ROLES.VALUE_IN) wrongSideSigns += stats.negativeCount;
-    if (mapping.role === ROLES.VALUE_OUT) wrongSideSigns += stats.positiveCount;
+    if (mapping.role === ROLES.VALUE_IN) wrongSideSigns += stats.explicitNegative;
+    if (mapping.role === ROLES.VALUE_OUT) wrongSideSigns += stats.explicitPositive;
   }
 
   // Duplicados exatos (mesma data, valor e histórico).

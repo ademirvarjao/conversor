@@ -187,7 +187,17 @@ export const BANK_LAYOUTS = [
       { match: 'valor', role: LAYOUT_ROLES.VALUE_AUTO },
       { match: 'saldo', role: LAYOUT_ROLES.IGNORE },
     ],
-    quirks: { saldo: 'corrente' },
+    quirks: {
+      // O Sicoob imprime o saldo em linhas próprias na MESMA coluna dos valores
+      // ("SALDO ANTERIOR", "SALDO DO DIA ===== >") — não numa coluna de saldo.
+      // O treinador confere por checkpoint.
+      saldo: 'checkpoint',
+      // "54.607,59C" / "39,00D": o sentido vem da letra colada no número.
+      valueSuffixDC: true,
+      // Documento + valor na mesma linha e histórico quebrado em até 4 linhas.
+      blockLines: 4,
+      sections: ['saldo anterior', 'saldo bloqueado anterior', 'saldo do dia', 'resumo'],
+    },
   },
   {
     id: 'sicredi',
@@ -669,11 +679,18 @@ export function recognizeLayout(parsedFile, { layouts = null, learnedSignatures 
  *
  * @returns {Array<{ colIdx:number, header:string, from:string, to:string, reason:string }>}
  */
+/** A previsão veio de uma regra (do banco ou genérica) ou é só o “não achei”? */
+function hasRule(predicted) {
+  return Boolean(predicted?.rule) && predicted.rule !== '(sem regra)';
+}
+
 export function diffRoles(analysis, recognition) {
   const mappings = Array.isArray(analysis?.mappings) ? analysis.mappings : [];
   const diffs = [];
 
   for (const predicted of recognition?.roles || []) {
+    // Coluna fora do padrão do banco ("Pagto.", "Recbto."…): a IA manda.
+    if (!hasRule(predicted)) continue;
     const mapping = mappings.find((item) => item.colIdx === predicted.colIdx);
     if (!mapping || mapping.role === predicted.role) continue;
 
@@ -727,8 +744,21 @@ export function diffRoles(analysis, recognition) {
 export function applyRecognition(analysis, recognition) {
   const next = JSON.parse(JSON.stringify(analysis || {}));
   const mappings = Array.isArray(next.mappings) ? next.mappings : [];
+  const originalRoles = mappings.map((mapping) => mapping.role);
+
+  const valueRoles = [LAYOUT_ROLES.VALUE_AUTO, LAYOUT_ROLES.VALUE_IN, LAYOUT_ROLES.VALUE_OUT];
+  const counts = (roles) => ({
+    dates: roles.filter((role) => role === LAYOUT_ROLES.DATE).length,
+    values: roles.filter((role) => valueRoles.includes(role)).length,
+  });
+  const before = counts(originalRoles);
 
   for (const predicted of recognition?.roles || []) {
+    // Só manda na coluna quem tem regra (do banco ou dos sinônimos). Sem isso,
+    // um extrato do banco com nomes de coluna fora do padrão ("Pagto." e
+    // "Recbto." no Itaú Sul) perdia as colunas de valor e ficava vazio.
+    if (!hasRule(predicted)) continue;
+
     const mapping = mappings.find((item) => item.colIdx === predicted.colIdx);
     if (!mapping) continue;
     mapping.role = predicted.role;
@@ -737,6 +767,15 @@ export function applyRecognition(analysis, recognition) {
     } else if (predicted.role !== LAYOUT_ROLES.HISTORY) {
       mapping.historyOrder = 0;
     }
+  }
+
+  // Rede de segurança: reconhecimento nunca pode deixar o arquivo sem data ou
+  // sem valor quando a própria IA já tinha encontrado.
+  const after = counts(mappings.map((mapping) => mapping.role));
+  if ((before.dates > 0 && after.dates === 0) || (before.values > 0 && after.values === 0)) {
+    mappings.forEach((mapping, idx) => {
+      mapping.role = originalRoles[idx];
+    });
   }
 
   // Renumera o histórico para 1..n na ordem das colunas.
