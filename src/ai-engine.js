@@ -78,6 +78,20 @@ const SEQUENCE_HEADER_RE = /\b(lancto|lcto|lanc|id|seq|sequencia|ordem|codigo|co
 const DOCUMENT_HEADER_RE =
   /\b(documento|documentos|docto|doc|nf|nota|cheque|chq|titulo|autenticacao|protocolo)\b/;
 
+/**
+ * Datas de vencimento/prazo são previsão; as de movimento (recebimento,
+ * pagamento, baixa, caixa) são o fato que interessa na conciliação.
+ */
+const DUE_DATE_HEADER_RE = /\b(venc|vencimento|vencido|vencer|prazo|previsao|previsto)\b/;
+const EVENT_DATE_HEADER_RE =
+  /\b(rec|receb|recebimento|recebido|pag|pago|pagamento|liquidacao|liquidado|baixa|caixa|movimento|mov|compensacao)\b/;
+
+/** Valores previstos (vencimento, orçamento) perdem para os realizados. */
+const FORECAST_AMOUNT_RE =
+  /\b(venc|vencimento|vencido|vencer|previsto|previsao|orcado|orcamento|provisionado|estimado)\b/;
+const REALIZED_AMOUNT_RE =
+  /\b(recebido|recebidos|pago|pagos|liquidado|baixado|realizado|creditado|debitado)\b/;
+
 const BASE_TOKEN_WEIGHTS = {
   // Datas
   data: { date: 4.5 },
@@ -516,14 +530,17 @@ export function computeColumnProfiles(headers, rows, { sampleSize = 120 } = {}) 
 /*                         Classificação de papéis                            */
 /* -------------------------------------------------------------------------- */
 
-/** Sequência numérica (1, 2, 3...): inteiros, únicos e crescentes. */
+/**
+ * Sequência numérica (1, 2, 3...): inteiros, sem sinal e crescentes.
+ * Relatórios agrupados reiniciam a numeração a cada grupo, por isso a
+ * unicidade não é exigida — só o padrão de crescimento.
+ */
 function looksLikeSequenceColumn(colStat) {
   return (
     colStat.moneyCount >= 5 &&
     colStat.integerMoneyRatio >= 0.99 &&
     colStat.pctExplicitSign === 0 &&
-    colStat.uniqueRatio >= 0.95 &&
-    colStat.sequenceRatio >= 0.85
+    colStat.sequenceRatio >= 0.8
   );
 }
 
@@ -578,6 +595,12 @@ export function scoreColumnRoles(colStat, tokenWeights) {
   else if (colStat.pctDate >= 0.3) scores[ROLES.DATE] += 2.5;
   else scores[ROLES.DATE] -= 3;
 
+  // Data do fato (recebimento/pagamento/movimento) vale mais que vencimento.
+  if (colStat.pctDate >= 0.3) {
+    if (EVENT_DATE_HEADER_RE.test(colStat.normHeader)) scores[ROLES.DATE] += 3;
+    else if (DUE_DATE_HEADER_RE.test(colStat.normHeader)) scores[ROLES.DATE] -= 1.5;
+  }
+
   const looksLikeBalance =
     /\b(saldo|acumulado|subtotal|total)\b/.test(colStat.normHeader) && !/valor/.test(colStat.normHeader);
 
@@ -601,9 +624,22 @@ export function scoreColumnRoles(colStat, tokenWeights) {
   }
 
   // 3.1) Identificadores: "Lancto", "Documento", "Nº" e sequências numéricas
-  // (inteiros, únicos e crescentes) nunca são montantes — sem esta penalidade,
+  // (inteiros e crescentes) nunca são montantes — sem esta penalidade,
   // somaríamos o número do lançamento ao valor da linha.
+  const isAmountHeader = AMOUNT_HEADER_RE.test(colStat.normHeader);
   const looksLikeIdentifier = isIdentifierColumn(colStat);
+
+  // 3.2) Em relatórios de contas recebidas/pagas convivem o valor previsto
+  // (vencimento) e o realizado (recebido/pago): o realizado é o que importa.
+  if (!isAmountHeader && FORECAST_AMOUNT_RE.test(colStat.normHeader)) {
+    for (const role of VALUE_ROLES) scores[role] -= 3;
+    scores[ROLES.IGNORE] += 1.5;
+  }
+  if (REALIZED_AMOUNT_RE.test(colStat.normHeader)) {
+    scores[ROLES.VALUE_AUTO] += 2;
+    scores[ROLES.VALUE_OUT] += 1;
+    scores[ROLES.VALUE_IN] += 1;
+  }
 
   if (looksLikeIdentifier) {
     for (const role of VALUE_ROLES) scores[role] -= 7;
@@ -1056,13 +1092,18 @@ export function analyzeFileLayout(parsedFile, memory) {
       );
     }
   } else if (dateMappings.length > 1) {
-    // Mantém a data de maior evidência; as demais viram histórico.
+    // Mantém a data do fato (ou a de maior evidência). As demais são previsão
+    // (vencimento) e não entram no histórico — senão todo lançamento ficaria
+    // com uma data extra colada na descrição.
     dateMappings.sort((a, b) => b.scores[ROLES.DATE] - a.scores[ROLES.DATE]);
     for (let i = 1; i < dateMappings.length; i++) {
-      dateMappings[i].role = ROLES.HISTORY;
-      dateMappings[i].reason = 'Data secundária incorporada ao histórico';
+      dateMappings[i].role = ROLES.IGNORE;
+      dateMappings[i].reason = `Data secundária ("${dateMappings[i].header}") — não entra no histórico`;
     }
-    warnings.push('Mais de uma coluna parece data; foi usada apenas a mais evidente.');
+    warnings.push(
+      `Mais de uma coluna parece data; foi usada "${dateMappings[0].header}". ` +
+        'Se precisar da outra no histórico, mude a função dela.'
+    );
   }
 
   // 2.1) Colunas separadas de entradas e saídas (débito × crédito): cada linha
@@ -1101,13 +1142,14 @@ export function analyzeFileLayout(parsedFile, memory) {
         second.scores[ROLES.VALUE_AUTO] - first.scores[ROLES.VALUE_AUTO] ||
         second.confidence - first.confidence
     );
+    const keptValue = autoValueMappings[0];
     for (const mapping of autoValueMappings.slice(1)) {
       mapping.role = ROLES.IGNORE;
-      mapping.reason = 'Segunda coluna de valor — ignorada para não somar';
+      mapping.reason = `Segunda coluna de valor — ignorada (usando "${keptValue.header}")`;
       mapping.confidence = Math.min(mapping.confidence, 55);
       warnings.push(
-        `Mais de uma coluna parecia valor; "${mapping.header}" foi ignorada. ` +
-          'Ajuste o mapeamento se ela também precisar entrar no total.'
+        `Mais de uma coluna parecia valor; "${mapping.header}" foi ignorada e vale ` +
+          `"${keptValue.header}". Ajuste o mapeamento se ela também precisar entrar no total.`
       );
     }
   }
@@ -1425,8 +1467,29 @@ export function transformRowsWithConfig(parsedFile, config) {
   const skipped = [];
   const rows = Array.isArray(parsedFile?.rows) ? parsedFile.rows : [];
 
+  // Relatórios agrupados ("Contas Recebidas por Cliente") trazem uma linha só
+  // com o nome do cliente/fornecedor antes do bloco de lançamentos. Esse texto
+  // vira prefixo do histórico de todas as linhas do grupo.
+  let sectionText = '';
+
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex] || [];
+
+    // 0) Cabeçalho de grupo: uma única célula com texto, sem data e sem valor.
+    const filledCells = row.filter((cell) => cleanWhitespace(cell));
+    const looksLikeSection =
+      filledCells.length === 1 &&
+      parseDateValue(filledCells[0]) === null &&
+      parseMoneyValue(filledCells[0]) === null;
+    if (looksLikeSection) {
+      sectionText = normalizeHistoryCell(filledCells[0], rules);
+      skipped.push({
+        rowIdx: rowIndex + 1,
+        reason: 'Cabeçalho de grupo (aplicado ao histórico das linhas seguintes)',
+        raw: row,
+      });
+      continue;
+    }
 
     // 1) Data: usa a primeira coluna de data que trouxer valor válido.
     let dateIso = null;
@@ -1505,8 +1568,9 @@ export function transformRowsWithConfig(parsedFile, config) {
       continue;
     }
 
-    // 3) Histórico: concatena as colunas marcadas na ordem escolhida.
+    // 3) Histórico: grupo (se houver) + colunas marcadas na ordem escolhida.
     const parts = [];
+    if (sectionText) parts.push(sectionText);
     for (const mapping of historyMappings) {
       const text = normalizeHistoryCell(row[mapping.colIdx], rules);
       if (text) parts.push(text);
