@@ -372,7 +372,16 @@ describe('treinador automático — relatório', () => {
     assert.equal(report.score.fail, 0);
 
     const ids = report.checks.map((check) => check.id);
-    assert.deepEqual(ids, ['colunas', 'lancamentos', 'datas', 'sinal', 'saldo', 'descartes', 'duplicados']);
+    assert.deepEqual(ids, [
+      'layout',
+      'colunas',
+      'lancamentos',
+      'datas',
+      'sinal',
+      'saldo',
+      'descartes',
+      'duplicados',
+    ]);
     assert.ok(report.checks.every((check) => check.detail.length > 0));
   });
 
@@ -486,5 +495,154 @@ describe('treinador automático — o que aparece na tela', () => {
     const report = buildCoachReport(parsed, analysis);
     const html = coachSummaryHtml(report) + coachChecksHtml(report) + coachFixesHtml(report);
     assert.doesNotMatch(html, /<img/);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                   Catálogo de bancos dentro do relatório                   */
+/* -------------------------------------------------------------------------- */
+
+describe('treinador automático — banco e catálogo', () => {
+  const caixaFile = {
+    fileName: 'caixa.pdf',
+    fileType: 'pdf',
+    headers: ['Data', 'Histórico', 'Dcto.', 'Valor', 'Saldo'],
+    bannerLines: ['CAIXA ECONÔMICA FEDERAL — extrato de conta corrente'],
+    rows: [
+      ['30/09/2026', 'SALDO ANTERIOR', '', '', '1.000,00'],
+      ['01/10/2026', 'TED RECEBIDA', '123456', '100,00', '1.100,00'],
+      ['02/10/2026', 'TARIFA', '789', '-10,00', '1.090,00'],
+    ],
+  };
+
+  it('identifica o banco no catálogo e diz como reconheceu', () => {
+    const parsed = asPdf(buildTableFromTextLines(SEED_LOG_LAYOUTS.bradesco), 'bradesco.pdf');
+    const analysis = analyzeFileLayout(parsed, loading());
+    const report = buildCoachReport(parsed, analysis);
+
+    assert.equal(report.layout.source, 'catalog');
+    assert.equal(report.layout.bank.id, 'bradesco');
+    assert.ok(report.layout.confidence >= 0.8);
+    assert.match(report.layout.evidence.join(' '), /Bradesco/);
+
+    const check = report.checks.find((item) => item.id === 'layout');
+    assert.equal(check.status, CHECK_STATUS.OK);
+    assert.match(check.detail, /Bradesco/);
+  });
+
+  it('sem banco identificado, avisa que está usando os sinônimos das colunas', () => {
+    const parsed = {
+      fileName: 'banco-novo.pdf',
+      fileType: 'pdf',
+      headers: ['Data', 'Descrição', 'Valor'],
+      bannerLines: ['BANCO INÉDITO S.A.'],
+      rows: [['01/10/2026', 'PIX', '10,00']],
+    };
+    const analysis = analysisWith(parsed.headers, [ROLES.DATE, ROLES.HISTORY, ROLES.VALUE_AUTO]);
+    const report = buildCoachReport(parsed, analysis);
+
+    assert.equal(report.layout.source, 'generic');
+    const check = report.checks.find((item) => item.id === 'layout');
+    assert.equal(check.status, CHECK_STATUS.WARN);
+    assert.match(check.detail, /sinônimos das colunas/);
+  });
+
+  it('propõe a correção do banco (Dcto. não é valor) e ela fecha o saldo', () => {
+    const analysis = analysisWith(caixaFile.headers, [
+      ROLES.DATE,
+      ROLES.HISTORY,
+      ROLES.VALUE_AUTO, // errado: é o documento
+      ROLES.VALUE_AUTO,
+      ROLES.IGNORE,
+    ]);
+    const report = buildCoachReport(caixaFile, analysis);
+
+    const fix = report.fixes.find((item) => fix0(item) === 'ignore');
+    function fix0(item) {
+      return item.colIdx === 2 ? item.to : null;
+    }
+    assert.ok(fix, 'correção para a coluna do documento');
+    assert.equal(fix.to, ROLES.IGNORE);
+    assert.match(fix.reason, /Caixa/, 'motivo cita o banco');
+
+    const fixed = applyCoachFixes(analysis, report.fixes);
+    assert.equal(fixed.mappings[2].role, ROLES.IGNORE);
+  });
+
+  it('usa layouts baixados da comunidade no reconhecimento', () => {
+    const parsed = {
+      fileName: 'bnb.pdf',
+      fileType: 'pdf',
+      headers: ['Data', 'Histórico', 'Documento', 'Valor', 'Saldo'],
+      bannerLines: ['BANCO DO NORDESTE DO BRASIL S.A.'],
+      rows: [['01/10/2026', 'PIX', '1', '10,00', '1.010,00']],
+    };
+    const analysis = analysisWith(parsed.headers, [
+      ROLES.DATE,
+      ROLES.HISTORY,
+      ROLES.VALUE_AUTO, // documento entrando como valor
+      ROLES.VALUE_AUTO,
+      ROLES.IGNORE,
+    ]);
+
+    const semCatalogo = buildCoachReport(parsed, analysis);
+    assert.equal(semCatalogo.layout.source, 'generic');
+
+    const community = [
+      {
+        id: 'banco-do-nordeste',
+        name: 'Banco do Nordeste (BNB)',
+        columns: [
+          { match: '^data', role: 'date' },
+          { match: 'historico', role: 'history' },
+          { match: 'documento', role: 'ignore' },
+          { match: 'valor', role: 'value_auto' },
+          { match: 'saldo', role: 'ignore' },
+        ],
+      },
+    ];
+    const comCatalogo = buildCoachReport(parsed, analysis, null, { layouts: community });
+    assert.equal(comCatalogo.layout.source, 'catalog');
+    assert.equal(comCatalogo.layout.bank.name, 'Banco do Nordeste (BNB)');
+    assert.ok(comCatalogo.fixes.some((fix) => fix.to === ROLES.IGNORE && fix.colIdx === 2));
+  });
+
+  it('reaproveita assinatura aprendida quando o banco não está no catálogo', () => {
+    const parsed = {
+      fileName: 'banco-novo.pdf',
+      fileType: 'pdf',
+      headers: ['Data', 'Lançamento', 'Documento', 'Crédito (R$)', 'Débito (R$)', 'Saldo (R$)'],
+      bannerLines: ['BANCO INÉDITO S.A.'],
+      rows: [['01/10/2026', 'PIX', '1', '10,00', '', '1.010,00']],
+    };
+    const analysis = analysisWith(parsed.headers, [
+      ROLES.DATE,
+      ROLES.HISTORY,
+      ROLES.VALUE_AUTO,
+      ROLES.VALUE_AUTO,
+      ROLES.VALUE_AUTO,
+      ROLES.IGNORE,
+    ]);
+
+    const learnedSignatures = [
+      {
+        id: 'sig-1',
+        name: 'Extrato do banco novo',
+        headers: ['data', 'lancamento', 'documento', 'credito (r$)', 'debito (r$)', 'saldo (r$)'],
+        roles: [
+          { header: 'Data', role: 'date', historyOrder: 0 },
+          { header: 'Lançamento', role: 'history', historyOrder: 1 },
+          { header: 'Documento', role: 'ignore', historyOrder: 0 },
+          { header: 'Crédito (R$)', role: 'value_in', historyOrder: 0 },
+          { header: 'Débito (R$)', role: 'value_out', historyOrder: 0 },
+          { header: 'Saldo (R$)', role: 'ignore', historyOrder: 0 },
+        ],
+      },
+    ];
+
+    const report = buildCoachReport(parsed, analysis, null, { learnedSignatures });
+    assert.equal(report.layout.source, 'learned');
+    assert.ok(report.fixes.some((fix) => fix.colIdx === 3 && fix.to === ROLES.VALUE_IN));
+    assert.ok(report.fixes.some((fix) => fix.colIdx === 4 && fix.to === ROLES.VALUE_OUT));
   });
 });

@@ -226,6 +226,19 @@
         <div id="coach-fixes" class="coach-fixes hidden"></div>
         <div id="coach-divergences" class="coach-divergences hidden"></div>
 
+        <div class="coach-registry">
+          <button id="btn-coach-registry" class="btn btn-sm btn-ghost-dark" type="button">
+            Buscar layouts na comunidade
+          </button>
+          <label class="checkbox-label">
+            <input id="coach-registry-auto" type="checkbox" checked />
+            <span>Buscar sozinho quando o banco não for conhecido</span>
+          </label>
+          <p id="coach-registry-status" class="coach-registry-status">
+            Só baixa a lista de layouts: nada do seu arquivo sai do navegador.
+          </p>
+        </div>
+
         <div class="coach-actions">
           <button id="btn-coach-apply" class="btn btn-primary" type="button">
             Aplicar correções e treinar
@@ -365,7 +378,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.15.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.16.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
