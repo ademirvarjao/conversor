@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.5.1';
+export const APP_VERSION = '1.6.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -69,6 +69,10 @@ export const REQUIRED_ELEMENT_IDS = [
   'app-version',
   // Nuvem compartilhada (chave de acesso + banco de modelos)
   'cloud-status',
+  'btn-cloud-key',
+  'cloud-key-code',
+  'cloud-key-caption',
+  'btn-cloud-key-info',
   'cloud-identity-empty',
   'cloud-identity-active',
   'cloud-code-display',
