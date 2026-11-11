@@ -49,6 +49,9 @@ test('as migrações mantêm o cofre por dono (Auth + RLS)', async () => {
   assert.match(all, /references auth\.users\(id\)/i);
   assert.match(all, /owner_id = auth\.uid\(\)/i);
   assert.match(SETUP_SQL, /create index if not exists conversor_models_owner_idx/i);
+  // O upsert não reescreve owner_id: quem adota a linha antiga é o gatilho.
+  assert.match(all, /new\.owner_id is null and auth\.uid\(\) is not null/i);
+  assert.match(all, /new\.owner_id := auth\.uid\(\);/i);
 });
 
 test('o SQL é idempotente e cria tabela, gatilho e políticas de RLS', () => {
