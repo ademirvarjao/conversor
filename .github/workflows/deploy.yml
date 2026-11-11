@@ -1,4 +1,4 @@
-name: Deploy Conversor Custódio para GitHub Pages
+name: Deploy Conversor para GitHub Pages
 
 on:
   push:
@@ -69,7 +69,7 @@ jobs:
               echo ""
               echo "1. Abra [Settings → Pages](https://github.com/${GITHUB_REPOSITORY}/settings/pages)."
               echo "2. Em **Build and deployment → Source**, escolha **GitHub Actions**."
-              echo "3. Rode este workflow novamente (Actions → *Deploy Conversor Custódio para GitHub Pages* → **Run workflow**)."
+              echo "3. Rode este workflow novamente (Actions → *Deploy Conversor para GitHub Pages* → **Run workflow**)."
               echo ""
               echo "Alternativa automatizada: criar um secret \`PAGES_TOKEN\` com um PAT que tenha permissão de Pages;"
               echo "nesse caso o próprio workflow habilita o site."
