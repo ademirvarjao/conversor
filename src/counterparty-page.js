@@ -52,7 +52,9 @@ import {
 } from './sync-vault.js';
 import { APP_VERSION } from './ui-contract.js';
 
-const PAGE_SIZE = 40;
+const DEFAULT_PAGE_SIZE = 50;
+/** Opções de linhas por página (`'all'` mostra a conciliação inteira). */
+const PAGE_SIZE_OPTIONS = [50, 100, 300, 1000, 'all'];
 const SEARCH_DEBOUNCE_MS = 180;
 
 if (pdfjsLib?.GlobalWorkerOptions) {
@@ -74,6 +76,7 @@ const state = {
   linkSearch: '',
   learnedCount: 0,
   selected: new Set(),
+  pageSize: DEFAULT_PAGE_SIZE,
   busy: false,
 };
 
@@ -110,6 +113,8 @@ const REQUIRED_IDS = [
   'cp-selected-count',
   'cp-account-hint',
   'cp-select-all',
+  'cp-page-size',
+  'btn-cp-clear-selection',
   'cp-link-account-input',
   'btn-cp-link-account',
   'cp-link-account-hint',
@@ -579,15 +584,21 @@ function accountCell(row, side) {
             </td>`;
 }
 
+/** Quantas linhas cabem na página (a conciliação inteira quando `'all'`). */
+function rowsPerPage() {
+  return state.pageSize === 'all' ? Infinity : Number(state.pageSize) || DEFAULT_PAGE_SIZE;
+}
+
 function renderRows() {
   const tbody = dom['cp-tbody'];
   if (!tbody) return;
 
   const rows = visibleRows();
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const perPage = rowsPerPage();
+  const totalPages = Math.max(1, Math.ceil(rows.length / perPage));
   state.page = Math.min(Math.max(1, state.page), totalPages);
-  const start = (state.page - 1) * PAGE_SIZE;
-  const pageRows = rows.slice(start, start + PAGE_SIZE);
+  const start = Number.isFinite(perPage) ? (state.page - 1) * perPage : 0;
+  const pageRows = Number.isFinite(perPage) ? rows.slice(start, start + perPage) : rows.slice();
 
   if (pageRows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">Nenhum lançamento para este filtro.</td></tr>';
@@ -625,26 +636,44 @@ function renderRows() {
 
   if (dom['cp-pagination-info']) {
     dom['cp-pagination-info'].textContent = rows.length
-      ? `Exibindo ${start + 1}–${Math.min(start + PAGE_SIZE, rows.length)} de ${rows.length}`
+      ? `Exibindo ${start + 1}–${Math.min(start + pageRows.length, rows.length)} de ${rows.length}`
       : 'Exibindo 0 de 0';
   }
   if (dom['cp-btn-prev']) dom['cp-btn-prev'].disabled = state.page <= 1;
   if (dom['cp-btn-next']) dom['cp-btn-next'].disabled = state.page >= totalPages;
 
-  renderSelection(pageRows);
+  renderSelection(rows);
 }
 
-/** Mantém o contador de selecionados e o "selecionar todos" coerentes. */
-function renderSelection(pageRows = []) {
+/**
+ * Mantém o contador, o "selecionar tudo" e o "limpar seleção" coerentes.
+ *
+ * O "selecionar tudo" vale para **todos** os lançamentos do filtro atual, não
+ * só para os da página — não é preciso ir página por página marcando.
+ */
+function renderSelection(rows = visibleRows()) {
   if (dom['cp-selected-count']) dom['cp-selected-count'].textContent = String(state.selected.size);
 
   const selectAll = dom['cp-select-all'];
   if (selectAll) {
-    const pageIds = pageRows.map((row) => row.id);
-    const selectedOnPage = pageIds.filter((id) => state.selected.has(id)).length;
-    selectAll.checked = pageIds.length > 0 && selectedOnPage === pageIds.length;
-    selectAll.indeterminate = selectedOnPage > 0 && selectedOnPage < pageIds.length;
-    selectAll.disabled = pageIds.length === 0;
+    const ids = rows.map((row) => row.id);
+    const selectedHere = ids.filter((id) => state.selected.has(id)).length;
+    selectAll.checked = ids.length > 0 && selectedHere === ids.length;
+    selectAll.indeterminate = selectedHere > 0 && selectedHere < ids.length;
+    selectAll.disabled = ids.length === 0;
+    selectAll.title = ids.length
+      ? `Selecionar todos os ${ids.length} lançamentos do filtro atual`
+      : 'Nenhum lançamento para selecionar';
+    selectAll.setAttribute(
+      'aria-label',
+      ids.length ? `Selecionar todos os ${ids.length} lançamentos do filtro atual` : 'Selecionar todos os lançamentos'
+    );
+  }
+
+  const clear = dom['btn-cp-clear-selection'];
+  if (clear) {
+    clear.disabled = state.selected.size === 0;
+    clear.textContent = state.selected.size ? `Limpar seleção (${state.selected.size})` : 'Limpar seleção';
   }
 }
 
@@ -1124,11 +1153,23 @@ function bindEvents() {
   });
 
   dom['cp-select-all']?.addEventListener('change', (event) => {
-    const pageRows = visibleRows().slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE);
-    for (const row of pageRows) {
-      if (event.target.checked) state.selected.add(row.id);
+    const select = event.target.checked;
+    for (const row of visibleRows()) {
+      if (select) state.selected.add(row.id);
       else state.selected.delete(row.id);
     }
+    renderRows();
+  });
+
+  dom['btn-cp-clear-selection']?.addEventListener('click', () => {
+    state.selected.clear();
+    renderRows();
+  });
+
+  dom['cp-page-size']?.addEventListener('change', (event) => {
+    const value = event.target.value;
+    state.pageSize = value === 'all' ? 'all' : Number(value);
+    state.page = 1;
     renderRows();
   });
 
@@ -1184,6 +1225,16 @@ function bindEvents() {
 function init() {
   cacheDom();
   if (dom['app-version']) dom['app-version'].textContent = `v${APP_VERSION}`;
+
+  // Tamanho da página vem do seletor; qualquer valor estranho cai no padrão.
+  const initialSize = dom['cp-page-size']?.value;
+  state.pageSize =
+    initialSize === 'all' || PAGE_SIZE_OPTIONS.includes(Number(initialSize))
+      ? initialSize === 'all'
+        ? 'all'
+        : Number(initialSize)
+      : DEFAULT_PAGE_SIZE;
+  if (dom['cp-page-size']) dom['cp-page-size'].value = String(state.pageSize);
 
   counterpartyMemory();
   renderCloudState(describeIdentity(), 'idle');
