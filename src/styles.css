@@ -2001,3 +2001,118 @@ body {
   font-size: 0.78rem;
   letter-spacing: 0.02em;
 }
+
+/* Conta de contrapartida (lote e por lançamento) */
+.cp-account-bar {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt);
+}
+
+.cp-account-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.cp-account-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.cp-account-input {
+  width: min(260px, 100%);
+  padding: 8px 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 9px;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  background: #fff;
+  color: var(--text);
+}
+
+.cp-account-input:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border-color: var(--primary);
+}
+
+.cp-account-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.cp-account-hint {
+  margin: 8px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-light);
+}
+
+.data-table th.col-select,
+.data-table td.col-select {
+  width: 34px;
+  text-align: center;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.data-table td.col-select input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.cp-badge.is-manual {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.cp-link-account {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.cp-link-account label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 6px;
+}
+
+.cp-link-account-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cp-link-account-row input {
+  flex: 1 1 160px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 9px;
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  letter-spacing: 0.04em;
+}
+
+.cp-link-account-row input:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border-color: var(--primary);
+}
+
+.cp-hint {
+  margin: 6px 0 0;
+  font-size: 0.74rem;
+  color: var(--text-light);
+}
