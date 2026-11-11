@@ -12,6 +12,7 @@
  */
 
 import { normalizeMemory } from './ai-engine.js';
+import { currentAccessToken } from './cloud-auth.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { decryptPayload, deriveAccessKeys, encryptPayload } from './sync-crypto.js';
 import { fetchRemoteVault, normalizeSupabaseConfig, saveRemoteVault } from './sync-client.js';
@@ -206,7 +207,17 @@ export function isPayloadNewer(candidate, reference) {
  * Envia a memória atual para o banco compartilhado.
  * @returns {Promise<{updatedAt: string}>}
  */
-export async function pushVault({ config, identity, memory, appVersion, fetchImpl, now, iterations }) {
+export async function pushVault({
+  config,
+  identity,
+  memory,
+  appVersion,
+  fetchImpl,
+  now,
+  iterations,
+  accessToken,
+  storage,
+}) {
   const normalized = normalizeSupabaseConfig(config);
   if (!normalized) throw new Error('Configure o banco compartilhado antes de enviar.');
   if (!identity?.slot) throw new Error('Gere ou informe uma chave de acesso primeiro.');
@@ -216,20 +227,24 @@ export async function pushVault({ config, identity, memory, appVersion, fetchImp
   const { aesKey } = await deriveAccessKeys(identity.code, { iterations });
   const envelope = await encryptPayload(aesKey, payload);
 
-  await saveRemoteVault(normalized, identity.slot, envelope, { fetchImpl });
-  return { updatedAt, payload };
+  // Com conta na nuvem o POST vai autenticado e o banco grava o cofre como
+  // sendo dessa conta (owner_id = auth.uid()).
+  const token = accessToken ?? (await currentAccessToken(normalized, { fetchImpl, storage }));
+  await saveRemoteVault(normalized, identity.slot, envelope, { fetchImpl, accessToken: token });
+  return { updatedAt, payload, owned: Boolean(token) };
 }
 
 /**
  * Baixa o pacote do slot e devolve o conteúdo já decifrado.
  * @returns {Promise<{payload: object, updatedAt: string}|null>}
  */
-export async function pullVault({ config, identity, fetchImpl, iterations }) {
+export async function pullVault({ config, identity, fetchImpl, iterations, accessToken, storage }) {
   const normalized = normalizeSupabaseConfig(config);
   if (!normalized) throw new Error('Configure o banco compartilhado antes de baixar.');
   if (!identity?.slot) throw new Error('Gere ou informe uma chave de acesso primeiro.');
 
-  const remote = await fetchRemoteVault(normalized, identity.slot, { fetchImpl });
+  const token = accessToken ?? (await currentAccessToken(normalized, { fetchImpl, storage }));
+  const remote = await fetchRemoteVault(normalized, identity.slot, { fetchImpl, accessToken: token });
   if (!remote) return null;
 
   const { aesKey } = await deriveAccessKeys(identity.code, { iterations });
