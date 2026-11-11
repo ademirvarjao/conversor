@@ -159,3 +159,19 @@ describe('arquivos referenciados', () => {
     assert.doesNotMatch(html, /@import\s+url\(['"]?https?:/i);
   });
 });
+
+describe('publicação no GitHub Pages', () => {
+  it('copia todas as páginas HTML da raiz para o site', async () => {
+    const workflow = await readFile(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+    const htmlFiles = (await readdir(ROOT)).filter((name) => name.endsWith('.html'));
+
+    assert.ok(htmlFiles.includes('index.html'), 'a página principal precisa existir');
+    assert.ok(htmlFiles.includes('conciliador.html'), 'a página do conciliador precisa existir');
+
+    for (const file of htmlFiles) {
+      const explicit = new RegExp(`cp[^\\n]*\\b${file.replace('.', '\\.')}\\b`).test(workflow);
+      const wildcard = /cp[^\n]*\.\/\*\.html/.test(workflow);
+      assert.ok(explicit || wildcard, `o deploy não publica ${file}`);
+    }
+  });
+});
