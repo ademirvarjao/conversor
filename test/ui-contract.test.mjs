@@ -42,6 +42,13 @@ describe('index.html x controlador', () => {
     assert.ok(html.includes('type="module"'), 'app.js precisa ser carregado como módulo');
   });
 
+  it('mostra a chave de acesso na barra superior, com aviso de uso em outro computador', () => {
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    assert.ok(header.includes('id="btn-cloud-key"'), 'a chave deve ficar visível no topo');
+    assert.ok(header.includes('id="cloud-key-code"'), 'o código da chave aparece no topo');
+    assert.match(header, /outro computador/i, 'o aviso precisa citar o uso em outro computador');
+  });
+
   it('usa o título curto do produto', () => {
     assert.match(html, /<title>Conversor — Conciliação Financeira<\/title>/);
   });

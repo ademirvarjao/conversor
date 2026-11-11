@@ -33,6 +33,34 @@
         <button id="btn-demo" class="btn btn-ghost" type="button" title="Testar com arquivos simulados de layout variável">
           Testar Exemplo IA
         </button>
+        <div class="key-access">
+          <button
+            id="btn-cloud-key"
+            class="btn btn-key is-empty"
+            type="button"
+            title="Clique para criar sua chave de acesso. Você precisa dela para abrir seus modelos em outro computador."
+          >
+            <svg class="key-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4.5" y="10.5" width="15" height="9.5" rx="2.4" stroke="currentColor" stroke-width="1.7" />
+              <path d="M8.2 10.5V7.8a3.8 3.8 0 0 1 7.6 0v2.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <circle cx="12" cy="15.2" r="1.4" fill="currentColor" />
+            </svg>
+            <span class="key-body">
+              <span class="key-caption" id="cloud-key-caption">Chave para outro PC</span>
+              <code id="cloud-key-code" class="key-code">criar agora</code>
+            </span>
+          </button>
+          <button
+            id="btn-cloud-key-info"
+            class="key-info"
+            type="button"
+            title="Por que preciso da chave?"
+            aria-label="Por que preciso da chave de acesso?"
+          >
+            ?
+          </button>
+        </div>
+
         <button id="btn-ai-memory" class="btn btn-outline-light" type="button" aria-haspopup="dialog">
           <span class="ai-dot" aria-hidden="true"></span>
           <span>Memória da IA</span>
@@ -244,7 +272,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.5.1</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.6.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -357,7 +385,10 @@
             </div>
 
             <div id="cloud-identity-active" class="hidden">
-              <p>Sua chave de acesso — guarde com você:</p>
+              <p>
+                Sua chave de acesso — <strong>guarde com você</strong>: é com ela que você
+                abre seus modelos em outro computador.
+              </p>
               <input
                 id="cloud-code-display"
                 class="cloud-code"

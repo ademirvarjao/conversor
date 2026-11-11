@@ -113,6 +113,92 @@ body {
   display: inline-block;
 }
 
+/* Chave de acesso sempre à vista na barra superior */
+.key-access {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* Duas classes para vencer as regras base de .btn (definidas mais abaixo). */
+.btn.btn-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.15;
+}
+
+.btn.btn-key:hover {
+  background: rgba(56, 189, 248, 0.24);
+  border-color: rgba(56, 189, 248, 0.75);
+}
+
+.btn.btn-key:focus-visible {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 2px;
+}
+
+.key-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: #38bdf8;
+}
+
+.key-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.key-caption {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #bae6fd;
+}
+
+.key-code {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #fff;
+}
+
+.btn-key.is-empty .key-code {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #7dd3fc;
+}
+
+.key-info {
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.key-info:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
 .badge-pill {
   background: rgba(255, 255, 255, 0.16);
   padding: 2px 8px;
@@ -1348,6 +1434,17 @@ body {
   }
   .topbar-actions .btn {
     flex: 1;
+  }
+  .key-access {
+    width: 100%;
+  }
+  .key-access .btn-key {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+  }
+  .key-body {
+    align-items: center;
   }
   .card {
     padding: 16px;
