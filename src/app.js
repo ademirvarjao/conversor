@@ -33,6 +33,15 @@ import {
 import { normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
+import {
+  CLOUD_LOCK,
+  LOCKOUT_MS,
+  MAX_ATTEMPTS,
+  clearUnlock,
+  loadUnlock,
+  saveUnlock,
+  verifyCloudCredentials,
+} from './cloud-lock.js';
 import { APP_VERSION, REQUIRED_ELEMENT_IDS } from './ui-contract.js';
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -88,6 +97,10 @@ const cloud = {
    * `{state:'error', message, code}`.
    */
   ping: null,
+  /** Trava da aba: só o administrador cria/entra com chave, envia e baixa modelos. */
+  locked: !loadUnlock(),
+  attempts: 0,
+  cooldownUntil: 0,
 };
 
 /** Banco embutido no app (URL + chave anônima públicas): não há o que configurar. */
@@ -1564,10 +1577,23 @@ function renderTopKey() {
   const hasKey = !!identity;
   const shown = hasKey ? formatAccessCode(identity.code) : '';
 
+  // Com a aba bloqueada a chave nem aparece: ela é o segredo do cofre.
   button.classList.toggle('is-empty', !hasKey);
-  codeEl.textContent = hasKey ? shown : 'criar agora';
+  button.classList.toggle('is-locked', cloud.locked);
+  codeEl.textContent = cloud.locked ? '••••-••••' : hasKey ? shown : 'criar agora';
   if (dom['cloud-key-caption']) {
-    dom['cloud-key-caption'].textContent = hasKey ? 'Chave de acesso' : 'Chave para outro PC';
+    dom['cloud-key-caption'].textContent = cloud.locked
+      ? 'Nuvem bloqueada'
+      : hasKey
+        ? 'Chave de acesso'
+        : 'Chave para outro PC';
+  }
+
+  if (cloud.locked) {
+    const message = 'Nuvem bloqueada. Clique para entrar com login e senha.';
+    button.title = message;
+    button.setAttribute('aria-label', message);
+    return;
   }
 
   button.title = hasKey
@@ -1669,7 +1695,101 @@ function cloudStatusMessage(hasConfig, identity) {
   };
 }
 
+/**
+ * Mostra/esconde o portão de login e o conteúdo da aba Nuvem.
+ * @returns {boolean} `true` quando a aba está desbloqueada
+ */
+function applyCloudLock() {
+  const unlocked = !cloud.locked;
+  dom['cloud-panel']?.classList.toggle('hidden', !unlocked);
+  dom['cloud-lock-gate']?.classList.toggle('hidden', unlocked);
+  if (dom['cloud-lock-user'] && !unlocked && !dom['cloud-lock-user'].value) {
+    dom['cloud-lock-user'].value = '';
+  }
+  return unlocked;
+}
+
+function setCloudLockError(message) {
+  const box = dom['cloud-lock-error'];
+  if (!box) return;
+  box.textContent = message || '';
+  box.classList.toggle('hidden', !message);
+}
+
+/** Pede login e senha (usado ao abrir a aba e ao clicar na chave do topo). */
+function focusCloudLogin() {
+  if (!cloud.locked) return;
+  setCloudLockError('');
+  dom['cloud-lock-password'] && (dom['cloud-lock-password'].value = '');
+  dom['cloud-lock-user']?.focus();
+}
+
+async function submitCloudUnlock(event) {
+  event?.preventDefault?.();
+  if (cloud.busy) return;
+
+  const now = Date.now();
+  if (cloud.cooldownUntil > now) {
+    const seconds = Math.ceil((cloud.cooldownUntil - now) / 1000);
+    setCloudLockError(`Muitas tentativas. Aguarde ${seconds}s para tentar de novo.`);
+    return;
+  }
+
+  const user = dom['cloud-lock-user']?.value || '';
+  const password = dom['cloud-lock-password']?.value || '';
+  if (!user.trim() || !password) {
+    setCloudLockError('Informe login e senha.');
+    return;
+  }
+
+  const button = dom['btn-cloud-unlock'];
+  if (button) button.disabled = true;
+  try {
+    const ok = await verifyCloudCredentials(user, password);
+    if (!ok) {
+      cloud.attempts += 1;
+      if (cloud.attempts >= MAX_ATTEMPTS) {
+        cloud.attempts = 0;
+        cloud.cooldownUntil = Date.now() + LOCKOUT_MS;
+        setCloudLockError('Muitas tentativas erradas. Aguarde 30 segundos.');
+      } else {
+        setCloudLockError(`Login ou senha incorretos (${cloud.attempts}/${MAX_ATTEMPTS}).`);
+      }
+      if (dom['cloud-lock-password']) dom['cloud-lock-password'].value = '';
+      return;
+    }
+
+    cloud.attempts = 0;
+    cloud.cooldownUntil = 0;
+    cloud.locked = false;
+    saveUnlock();
+    setCloudLockError('');
+    if (dom['cloud-lock-password']) dom['cloud-lock-password'].value = '';
+    renderCloudPanel();
+    showToast('Nuvem desbloqueada.', 'success');
+  } catch (error) {
+    setCloudLockError(error?.message || 'Não foi possível validar a senha.');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function lockCloudPanel() {
+  clearUnlock();
+  cloud.locked = true;
+  cloud.ping = null;
+  renderCloudPanel();
+  focusCloudLogin();
+  showToast('Nuvem bloqueada neste navegador.', 'warn');
+}
+
 function renderCloudPanel() {
+  const unlocked = applyCloudLock();
+  if (!unlocked) {
+    renderTopKey();
+    return;
+  }
+
   const hasConfig = !!cloud.config;
   const identity = cloud.identity;
 
@@ -2027,6 +2147,14 @@ function bindCloudEvents() {
 
   // A chave na barra superior: cria quando ainda não existe, copia quando existe.
   dom['btn-cloud-key']?.addEventListener('click', async () => {
+    // A chave de acesso é o segredo do cofre: com a aba bloqueada, o clique
+    // leva para o login em vez de criar/copiar a chave.
+    if (cloud.locked) {
+      activateModalTab('cloud');
+      focusCloudLogin();
+      showToast('Nuvem bloqueada: entre com login e senha para ver sua chave.', 'warn');
+      return;
+    }
     if (!cloud.identity) {
       await withCloudBusy(createAccessIdentity);
       return;
@@ -2076,7 +2204,20 @@ function bindCloudEvents() {
     }
   };
 
-  dom['btn-cloud-key-use']?.addEventListener('click', submitTopKey);
+  dom['btn-cloud-key-use']?.addEventListener('click', () => {
+    if (cloud.locked) {
+      activateModalTab('cloud');
+      focusCloudLogin();
+      showToast('Nuvem bloqueada: entre com login e senha para usar uma chave.', 'warn');
+      return;
+    }
+    submitTopKey();
+  });
+
+  // Portão de entrada da aba Nuvem.
+  dom['cloud-lock-form']?.addEventListener('submit', submitCloudUnlock);
+  dom['btn-cloud-unlock']?.addEventListener('click', submitCloudUnlock);
+  dom['btn-cloud-lock']?.addEventListener('click', lockCloudPanel);
   dom['cloud-key-top-input']?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();

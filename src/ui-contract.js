@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.10.3';
+export const APP_VERSION = '1.11.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -95,6 +95,14 @@ export const REQUIRED_ELEMENT_IDS = [
   'cloud-config-block',
   'cloud-official-note',
   'cloud-setup-hint',
+  'cloud-lock-gate',
+  'cloud-lock-form',
+  'cloud-lock-user',
+  'cloud-lock-password',
+  'cloud-lock-error',
+  'btn-cloud-unlock',
+  'cloud-panel',
+  'btn-cloud-lock',
   'btn-cloud-copy-sql',
   'cloud-sql-editor-link',
   'btn-cloud-retry-ping',
