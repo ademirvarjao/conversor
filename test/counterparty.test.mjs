@@ -7,6 +7,8 @@ import {
   applyRowAccount,
   buildContactsFromLines,
   buildContactsFromTable,
+  accountMemorySummary,
+  accountSuggestion,
   buildSourceTransactions,
   contactAccountSide,
   contactCode,
@@ -15,6 +17,7 @@ import {
   historyCore,
   learnFromReconciliation,
   learnManualLink,
+  learnRowAccount,
   linkHistory,
   mergeContacts,
   mergeTransactions,
@@ -568,6 +571,176 @@ describe('edição das colunas de débito e crédito na tabela', () => {
   });
 });
 
+describe('treino de contas do conciliador', () => {
+  const mem = () => ({ counterparties: sanitizeCounterparties(null) });
+
+  it('memoriza a conta digitada pelo histórico e pelo contato', () => {
+    const memory = mem();
+    const contact = { code: '6.209.355', name: 'ALEF FERRAMENTAS', natureza: NATUREZA.CREDORA };
+
+    const learned = learnRowAccount(memory, {
+      history: 'Alef Ferramentas 1152',
+      contact,
+      side: 'credit',
+      account: '1.234-5',
+    });
+
+    const key = historyCore('Alef Ferramentas 1152');
+    assert.equal(learned.accounts.byHistory[key].credit, '12345');
+    assert.equal(learned.accounts.byContact['6209355'].credit, '12345');
+    assert.equal(learned.accounts.byHistory[key].hits, 1);
+  });
+
+  it('repetir a mesma conta soma confiança; trocar reinicia', () => {
+    const memory = mem();
+    const input = { history: 'PAGAMENTO XYZ', side: 'debit', account: '500046' };
+
+    memory.counterparties = learnRowAccount(memory, input);
+    memory.counterparties = learnRowAccount(memory, input);
+
+    const key = historyCore('PAGAMENTO XYZ');
+    assert.equal(memory.counterparties.accounts.byHistory[key].hits, 2, 'repetir confirma a conta');
+
+    memory.counterparties = learnRowAccount(memory, { ...input, account: '777' });
+    assert.equal(memory.counterparties.accounts.byHistory[key].debit, '777');
+    assert.equal(memory.counterparties.accounts.byHistory[key].hits, 1, 'trocar a conta reinicia a confiança');
+  });
+
+  it('não memoriza conta vazia nem histórico curto demais', () => {
+    const memory = mem();
+    const empty = learnRowAccount(memory, { history: 'FORNECEDOR ABC', side: 'debit', account: '   ' });
+    assert.deepEqual(empty.accounts.byHistory, {});
+
+    const short = learnRowAccount(memory, { history: 'NF 1', side: 'debit', account: '123' });
+    assert.deepEqual(short.accounts.byHistory, {}, 'histórico curto não vira chave');
+  });
+
+  it('resume e normaliza o bloco de contas', () => {
+    const learned = sanitizeCounterparties({
+      accounts: {
+        byHistory: { 'alef ferramentas 1152': { debit: '', credit: '12.345', hits: '3' }, vazio: {} },
+        byContact: { '6209355': { debit: '5.00.046', credit: '', hits: 1 } },
+      },
+    });
+
+    assert.equal(learned.accounts.byHistory['alef ferramentas 1152'].credit, '12345');
+    assert.equal(learned.accounts.byHistory['alef ferramentas 1152'].hits, 3);
+    assert.equal('vazio' in learned.accounts.byHistory, false, 'entrada sem conta é descartada');
+    assert.equal(learned.accounts.byContact['6209355'].debit, '500046');
+
+    const summary = accountMemorySummary({ counterparties: learned });
+    assert.deepEqual(summary, { byHistory: 1, byContact: 1, total: 2 });
+  });
+
+  it('sugere só a coluna oposta quando o lançamento tem contato', () => {
+    const accounts = sanitizeCounterparties({
+      accounts: {
+        byHistory: { [historyCore('Alef Ferramentas 1152')]: { debit: '999', credit: '12345', hits: 1 } },
+        byContact: {},
+      },
+    }).accounts;
+
+    const row = {
+      direction: DIRECTION.PAYMENT,
+      contact: { code: '6.209.355', name: 'ALEF' },
+      debitAccount: '6209355',
+      creditAccount: '',
+      rawHistory: 'Alef Ferramentas 1152',
+    };
+
+    const suggestion = accountSuggestion(row, accounts);
+    assert.equal(suggestion.side, 'credit');
+    assert.equal(suggestion.account, '12345');
+    assert.equal(suggestion.hits, 1);
+
+    // A conta do contato nunca é sugerida para substituição.
+    row.creditAccount = '12345';
+    assert.equal(accountSuggestion(row, accounts), null);
+  });
+
+  it('num lançamento sem contato, sugere primeiro a coluna da direção', () => {
+    const accounts = sanitizeCounterparties({
+      accounts: {
+        byHistory: {
+          [historyCore('Sindicato Metalurgicos')]: { debit: '5086959', credit: '777', hits: 1 },
+        },
+        byContact: {},
+      },
+    }).accounts;
+
+    const payment = accountSuggestion(
+      { direction: DIRECTION.PAYMENT, contact: null, debitAccount: '', creditAccount: '', rawHistory: 'Sindicato Metalurgicos' },
+      accounts
+    );
+    assert.equal(payment.side, 'debit');
+    assert.equal(payment.account, '5086959');
+
+    const receipt = accountSuggestion(
+      { direction: DIRECTION.RECEIPT, contact: null, debitAccount: '', creditAccount: '', rawHistory: 'Sindicato Metalurgicos' },
+      accounts
+    );
+    assert.equal(receipt.side, 'credit');
+    assert.equal(receipt.account, '777');
+  });
+
+  it('aplica sozinha a conta confirmada 2+ vezes e sugere a de 1 confirmação', () => {
+    const contacts = buildContactsFromLines(questorLines()).contacts;
+    const plasttotal = contacts.find((contact) => /PLASTTOTAL/i.test(contact.name));
+
+    let memory = { counterparties: sanitizeCounterparties(null) };
+    for (let i = 0; i < 2; i += 1) {
+      memory = {
+        counterparties: learnRowAccount(memory, {
+          history: 'Plasttotal Plástico Industrial Ltda 232617',
+          contact: plasttotal,
+          side: 'credit',
+          account: '12345',
+        }),
+      };
+    }
+    memory = {
+      counterparties: learnRowAccount(memory, {
+        history: 'Sindicato dos Metalurgicos de Tres Rios',
+        contact: null,
+        side: 'debit',
+        account: '5086959',
+      }),
+    };
+
+    const transactions = buildSourceTransactions(
+      recordsFrom([
+        ['01/10/2026', '-1.050,00', 'Plasttotal Plástico Industrial Ltda 232617'],
+        ['01/10/2026', '-85,62', 'Sindicato dos Metalurgicos de Tres Rios'],
+      ])
+    );
+
+    const { rows } = reconcileCounterparties(transactions, contacts, { memory });
+
+    const confirmada = rows.find((row) => /Plasttotal/i.test(row.rawHistory));
+    assert.equal(confirmada.creditAccount, '12345', 'com 2 confirmações a conta entra sozinha');
+    assert.equal(confirmada.debitAccount, '5086959', 'a conta do fornecedor continua no débito');
+    assert.equal(confirmada.counterpartAccount, '12345');
+    assert.equal(confirmada.counterpartSource, 'memory');
+
+    const sugerida = rows.find((row) => /Sindicato/i.test(row.rawHistory));
+    assert.equal(sugerida.debitAccount, '', 'com 1 confirmação só sugere');
+    assert.equal(sugerida.accountSuggestion.side, 'debit');
+    assert.equal(sugerida.accountSuggestion.account, '5086959');
+    assert.equal(sugerida.accountSuggestion.hits, 1);
+  });
+
+  it('sem memória de contas nada é preenchido nem sugerido', () => {
+    const contacts = buildContactsFromLines(questorLines()).contacts;
+    const transactions = buildSourceTransactions(
+      recordsFrom([['01/10/2026', '-1.050,00', 'Plasttotal Plástico Industrial Ltda 232617']])
+    );
+
+    const { rows } = reconcileCounterparties(transactions, contacts, { memory: {} });
+    assert.equal(rows[0].creditAccount, '');
+    assert.equal(rows[0].accountSuggestion, undefined);
+  });
+});
+
 /* -------------------------------------------------------------------------- */
 /*                                 Aprendizado                                */
 /* -------------------------------------------------------------------------- */
@@ -605,10 +778,11 @@ describe('aprendizado da IA', () => {
 
   it('descarta conteúdo inválido da memória', () => {
     assert.deepEqual(sanitizeCounterparties(null), {
-      version: 1,
+      version: 2,
       aliases: {},
       tokenWeights: {},
       contacts: {},
+      accounts: { byHistory: {}, byContact: {} },
       uses: 0,
       updatedAt: null,
     });
