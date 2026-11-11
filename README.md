@@ -83,8 +83,17 @@ e a integração **Supabase + GitHub** aplica a migração sozinha a cada push n
 não é preciso abrir o SQL Editor. A migração é idempotente (`create table if not exists`,
 `drop policy if exists`), então pode rodar quantas vezes for preciso.
 
-A conexão do cliente (Project URL + chave **anon public**) é pública por natureza e fica
-embutida em [`src/sync-config.js`](src/sync-config.js): o app já abre conectado e a tela
+Para a integração aplicar as migrações, o repositório precisa do folder do projeto **com
+[`supabase/config.toml`](supabase/config.toml)** — sem esse arquivo a integração nunca roda os
+SQLs (era o que deixava a tabela ausente). No painel: **Project Settings → Integrations → GitHub**,
+*Working directory* `.`, *Deploy to production* ligado e *Production branch* `main`.
+
+Se a tabela ainda não existir, o próprio app resolve em dois cliques: a aba **Nuvem** detecta o
+erro do PostgREST (`PGRST205`), mostra **Copiar SQL de instalação** (o mesmo SQL da migração,
+embarcado em [`src/sql-setup.js`](src/sql-setup.js)) e **Abrir SQL Editor** já no projeto certo.
+
+A conexão do cliente (Project URL + chave **anon public**/**publishable**) é pública por natureza
+e fica embutida em [`src/sync-config.js`](src/sync-config.js): o app já abre conectado e a tela
 **Memória da IA → Nuvem (Equipe)** mostra o estado do banco e checa a conexão sozinha na
 primeira abertura. O único passo do usuário é **criar a chave de acesso** (o segredo da
 criptografia) — no primeiro clique ela já sobe os modelos locais.
