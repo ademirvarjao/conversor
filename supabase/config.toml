@@ -1,0 +1,65 @@
+# ============================================================================
+#  Conversor — configuração do projeto Supabase (usada pela integração GitHub)
+# ----------------------------------------------------------------------------
+#  Este arquivo NÃO é opcional: a integração "Supabase + GitHub" só aplica as
+#  migrações de `supabase/migrations/` quando o repositório tem o folder do
+#  projeto com o config.toml. Sem ele, os SQLs do repositório nunca rodam no
+#  banco (a tabela `conversor_models` não existe e o app avisa "tabela ausente").
+#
+#  Gerado/editado a partir do `supabase init`; os valores de portas e URLs
+#  locais servem apenas para o ambiente de desenvolvimento (`supabase start`).
+#  O deploy (integração GitHub ou `supabase db push`) usa o projeto remoto.
+#
+#  No painel do Supabase: Project Settings → Integrations → GitHub
+#    • Working directory: .              (a raiz do repo, que contém supabase/)
+#    • Deploy to production: ligado
+#    • Production branch: main
+# ============================================================================
+
+project_id = "conversor"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.pooler]
+enabled = false
+port = 54329
+pool_mode = "transaction"
+default_pool_size = 20
+max_client_conn = 100
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false

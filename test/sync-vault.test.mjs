@@ -411,7 +411,12 @@ test('tabela ausente vira mensagem de ação (rodar o SQL)', async () => {
 
   await assert.rejects(
     () => pushVault({ config: CONFIG, identity, memory: memoryWithProfile(), fetchImpl: notFound, iterations: FAST }),
-    /conversor_models/
+    (error) => {
+      assert.match(error.message, /conversor_models/);
+      // A UI usa este código para oferecer o SQL de instalação na aba Nuvem.
+      assert.equal(error.code, 'TABLE_MISSING');
+      return true;
+    }
   );
 
   const forbidden = async () => jsonResponse(401, { message: 'bad key' });

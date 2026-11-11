@@ -32,6 +32,7 @@ import {
 } from './sync-vault.js';
 import { normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
+import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
 import { APP_VERSION, REQUIRED_ELEMENT_IDS } from './ui-contract.js';
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -81,7 +82,11 @@ const cloud = {
   identity: loadIdentity(),
   busy: false,
   statusTone: 'idle',
-  /** Resultado da checagem automática do banco: null | 'checking' | 'ok' | string (erro). */
+  /**
+   * Resultado da checagem automática do banco:
+   * `null` (ainda não checado) | `{state:'checking'}` | `{state:'ok'}` |
+   * `{state:'error', message, code}`.
+   */
   ping: null,
 };
 
@@ -1608,14 +1613,23 @@ function cloudHostLabel(config = cloud.config) {
  */
 async function ensureCloudOnline() {
   if (!cloud.config || cloud.ping !== null || cloud.busy) return;
-  cloud.ping = 'checking';
+  cloud.ping = { state: 'checking' };
   try {
     await pingDatabase(cloud.config);
-    cloud.ping = 'ok';
+    cloud.ping = { state: 'ok' };
   } catch (error) {
-    cloud.ping = error?.message || 'falha ao falar com o banco';
+    cloud.ping = {
+      state: 'error',
+      message: error?.message || 'falha ao falar com o banco',
+      code: error?.code || null,
+    };
   }
   if (dom['cloud-status']) renderCloudPanel();
+}
+
+/** `true` quando o banco responde, mas a tabela dos modelos ainda não existe. */
+function cloudTableMissing() {
+  return cloud.ping?.state === 'error' && cloud.ping.code === 'TABLE_MISSING';
 }
 
 function cloudStatusMessage(hasConfig, identity) {
@@ -1627,9 +1641,19 @@ function cloudStatusMessage(hasConfig, identity) {
     };
   }
 
-  const online = cloud.ping === 'ok' ? ' Banco online.' : cloud.ping === 'checking' ? ' Checando o banco…' : '';
-  const offline = typeof cloud.ping === 'string' && cloud.ping !== 'checking' && cloud.ping !== 'ok'
-    ? ` Banco indisponível: ${cloud.ping}`
+  if (cloudTableMissing()) {
+    return {
+      tone: 'warn',
+      message:
+        'Banco conectado, mas a tabela dos modelos ainda não existe neste projeto. ' +
+        'Copie o SQL de instalação abaixo e rode uma vez no SQL Editor — depois recarregue a página.',
+    };
+  }
+
+  const online =
+    cloud.ping?.state === 'ok' ? ' Banco online.' : cloud.ping?.state === 'checking' ? ' Checando o banco…' : '';
+  const offline = cloud.ping?.state === 'error' && cloud.ping.code !== 'TABLE_MISSING'
+    ? ` Banco indisponível: ${cloud.ping.message}`
     : '';
 
   if (!identity) {
@@ -1666,6 +1690,13 @@ function renderCloudPanel() {
   }
   if (dom['btn-cloud-reset-config']) {
     dom['btn-cloud-reset-config'].classList.toggle('hidden', !BUILT_IN_CLOUD || builtIn);
+  }
+
+  // Banco respondeu, mas a tabela ainda não existe: oferece o SQL de instalação
+  // (copia) e o atalho para o SQL Editor do projeto, sem caçar arquivo no repo.
+  dom['cloud-setup-hint']?.classList.toggle('hidden', !cloudTableMissing());
+  if (dom['cloud-sql-editor-link'] && cloud.config) {
+    dom['cloud-sql-editor-link'].href = sqlEditorUrl(cloud.config);
   }
 
   dom['cloud-identity-empty']?.classList.toggle('hidden', !!identity);
@@ -1942,6 +1973,18 @@ function bindCloudEvents() {
     showToast('Conexão com o banco compartilhado salva.');
   });
 
+  // Plano B quando a migração do repositório ainda não rodou no projeto: copia
+  // o SQL idempotente para o usuário colar no SQL Editor do Supabase.
+  dom['btn-cloud-copy-sql']?.addEventListener('click', async () => {
+    const copied = await copyText(SETUP_SQL);
+    showToast(
+      copied
+        ? 'SQL copiado. Cole no SQL Editor do projeto e clique em Run — depois recarregue esta página.'
+        : 'Não consegui copiar automaticamente. Use “Abrir SQL Editor” e cole o conteúdo de supabase/migrations.',
+      copied ? 'success' : 'warn'
+    );
+  });
+
   // Volta para o banco oficial embutido (descarta a conexão personalizada).
   dom['btn-cloud-reset-config']?.addEventListener('click', () => {
     clearCloudConfig();
@@ -1958,13 +2001,17 @@ function bindCloudEvents() {
     };
     try {
       await pingDatabase(config);
-      cloud.ping = 'ok';
+      cloud.ping = { state: 'ok' };
       renderCloudPanel();
       showToast('Conexão com o banco funcionando.', 'success');
     } catch (error) {
-      cloud.ping = error?.message || 'falha ao falar com o banco';
+      cloud.ping = {
+        state: 'error',
+        message: error?.message || 'falha ao falar com o banco',
+        code: error?.code || null,
+      };
       renderCloudPanel();
-      showToast(`Falha no teste: ${error.message}`, 'error');
+      showToast(`Falha no teste: ${error.message}`, error?.code === 'TABLE_MISSING' ? 'warn' : 'error');
     }
   });
 
