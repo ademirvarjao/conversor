@@ -822,6 +822,26 @@ body {
   margin-bottom: 8px;
 }
 
+/* O app já vem com o banco oficial embutido: o selo evita a dúvida de "onde
+   configuro isso?". A troca de projeto continua disponível ao abrir o bloco. */
+.cloud-config.is-built-in summary::after {
+  content: 'banco oficial';
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.cloud-config.is-built-in input {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+}
+
 .trainer-hint {
   margin: 12px 0 0;
   font-size: 0.82rem;

@@ -79,7 +79,11 @@ async function request(config, url, init, fetchImpl) {
   }
   if (response.status === 404) {
     throw new Error(
-      `A tabela "${TABLE_NAME}" não existe. Rode o SQL de supabase/schema.sql no projeto.`
+      `A tabela "${TABLE_NAME}" ainda não existe no projeto Supabase. A migração ` +
+        'supabase/migrations/20261111120000_conversor_models.sql é aplicada automaticamente ' +
+        'pela integração Supabase + GitHub a cada push; se o projeto foi criado agora, ' +
+        'aguarde alguns segundos e recarregue. Para aplicar à mão, rode o SQL de ' +
+        'supabase/schema.sql no SQL Editor.'
     );
   }
   if (response.status === 429) {

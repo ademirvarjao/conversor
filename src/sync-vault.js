@@ -103,14 +103,24 @@ export function clearIdentity(storage) {
 
 /**
  * Configuração efetiva do banco: a que o usuário salvou neste navegador tem
- * prioridade; senão vale a que o administrador deixou em `sync-config.js`.
+ * prioridade; senão vale a que veio embutida no app (`sync-config.js`), que já
+ * aponta para o projeto oficial do Conversor.
+ *
+ * @param {Storage} [storage]
+ * @param {{url?: string, anonKey?: string}} [fallback] padrão embutido
+ *   (parâmetro usado pelos testes para isolar o valor publicado).
  * @returns {{url:string, anonKey:string}|null}
  */
-export function loadCloudConfig(storage) {
-  return (
-    normalizeSupabaseConfig(readJson(storage, CONFIG_KEY)) ||
-    normalizeSupabaseConfig(DEFAULT_CLOUD_CONFIG)
-  );
+export function loadCloudConfig(storage, fallback = DEFAULT_CLOUD_CONFIG) {
+  return normalizeSupabaseConfig(readJson(storage, CONFIG_KEY)) || normalizeSupabaseConfig(fallback);
+}
+
+/**
+ * `true` quando existe banco embutido no app (mesmo que o usuário ainda não
+ * tenha criado a chave de acesso dele).
+ */
+export function hasBuiltInCloudConfig(fallback = DEFAULT_CLOUD_CONFIG) {
+  return normalizeSupabaseConfig(fallback) !== null;
 }
 
 export function saveCloudConfig(config, storage) {
