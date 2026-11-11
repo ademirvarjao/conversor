@@ -49,24 +49,19 @@ describe('index.html x controlador', () => {
     assert.match(header, /Colar chave/i);
   });
 
-  it('abre a conciliação de clientes/fornecedores pelo ícone da marca, numa barra lateral', () => {
+  it('leva para a página do conciliador pelo ícone da marca', () => {
     const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
     assert.match(
       header,
-      /<button[^>]+id="btn-counterparty"/,
-      'o ícone da marca precisa ser um botão com id="btn-counterparty"'
+      /<a[^>]+href="\.\/conciliador\.html"/,
+      'o ícone da marca precisa levar para conciliador.html'
     );
-    assert.ok(header.includes('aria-controls="cp-modal"'), 'o ícone precisa apontar para o painel');
-    assert.ok(header.includes('brand-button'), 'o ícone precisa da classe de botão');
+    assert.ok(header.includes('brand-back'), 'o ícone precisa da classe de atalho');
+    assert.ok(header.includes('Conciliar clientes/fornecedores'), 'falta o rótulo acessível do atalho');
 
+    // A conciliação não é mais um modal/drawer dentro da página principal.
+    assert.equal(html.includes('cp-modal'), false, 'o painel embutido saiu do index.html');
     assert.equal(html.includes('action-tile'), false, 'o cartão antigo saiu do topo da página');
-
-    const panel = html.slice(html.indexOf('id="cp-modal"'), html.indexOf('<!-- Toast notifications -->'));
-    assert.ok(panel.includes('cp-drawer-backdrop'), 'o painel precisa ser a barra lateral');
-    assert.ok(panel.includes('<aside class="cp-drawer"'), 'falta o <aside> da barra lateral');
-    for (const id of ['btn-close-cp', 'cp-contacts-input', 'cp-ledger-input', 'cp-tbody', 'btn-cp-export-csv']) {
-      assert.ok(panel.includes(`id="${id}"`), `faltou #${id} na barra lateral`);
-    }
   });
 
   it('não expõe mais o botão de exemplo simulado', async () => {
