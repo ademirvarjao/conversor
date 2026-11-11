@@ -93,7 +93,7 @@ fica atrás de **login e senha** ([`src/cloud-lock.js`](src/cloud-lock.js)):
 > contra quem usa o computador/navegador, não contra alguém que altere o JavaScript). A barreira de
 > **servidor** é a conta na nuvem (Supabase Auth + RLS), descrita abaixo.
 
-#### Conta na nuvem — Supabase Auth + RLS (v1.12.0)
+#### Conta na nuvem — Supabase Auth + RLS (v1.12.1)
 A chave de acesso protege o **conteúdo**; a conta protege o **acesso**. Com uma conta do
 Supabase Auth ([`src/cloud-auth.js`](src/cloud-auth.js)), cada consulta ao banco vai com o
 `Authorization: Bearer <token do usuário>` e o **Row Level Security** passa a valer por dono:
@@ -101,7 +101,9 @@ Supabase Auth ([`src/cloud-auth.js`](src/cloud-auth.js)), cada consulta ao banco
 - a conta vê e grava **apenas os cofres dela** (`owner_id = auth.uid()`);
 - cofre com dono **não** pode ser lido, sobrescrito ou apagado por quem não é o dono — nem
   com a chave pública do projeto, nem sabendo o `slot`;
-- linhas antigas (sem dono) continuam funcionando e são **adotadas** no primeiro envio autenticado;
+- linhas antigas (sem dono) continuam funcionando e são **adotadas** no primeiro envio autenticado
+  — quem faz isso é o gatilho `conversor_models_touch()`, porque o upsert do PostgREST só atualiza
+  as colunas enviadas no corpo do POST (o `owner_id` não vai no JSON; o banco decide);
 - a coluna nasce com `default auth.uid()`, então o app não escolhe o dono: quem escolhe é o token;
 - sem conta, o app segue exatamente como antes (chave anônima, cofres sem dono).
 
@@ -111,9 +113,11 @@ Na interface (**Memória da IA → Nuvem → Conta na nuvem**) há **Entrar**, *
 (`expires_in` + refresh token). Se o projeto estiver com *Confirm email* ligado, o app avisa que
 é preciso confirmar o e-mail antes do primeiro login.
 
-A migração que liga isso é
-[`supabase/migrations/20261111160000_conversor_models_owner.sql`](supabase/migrations/20261111160000_conversor_models_owner.sql)
-(aplicada pela integração Supabase + GitHub, como as demais). Para trocar a senha da conta use
+As migrações que ligam isso são
+[`20261111160000_conversor_models_owner.sql`](supabase/migrations/20261111160000_conversor_models_owner.sql)
+(coluna + políticas) e
+[`20261111180000_conversor_models_adopt.sql`](supabase/migrations/20261111180000_conversor_models_adopt.sql)
+(adoção das linhas antigas), aplicadas pela integração Supabase + GitHub como as demais. Para trocar a senha da conta use
 **Sair da conta** e o painel do Supabase (**Authentication → Users**), onde também dá para
 desligar o cadastro público se você for o único usuário.
 
