@@ -125,6 +125,42 @@
         </div>
       </div>
 
+      <div class="cp-account-bar">
+        <div class="cp-account-main">
+          <label for="cp-account-input" class="cp-account-label">Conta de contrapartida</label>
+          <input
+            id="cp-account-input"
+            class="cp-account-input"
+            type="text"
+            inputmode="numeric"
+            placeholder="Ex.: 500046 ou 5.00.046"
+            autocomplete="off"
+            spellcheck="false"
+            aria-describedby="cp-account-hint"
+          />
+          <button id="btn-cp-account-apply" class="btn btn-sm btn-primary" type="button">Aplicar conta</button>
+        </div>
+
+        <div class="cp-account-scope" role="radiogroup" aria-label="Onde aplicar a conta de contrapartida">
+          <label class="checkbox-label">
+            <input id="cp-scope-selected" type="radio" name="cp-account-scope" value="selected" checked />
+            <span>selecionados (<strong id="cp-selected-count">0</strong>)</span>
+          </label>
+          <label class="checkbox-label">
+            <input id="cp-scope-filtered" type="radio" name="cp-account-scope" value="filtered" />
+            <span>todos os filtrados</span>
+          </label>
+          <label class="checkbox-label">
+            <input id="cp-scope-empty" type="radio" name="cp-account-scope" value="empty" />
+            <span>só os sem conta</span>
+          </label>
+        </div>
+
+        <p id="cp-account-hint" class="cp-account-hint" role="status">
+          Marque as linhas na tabela para aplicar em lote — ou clique em <em>Vincular</em> na linha para ajustar um lançamento só.
+        </p>
+      </div>
+
       <div class="toolbar cp-toolbar">
         <div class="search-box">
           <label for="cp-search" class="sr-only">Buscar no histórico conciliado</label>
@@ -143,6 +179,9 @@
           <caption class="sr-only">Conciliação no layout data, débito, crédito, valor e histórico — débito e crédito trazem a conta do contato (contactb) sem pontuação</caption>
           <thead>
             <tr>
+              <th scope="col" class="col-select">
+                <input id="cp-select-all" type="checkbox" aria-label="Selecionar todos os lançamentos desta página" />
+              </th>
               <th scope="col" class="col-date">data</th>
               <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos">debito</th>
               <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos">credito</th>
@@ -169,6 +208,25 @@
           <button id="btn-cp-link-close" class="icon-btn" type="button" aria-label="Fechar correção">✕</button>
         </div>
         <p id="cp-link-history" class="cp-link-history"></p>
+        <div class="cp-link-account">
+          <label for="cp-link-account-input">Conta de contrapartida deste lançamento</label>
+          <div class="cp-link-account-row">
+            <input
+              id="cp-link-account-input"
+              type="text"
+              inputmode="numeric"
+              placeholder="Ex.: 500046"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="cp-link-account-hint"
+            />
+            <button id="btn-cp-link-account" class="btn btn-sm btn-primary" type="button">Aplicar nesta linha</button>
+          </div>
+          <p id="cp-link-account-hint" class="cp-hint">
+            Se a conta existir no cadastro, o contato é vinculado junto e a IA memoriza o histórico.
+          </p>
+        </div>
+
         <div class="search-box">
           <label for="cp-link-search" class="sr-only">Buscar contato no cadastro</label>
           <input id="cp-link-search" type="search" placeholder="Buscar fornecedor/cliente pelo nome, código ou CPF/CNPJ…" />
@@ -190,7 +248,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.9.1</span> — os arquivos nunca saem do navegador;
+        Conversor <span id="app-version" class="footer-version">v1.9.2</span> — os arquivos nunca saem do navegador;
         só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.
       </p>
       <p>Layout da conciliação: <code>data</code> | <code>debito</code> | <code>credito</code> | <code>valor</code> | <code>historico</code>.</p>

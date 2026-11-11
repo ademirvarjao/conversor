@@ -65,6 +65,25 @@ describe('página do conciliador', () => {
     }
   });
 
+  it('permite informar a conta de contrapartida em lote e por lançamento', () => {
+    // em lote: campo + escopo + botão
+    assert.ok(page.includes('id="cp-account-input"'));
+    assert.ok(page.includes('id="btn-cp-account-apply"'));
+    for (const scope of ['selected', 'filtered', 'empty']) {
+      assert.ok(page.includes(`value="${scope}"`), `falta o escopo ${scope}`);
+    }
+    assert.ok(page.includes('id="cp-selected-count"'));
+
+    // por lançamento: campo dentro do painel de vínculo
+    assert.ok(page.includes('id="cp-link-account-input"'));
+    assert.ok(page.includes('id="btn-cp-link-account"'));
+
+    // seleção na tabela: cabeçalho no HTML, caixas geradas pelo controlador
+    assert.ok(page.includes('id="cp-select-all"'));
+    assert.match(module, /data-cp-select/);
+    assert.match(module, /data-cp-link/);
+  });
+
   it('mostra o estado dos modelos da nuvem no topo', () => {
     assert.ok(page.includes('id="cp-cloud-state"'));
     assert.ok(page.includes('id="btn-cp-cloud-push"'));

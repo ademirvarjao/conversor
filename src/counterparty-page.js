@@ -22,6 +22,8 @@ import {
   contactSummary,
   learnFromReconciliation,
   learnManualLink,
+  applyRowAccount,
+  findContactByAccount,
   linkHistory,
   mergeContacts,
   mergeTransactions,
@@ -70,6 +72,7 @@ const state = {
   linkingId: null,
   linkSearch: '',
   learnedCount: 0,
+  selected: new Set(),
   busy: false,
 };
 
@@ -100,6 +103,14 @@ const REQUIRED_IDS = [
   'cp-kpi-value',
   'cp-kpi-review',
   'cp-search',
+  'cp-account-input',
+  'btn-cp-account-apply',
+  'cp-selected-count',
+  'cp-account-hint',
+  'cp-select-all',
+  'cp-link-account-input',
+  'btn-cp-link-account',
+  'cp-link-account-hint',
   'cp-tbody',
   'cp-pagination-info',
   'cp-btn-prev',
@@ -487,6 +498,7 @@ async function runReconciliation() {
     state.search = '';
     state.linkSearch = '';
     state.linkingId = null;
+    state.selected = new Set();
     if (dom['cp-search']) dom['cp-search'].value = '';
     if (dom['cp-link-search']) dom['cp-link-search'].value = '';
     dom['cp-link-panel']?.classList.add('hidden');
@@ -522,9 +534,14 @@ function visibleRows() {
 
   return state.rows.filter((row) => {
     if (!includeUnmatched && !row.contact) return false;
-    if (state.filter === 'matched' && !(row.status === 'matched' || row.status === 'manual')) return false;
+    if (
+      state.filter === 'matched' &&
+      !['matched', 'manual', 'manualAccount'].includes(row.status)
+    ) {
+      return false;
+    }
     if (state.filter === 'review' && row.status !== 'ambiguous') return false;
-    if (state.filter === 'unmatched' && row.contact) return false;
+    if (state.filter === 'unmatched' && (row.contact || row.debitAccount || row.creditAccount)) return false;
     if (!term) return true;
     return normalizeText(`${row.history} ${row.contact?.name || ''} ${row.date}`).includes(term);
   });
@@ -532,6 +549,7 @@ function visibleRows() {
 
 function statusBadge(row) {
   if (row.status === 'manual') return '<span class="cp-badge">manual</span>';
+  if (row.status === 'manualAccount') return '<span class="cp-badge is-manual">conta manual</span>';
   if (row.learnedAlias) return '<span class="cp-badge">memória</span>';
   if (row.status === 'matched') return '<span class="cp-badge">conciliado</span>';
   if (row.status === 'ambiguous') return '<span class="cp-badge is-review">revisar</span>';
@@ -555,6 +573,14 @@ function renderRows() {
       .map(
         (row) => `
         <tr data-cp-row="${row.id}">
+          <td class="col-select">
+            <input
+              type="checkbox"
+              data-cp-select="${row.id}"
+              aria-label="Selecionar o lançamento de ${escapeHtml(row.date || '')}"
+              ${state.selected.has(row.id) ? 'checked' : ''}
+            />
+          </td>
           <td class="col-date">${escapeHtml(row.date || '')}</td>
           <td class="col-account">${escapeHtml(row.debitAccount || '—')}</td>
           <td class="col-account">${escapeHtml(row.creditAccount || '—')}</td>
@@ -581,6 +607,22 @@ function renderRows() {
   }
   if (dom['cp-btn-prev']) dom['cp-btn-prev'].disabled = state.page <= 1;
   if (dom['cp-btn-next']) dom['cp-btn-next'].disabled = state.page >= totalPages;
+
+  renderSelection(pageRows);
+}
+
+/** Mantém o contador de selecionados e o "selecionar todos" coerentes. */
+function renderSelection(pageRows = []) {
+  if (dom['cp-selected-count']) dom['cp-selected-count'].textContent = String(state.selected.size);
+
+  const selectAll = dom['cp-select-all'];
+  if (selectAll) {
+    const pageIds = pageRows.map((row) => row.id);
+    const selectedOnPage = pageIds.filter((id) => state.selected.has(id)).length;
+    selectAll.checked = pageIds.length > 0 && selectedOnPage === pageIds.length;
+    selectAll.indeterminate = selectedOnPage > 0 && selectedOnPage < pageIds.length;
+    selectAll.disabled = pageIds.length === 0;
+  }
 }
 
 function render() {
@@ -675,6 +717,117 @@ function exportCsv() {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                        Conta de contrapartida manual                       */
+/* -------------------------------------------------------------------------- */
+
+function selectedScope() {
+  const checked = document.querySelector('input[name="cp-account-scope"]:checked');
+  return checked?.value || 'selected';
+}
+
+function accountTargets(scope) {
+  if (scope === 'filtered') return visibleRows();
+  if (scope === 'empty') {
+    return visibleRows().filter((row) => !row.debitAccount && !row.creditAccount);
+  }
+  return state.rows.filter((row) => state.selected.has(row.id));
+}
+
+function describeScope(scope, count) {
+  if (scope === 'filtered') return `todos os ${count} filtrado(s)`;
+  if (scope === 'empty') return `os ${count} sem conta`;
+  return `os ${count} selecionado(s)`;
+}
+
+/** Aplica a conta digitada em lote, conforme o escopo escolhido. */
+function applyAccountBatch() {
+  if (state.rows.length === 0) {
+    showToast('Concilie os arquivos antes de informar a conta.', 'warn');
+    return;
+  }
+
+  const account = contactCode(dom['cp-account-input']?.value);
+  if (!account) {
+    showToast('Digite a conta de contrapartida (somente números).', 'warn');
+    dom['cp-account-input']?.focus();
+    return;
+  }
+
+  const scope = selectedScope();
+  const targets = accountTargets(scope);
+  if (targets.length === 0) {
+    showToast(
+      scope === 'selected'
+        ? 'Marque pelo menos um lançamento na tabela (ou escolha outro escopo).'
+        : 'Nenhum lançamento se encaixa nesse escopo.',
+      'warn'
+    );
+    return;
+  }
+
+  let linked = 0;
+  for (const row of targets) {
+    const contact = findContactByAccount(state.contacts, account, row.direction);
+    applyRowAccount(row, account, contact);
+    if (contact) {
+      state.memory.counterparties = learnManualLink(state.memory, {
+        history: row.rawHistory,
+        contact,
+      });
+      linked += 1;
+    }
+  }
+
+  saveAiMemory(state.memory);
+  scheduleCloudPush();
+
+  state.stats = summarizeReconciliation(state.rows);
+  render();
+  if (dom['cp-account-hint']) {
+    dom['cp-account-hint'].textContent = `Conta ${account} aplicada a ${describeScope(scope, targets.length)}${
+      linked ? ` (${linked} vinculado(s) ao cadastro e memorizado(s))` : ' (conta não encontrada no cadastro)'
+    }.`;
+  }
+  showToast(
+    `Conta ${account} aplicada a ${targets.length} lançamento(s)${
+      linked ? ` • ${linked} vinculado(s) ao cadastro` : ''
+    }.`
+  );
+}
+
+/** Aplica a conta digitada em um único lançamento (painel de vínculo). */
+function applyAccountToLinkingRow() {
+  const row = currentLinkingRow();
+  if (!row) return;
+
+  const account = contactCode(dom['cp-link-account-input']?.value);
+  if (!account) {
+    showToast('Digite a conta de contrapartida deste lançamento.', 'warn');
+    dom['cp-link-account-input']?.focus();
+    return;
+  }
+
+  const contact = findContactByAccount(state.contacts, account, row.direction);
+  applyRowAccount(row, account, contact);
+
+  if (contact) {
+    state.memory.counterparties = learnManualLink(state.memory, { history: row.rawHistory, contact });
+    saveAiMemory(state.memory);
+    scheduleCloudPush();
+  }
+
+  state.stats = summarizeReconciliation(state.rows);
+  state.linkingId = null;
+  dom['cp-link-panel']?.classList.add('hidden');
+  render();
+  showToast(
+    contact
+      ? `Conta ${account} aplicada e histórico memorizado para ${contact.name}.`
+      : `Conta ${account} aplicada ao lançamento (fora do cadastro).`
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                             Correção de vínculo                            */
 /* -------------------------------------------------------------------------- */
 
@@ -740,6 +893,13 @@ function openLinkPanel(rowId) {
   state.linkSearch = '';
   if (dom['cp-link-search']) dom['cp-link-search'].value = '';
   if (dom['cp-link-history']) dom['cp-link-history'].textContent = row.rawHistory;
+  if (dom['cp-link-account-input']) {
+    dom['cp-link-account-input'].value = row.debitAccount || row.creditAccount || '';
+  }
+  if (dom['cp-link-account-hint']) {
+    const natureza = row.direction === DIRECTION.PAYMENT ? 'débito (fornecedor credora)' : 'crédito (cliente devedora)';
+    dom['cp-link-account-hint'].textContent = `Este lançamento usa a coluna ${natureza}.`;
+  }
   panel.classList.remove('hidden');
   renderCandidates();
   dom['cp-link-search']?.focus();
@@ -845,6 +1005,40 @@ function bindEvents() {
     const button = event.target.closest('[data-cp-link]');
     if (!button) return;
     openLinkPanel(Number(button.dataset.cpLink));
+  });
+
+  dom['cp-tbody']?.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('[data-cp-select]');
+    if (!checkbox) return;
+    const id = Number(checkbox.dataset.cpSelect);
+    if (checkbox.checked) state.selected.add(id);
+    else state.selected.delete(id);
+    renderSelection();
+  });
+
+  dom['cp-select-all']?.addEventListener('change', (event) => {
+    const pageRows = visibleRows().slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE);
+    for (const row of pageRows) {
+      if (event.target.checked) state.selected.add(row.id);
+      else state.selected.delete(row.id);
+    }
+    renderRows();
+  });
+
+  dom['btn-cp-account-apply']?.addEventListener('click', applyAccountBatch);
+  dom['cp-account-input']?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyAccountBatch();
+    }
+  });
+
+  dom['btn-cp-link-account']?.addEventListener('click', applyAccountToLinkingRow);
+  dom['cp-link-account-input']?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyAccountToLinkingRow();
+    }
   });
 
   dom['btn-cp-link-close']?.addEventListener('click', () => {
