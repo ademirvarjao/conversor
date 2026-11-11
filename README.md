@@ -51,6 +51,7 @@ Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**
 - **Só os modelos sobem.** Vão para o banco apenas `tokenWeights`, `learnedProfiles`, `learningLog` e `stats`. Arquivos, lançamentos financeiros e a chave do conector LLM **nunca** saem do navegador.
 - **Chave de acesso de 8 caracteres** (`ABCD-EFGH`), em alfabeto de 32 símbolos sem `0`, `O`, `1` e `I` — fácil de ditar, copiar ou guardar num cartão. A chave é a identidade: em outra máquina, basta digitá-la para recuperar os modelos.
 - **A chave fica sempre à vista na barra superior**: um clique copia, e o botão avisa que ela é necessária para abrir os modelos em outro computador (o `?` ao lado explica; sem chave, o mesmo botão a cria e já copia).
+- **Entrar em outro computador direto pelo topo**: cole a chave no campo `Colar chave de outro PC` e confirme com `Usar` (ou `Enter`) — os modelos descem na hora.
 - **Cifrado no navegador.** A chave passa por PBKDF2-SHA256 com 310.000 iterações e gera duas coisas: um `slot` opaco (HMAC) que identifica a linha no banco e uma chave AES-GCM-256 que cifra o conteúdo. Nem quem tem a chave anônima do projeto lê ou correlaciona usuários.
 - **Envio automático** depois de cada treinamento, mais botões de **Enviar modelos** e **Baixar modelos**.
 - **O LLM continua local:** ao baixar, a chave do conector já configurada nesta máquina é preservada.

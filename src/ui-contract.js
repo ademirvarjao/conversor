@@ -6,14 +6,13 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.7.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
   'file-input',
   'files-list',
   'btn-clear-files',
-  'btn-demo',
   'btn-ai-memory',
   'ai-profiles-badge',
   'ai-trainer-section',
@@ -73,6 +72,8 @@ export const REQUIRED_ELEMENT_IDS = [
   'cloud-key-code',
   'cloud-key-caption',
   'btn-cloud-key-info',
+  'cloud-key-top-input',
+  'btn-cloud-key-use',
   'cloud-identity-empty',
   'cloud-identity-active',
   'cloud-code-display',

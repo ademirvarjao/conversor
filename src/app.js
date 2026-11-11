@@ -1497,6 +1497,63 @@ async function copyText(text) {
   return false;
 }
 
+/**
+ * Adota uma chave já existente (digitada/colada em qualquer lugar do app) e
+ * tenta trazer os modelos da nuvem. Usada pelo campo do topo e pela aba Nuvem.
+ */
+async function useAccessCode(rawCode) {
+  const code = normalizeAccessCode(rawCode);
+  if (!code) {
+    showToast('Chave inválida: use os 8 caracteres no formato ABCD-EFGH.', 'warn');
+    return false;
+  }
+
+  let adopted = false;
+  await withCloudBusy(async () => {
+    try {
+      const identity = await restoreIdentityFromCode(code);
+      saveIdentity(identity);
+      cloud.identity = identity;
+      renderCloudPanel();
+      adopted = true;
+
+      if (!cloud.config) {
+        showToast(
+          `Chave ${formatAccessCode(code)} aceita e guardada neste navegador. Falta configurar o banco para baixar seus modelos.`,
+          'warn'
+        );
+        return;
+      }
+
+      showToast(`Chave aceita: ${formatAccessCode(code)}. Baixando seus modelos…`);
+      const pulled = await pullNow({ silent: true });
+
+      if (pulled === null) {
+        setCloudStatus(
+          `Chave ${formatAccessCode(code)} guardada neste dispositivo, mas a nuvem ainda não tem modelos para ela. ` +
+            'Se você já usava essa chave em outra máquina, confira se digitou certo — uma chave diferente abre um cofre novo.',
+          'warn'
+        );
+        showToast(
+          'Chave guardada. Nenhum modelo encontrado para ela na nuvem — confira se digitou certo.',
+          'warn'
+        );
+      } else if (pulled === false) {
+        // A chave pode estar certa mas o banco inacessível: mantém a chave.
+        showToast('Chave guardada, mas não consegui baixar os modelos agora. Tente “Baixar modelos”.', 'warn');
+      }
+    } catch (error) {
+      clearIdentity();
+      cloud.identity = null;
+      renderCloudPanel();
+      setCloudStatus(`Não foi possível usar esta chave: ${error.message}`, 'error');
+      showToast(`Não foi possível usar esta chave: ${error.message}`, 'error');
+    }
+  });
+
+  return adopted;
+}
+
 /** Cria a chave deste dispositivo, copia e já publica os modelos locais. */
 async function createAccessIdentity() {
   try {
@@ -1608,40 +1665,38 @@ function bindCloudEvents() {
   });
 
   dom['btn-cloud-recover']?.addEventListener('click', async () => {
-    const typed = dom['cloud-code-input']?.value || '';
-    const code = normalizeAccessCode(typed);
-    if (!code) {
-      showToast('Chave inválida: use os 8 caracteres no formato ABCD-EFGH.', 'warn');
+    const ok = await useAccessCode(dom['cloud-code-input']?.value || '');
+    if (ok && dom['cloud-code-input']) dom['cloud-code-input'].value = '';
+  });
+
+  // Campo do topo: colar a chave de outro computador e entrar.
+  const submitTopKey = async () => {
+    const input = dom['cloud-key-top-input'];
+    const raw = input?.value || '';
+    if (!raw.trim()) {
+      input?.focus();
+      showToast('Cole a chave de 8 caracteres que aparece no outro computador.', 'warn');
       return;
     }
+    const ok = await useAccessCode(raw);
+    if (ok && input) {
+      input.value = '';
+      input.blur();
+    }
+  };
 
-    await withCloudBusy(async () => {
-      try {
-        const identity = await restoreIdentityFromCode(code);
-        saveIdentity(identity);
-        cloud.identity = identity;
-        if (dom['cloud-code-input']) dom['cloud-code-input'].value = '';
-        renderCloudPanel();
-        showToast(`Chave aceita: ${formatAccessCode(code)}. Baixando seus modelos…`);
-        const pulled = await pullNow({ silent: true });
-        if (pulled === null) {
-          setCloudStatus(
-            `Chave ${formatAccessCode(code)} criada neste dispositivo, mas a nuvem ainda não tem modelos para ela. ` +
-              'Se você já usava essa chave em outra máquina, confira se digitou certo — uma chave diferente abre um cofre novo.',
-            'warn'
-          );
-        } else if (pulled === false) {
-          cloud.identity = null;
-          clearIdentity();
-          renderCloudPanel();
-        }
-      } catch (error) {
-        clearIdentity();
-        cloud.identity = null;
-        renderCloudPanel();
-        setCloudStatus(`Não foi possível usar esta chave: ${error.message}`, 'error');
-      }
-    });
+  dom['btn-cloud-key-use']?.addEventListener('click', submitTopKey);
+  dom['cloud-key-top-input']?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitTopKey();
+    }
+  });
+  // Ao sair do campo, mostra a chave no formato ABCD-EFGH se ela for válida.
+  dom['cloud-key-top-input']?.addEventListener('blur', () => {
+    const input = dom['cloud-key-top-input'];
+    const code = normalizeAccessCode(input?.value || '');
+    if (input && code) input.value = formatAccessCode(code);
   });
 
   dom['btn-cloud-copy']?.addEventListener('click', async () => {
@@ -1709,108 +1764,6 @@ function bindGlobalEvents() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                Modo demonstração                           */
-/* -------------------------------------------------------------------------- */
-
-function runDemo() {
-  if (
-    state.files.length > 0 &&
-    !window.confirm('Isto substitui os arquivos atuais pelos exemplos. Continuar?')
-  ) {
-    return;
-  }
-
-  state.files = [];
-  state.selectedFileId = null;
-
-  const demoPayments = {
-    fileName: 'Exemplo_Pagamentos_Itau_Layout_Novo.xlsx',
-    fileType: 'xlsx',
-    sheetName: 'Pagamentos',
-    availableSheets: [{ name: 'Pagamentos', rowCount: 3 }],
-    headers: [
-      'DATA PAGAMENTO',
-      'TÍTULO',
-      'TIPO',
-      'FORNECEDOR',
-      'VALOR PAGO',
-      'LOCAL | CENTRO DE CUSTO | NATUREZA',
-      'OBSERVAÇÃO OBRA',
-    ],
-    rows: [
-      [
-        '02/09/2026',
-        '02092026',
-        'FOLHA DE PAGAMENTO',
-        'SILVESTRE ABELARDO ENGENHARIA',
-        '-R$ 2.000,00',
-        '154 - E801-T-ADAPTOGEN-SP-2026 | 04.02 | 2.14.017 - PRESTADOR DE SERVIÇO',
-        'Aprovado Eng.',
-      ],
-      [
-        '04/09/2026',
-        '814-1',
-        'RECIBOS',
-        'HORTIFRUTI INHANGA LTDA',
-        '-R$ 532,00',
-        '1001.004 - ADMINISTRATIVO | 04.01 | 2.07.019 - OUTRAS DESPESAS',
-        'Copa Matriz',
-      ],
-      [
-        '09/09/2026',
-        'REN_LINEAR-2',
-        'RENEGOCIAÇÃO',
-        'LINEAR SERVIÇOS AR CONDICIONADO',
-        '-R$ 29.250,00',
-        '137 - E462-O-OCEANERRING-RJ-2025 | 02.01 | 2.02.002 - AR CONDICIONADO',
-        'Parcela 2',
-      ],
-    ],
-    bannerLines: ['ATLAS SOLUÇÕES EM CONSTRUÇÕES LTDA'],
-    skippedRows: 0,
-  };
-
-  const demoReceipts = {
-    fileName: 'Exemplo_Recebimentos_Layout_Banco.xlsx',
-    fileType: 'xlsx',
-    sheetName: 'Extrato',
-    availableSheets: [{ name: 'Extrato', rowCount: 3 }],
-    headers: ['Dt. Mov.', 'Doc.', 'Histórico Banco', 'Entrada (+)', 'Saída (-)', 'Saldo Dia'],
-    rows: [
-      ['02/09/2026', 'TRF-93593', 'TRANSFERENCIA ATLAS SOLUCOES', '8.002,12', '', '8.002,12'],
-      [
-        '08/09/2026',
-        '182-1',
-        'CORINTOS LOGISTICA COMERCIO EXTERIOR | CLIENTES',
-        '89.628,03',
-        '',
-        '97.630,15',
-      ],
-      ['10/09/2026', 'TAR-001', 'TARIFA MANUTENCAO CONTA', '', '45,90', '97.584,25'],
-    ],
-    bannerLines: ['Extrato Bancário Modelo Variável'],
-    skippedRows: 0,
-  };
-
-  for (const parsedFile of [demoPayments, demoReceipts]) {
-    state.files.push({
-      id: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      parsedFile,
-      analysis: analyzeFileLayout(parsedFile, state.memory),
-      result: { records: [], skipped: [] },
-      meta: { size: 0, uploadedAt: new Date().toISOString() },
-    });
-  }
-
-  rebuildUnifiedOutput();
-  openTrainerForFile(state.files[1].id);
-  showToast(
-    'Exemplo carregado: veja como a IA separou Entrada/Saída e ignorou a coluna Saldo Dia.',
-    'warn'
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 /*                                   Init                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -1828,7 +1781,6 @@ function init() {
   bindCloudEvents();
   bindGlobalEvents();
 
-  dom['btn-demo']?.addEventListener('click', runDemo);
 
   // Mantém filtros e controles acessíveis em estados iniciais coerentes.
   document.querySelectorAll('.pill[data-filter]').forEach((button) => {
