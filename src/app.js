@@ -16,6 +16,17 @@ import { formatLocalDateTime, formatValueGroupedBr, formatValuePlainBr, sumValue
 import { summarizeRecords } from './summary.js';
 import { applyRowEdits, recordKey, setHistoryOverride } from './row-edits.js';
 import { exportToPdf, exportToXlsx } from './exporters.js';
+import {
+  applyCoachFixes,
+  buildCoachReport,
+  coachChecksHtml,
+  coachDivergencesHtml,
+  coachFixesHtml,
+  coachScore,
+  coachSummaryHtml,
+  formatCoachReport,
+} from './training-coach.js';
+import { describeExportScope, resolveExportRows } from './export-scope.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
   applyVaultPayload,
@@ -81,6 +92,8 @@ const state = {
   removedCount: 0,
   exportOnlyFiltered: false,
   processing: false,
+  /** Relatório do treinador automático do arquivo aberto no painel de treino. */
+  coachReport: null,
 };
 
 /**
@@ -237,6 +250,9 @@ function rebuildUnifiedOutput({ resetPage = true } = {}) {
   for (const file of state.files) {
     const result = transformRowsWithConfig(file.parsedFile, file.analysis);
     file.result = result;
+    // Treinador automático: o mesmo diagnóstico que um analista faria à mão —
+    // inclui a conferência do saldo linha a linha. Aproveita o transform acima.
+    file.coach = buildCoachReport(file.parsedFile, file.analysis, result);
     allRecords.push(...result.records);
     skippedCount += result.skipped.length;
   }
@@ -285,8 +301,37 @@ function applyFilters({ resetPage = false } = {}) {
   if (resetPage) state.currentPage = 1;
 }
 
+/**
+ * Linhas que vão para o arquivo exportado:
+ *  - com seleção marcada → só os selecionados (a seleção ganha do filtro);
+ *  - sem seleção → o resultado filtrado (se a opção estiver ligada) ou tudo.
+ */
+function exportScope() {
+  return resolveExportRows({
+    allRows: state.unifiedRows,
+    filteredRows: state.filteredRows,
+    selected: state.selected,
+    onlyFiltered: state.exportOnlyFiltered,
+    keyOf: recordKey,
+  });
+}
+
 function visibleExportRows() {
-  return state.exportOnlyFiltered ? state.filteredRows : state.unifiedRows;
+  return exportScope().rows;
+}
+
+/** Dica ao lado dos botões de exportação: quantos e quais lançamentos vão sair. */
+function renderExportScopeHint() {
+  const hint = dom['export-scope-hint'];
+  if (!hint) return;
+  const { rows, scope } = exportScope();
+  hint.textContent = describeExportScope({
+    scope,
+    count: rows.length,
+    selectedCount: rows.length,
+    totalCount: state.unifiedRows.length,
+  });
+  hint.classList.toggle('has-selection', scope === 'selection');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -378,6 +423,7 @@ function renderFilesList() {
         <span aria-hidden="true">•</span>
         <span style="color:${subtotalColor}; font-weight:700;">${formatValuePlainBr(subtotal)}</span>
         ${warningChip}
+        ${coachChipHtml(file.coach)}
       </div>
       <div class="file-card-actions">
         ${
@@ -446,6 +492,7 @@ function openTrainerForFile(fileId) {
 
   if (!file || !section) {
     section?.classList.add('hidden');
+    renderCoachPanel(null);
     return;
   }
 
@@ -470,6 +517,7 @@ function openTrainerForFile(fileId) {
   dom['rule-replace-to'].value = file.analysis.rules.customReplaceTo || '';
 
   renderMappingRows(file);
+  renderCoachPanel(file);
   renderFilesList();
 }
 
@@ -552,6 +600,76 @@ function renderMappingRows(file) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                        Treinador automático (painel)                       */
+/* -------------------------------------------------------------------------- */
+
+/** Selo do diagnóstico no cartão do arquivo (sem abrir o painel). */
+function coachChipHtml(coach) {
+  if (!coach) return '';
+  const { tone, icon, label, title } = coachScore(coach);
+  return `<span class="coach-chip coach-chip-${escapeHtml(tone)}" title="${escapeHtml(
+    title
+  )}">${icon} ${escapeHtml(label)}</span>`;
+}
+
+/** Desenha o relatório do treinador automático do arquivo em edição. */
+function renderCoachPanel(file) {
+  const panel = dom['coach-panel'];
+  if (!panel) return;
+
+  if (!file) {
+    panel.classList.add('hidden');
+    state.coachReport = null;
+    return;
+  }
+
+  const report = file.coach || buildCoachReport(file.parsedFile, file.analysis, file.result);
+  file.coach = report;
+  state.coachReport = report;
+
+  panel.classList.remove('hidden');
+
+  const score = coachScore(report);
+  if (dom['coach-score']) {
+    dom['coach-score'].className = `coach-score score-${score.tone}`;
+    dom['coach-score'].textContent = score.scoreLabel;
+  }
+
+  if (dom['coach-summary']) dom['coach-summary'].innerHTML = coachSummaryHtml(report);
+  if (dom['coach-checks']) dom['coach-checks'].innerHTML = coachChecksHtml(report);
+
+  const fixesHtml = coachFixesHtml(report);
+  if (dom['coach-fixes']) {
+    dom['coach-fixes'].classList.toggle('hidden', !fixesHtml);
+    dom['coach-fixes'].innerHTML = fixesHtml;
+  }
+
+  const divergencesHtml = coachDivergencesHtml(report);
+  if (dom['coach-divergences']) {
+    dom['coach-divergences'].classList.toggle('hidden', !divergencesHtml);
+    dom['coach-divergences'].innerHTML = divergencesHtml;
+  }
+
+  const applyButton = dom['btn-coach-apply'];
+  if (applyButton) {
+    const pending = report.fixes.length;
+    applyButton.disabled = pending === 0;
+    applyButton.textContent = pending
+      ? `Aplicar ${pending} correção(ões) e treinar`
+      : 'Nenhuma correção pendente';
+  }
+}
+
+/** Recalcula o diagnóstico do arquivo aberto no painel. */
+function reanalyzeFileWithCoach(file) {
+  if (!file) return null;
+  file.result = transformRowsWithConfig(file.parsedFile, file.analysis);
+  file.coach = buildCoachReport(file.parsedFile, file.analysis, file.result);
+  renderCoachPanel(file);
+  return file.coach;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                          Resultado e paginação                             */
 /* -------------------------------------------------------------------------- */
 
@@ -599,6 +717,8 @@ function renderPreviewSelection() {
     clear.disabled = total === 0;
     clear.textContent = total ? `Limpar seleção (${total})` : 'Limpar seleção';
   }
+
+  renderExportScopeHint();
 }
 
 /** Exclui da planilha os lançamentos marcados (dá para restaurar depois). */
@@ -883,7 +1003,22 @@ async function processUploadedFiles(fileList) {
 
     if (firstNeedingReview) {
       openTrainerForFile(firstNeedingReview);
-      showToast('Novo layout ou alteração detectada. Confira o painel da IA.', 'warn');
+      // O treinador automático já rodou no rebuild: o aviso diz o que ele viu.
+      const report = findFile(firstNeedingReview)?.coach;
+      const resumo = !report
+        ? ''
+        : report.score.fail > 0
+          ? ` ${report.score.fail} conferência(s) falharam${
+              report.balance?.divergences?.length
+                ? ` (${report.balance.divergences.length} linha(s) fora do saldo)`
+                : ''
+            }.`
+          : ` ${report.score.ok}/${report.score.total} conferências ✓${
+              report.balance?.available && report.balance.checked > 0
+                ? `, saldo conferido ${report.balance.matched}/${report.balance.checked}`
+                : ''
+            }.`;
+      showToast(`Novo layout ou alteração detectada. Confira o painel da IA.${resumo}`, 'warn');
     } else if (added > 0 && !state.selectedFileId) {
       openTrainerForFile(state.files[0].id);
     }
@@ -1207,9 +1342,89 @@ function bindTrainerEvents() {
     if (saved) scheduleCloudPush();
   });
 
+  dom['btn-coach-analyze']?.addEventListener('click', () => {
+    const file = findFile(state.selectedFileId);
+    if (!file) return;
+    const report = reanalyzeFileWithCoach(file);
+    renderFilesList();
+    showToast(
+      report
+        ? `Diagnóstico atualizado: ${report.counts.records} lançamento(s), ${report.score.ok}/${report.score.total} conferências ✓.`
+        : 'Nada para analisar.',
+      'success'
+    );
+  });
+
+  dom['btn-coach-apply']?.addEventListener('click', () => {
+    const file = findFile(state.selectedFileId);
+    if (!file) return;
+    const fixes = file.coach?.fixes || [];
+    if (fixes.length === 0) {
+      showToast('O treinador não encontrou correções pendentes neste arquivo.', 'warn');
+      return;
+    }
+
+    // Aplica as correções num clone e treina em cima do resultado.
+    file.analysis = applyCoachFixes(file.analysis, fixes);
+    const name =
+      cleanWhitespace(dom['layout-name-input'].value) ||
+      file.analysis.matchedProfileName ||
+      suggestLayoutName(file.parsedFile);
+    if (dom['layout-name-input']) dom['layout-name-input'].value = name;
+
+    state.memory = trainAiWithLayout(file.parsedFile, file.analysis, name, state.memory);
+    updateAiBadge();
+    rebuildUnifiedOutput();
+    openTrainerForFile(file.id);
+
+    const saved = saveAiMemory(state.memory);
+    showToast(
+      saved
+        ? `${fixes.length} correção(ões) aplicada(s) e layout “${name}” memorizado.`
+        : 'Correções aplicadas, mas o navegador bloqueou o salvamento da memória.',
+      saved ? 'success' : 'warn'
+    );
+    if (saved) scheduleCloudPush();
+  });
+
+  dom['btn-coach-copy']?.addEventListener('click', async () => {
+    const file = findFile(state.selectedFileId);
+    const report = file?.coach;
+    if (!report) return;
+
+    const text = formatCoachReport(report);
+    const done = () => showToast('Diagnóstico copiado — dá para colar num e-mail ou mandar para o contador.');
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        done();
+        return;
+      }
+    } catch {
+      /* segue para o plano B */
+    }
+
+    try {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', 'readonly');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      area.remove();
+      if (ok) done();
+      else showToast('Não foi possível copiar automaticamente — selecione o texto do painel.', 'warn');
+    } catch (error) {
+      showToast(`Não foi possível copiar: ${error.message}`, 'error');
+    }
+  });
+
   dom['btn-close-trainer']?.addEventListener('click', () => {
     dom['ai-trainer-section'].classList.add('hidden');
     state.selectedFileId = null;
+    renderCoachPanel(null);
     renderFilesList();
   });
 
@@ -1365,6 +1580,7 @@ function bindOutputEvents() {
 
   dom['export-only-filtered']?.addEventListener('change', (event) => {
     state.exportOnlyFiltered = event.target.checked;
+    renderExportScopeHint();
   });
 
   dom['btn-export-xlsx']?.addEventListener('click', async () => {
@@ -1395,7 +1611,7 @@ function bindOutputEvents() {
   });
 
   dom['btn-export-pdf']?.addEventListener('click', () => {
-    const rows = visibleExportRows();
+    const { rows, scope } = exportScope();
     if (rows.length === 0) {
       showToast('Não há lançamentos para exportar.', 'warn');
       return;
@@ -1403,9 +1619,9 @@ function bindOutputEvents() {
 
     try {
       const stamp = new Date().toISOString().slice(0, 10);
-      const summary = state.exportOnlyFiltered
-        ? summarizeRecords(rows, { skippedCount: state.summary.skippedCount })
-        : state.summary;
+      // Os totalizadores do PDF precisam falar do que está sendo exportado.
+      const summary =
+        scope === 'all' ? state.summary : summarizeRecords(rows, { skippedCount: state.summary.skippedCount });
       exportToPdf(rows, summary, `Conciliacao_${stamp}.pdf`);
       showToast(`${rows.length} lançamento(s) exportado(s) em .pdf.`);
     } catch (error) {

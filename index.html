@@ -207,8 +207,40 @@
         </div>
       </div>
 
+      <div id="coach-panel" class="coach-panel hidden" aria-live="polite">
+        <div class="coach-head">
+          <div>
+            <h3>Treinador automático</h3>
+            <p class="coach-sub">
+              A mesma análise que um especialista faria à mão: confere colunas, sinais, datas,
+              descartes e <strong>fecha o saldo linha a linha</strong> antes de memorizar o layout.
+            </p>
+          </div>
+          <span id="coach-score" class="coach-score"></span>
+        </div>
+
+        <div id="coach-summary" class="coach-summary"></div>
+
+        <ul id="coach-checks" class="coach-checks" aria-label="Conferências do treinador automático"></ul>
+
+        <div id="coach-fixes" class="coach-fixes hidden"></div>
+        <div id="coach-divergences" class="coach-divergences hidden"></div>
+
+        <div class="coach-actions">
+          <button id="btn-coach-apply" class="btn btn-primary" type="button">
+            Aplicar correções e treinar
+          </button>
+          <button id="btn-coach-analyze" class="btn btn-sm btn-secondary" type="button">
+            Reanalisar arquivo
+          </button>
+          <button id="btn-coach-copy" class="btn btn-sm btn-ghost-dark" type="button">
+            Copiar diagnóstico
+          </button>
+        </div>
+      </div>
+
       <div class="trainer-footer">
-        <p class="trainer-tip">Ao confirmar, a IA atualiza os pesos semânticos das colunas e memoriza este perfil para reconhecer automaticamente variações futuras.</p>
+        <p class="trainer-tip">Ao confirmar, a IA atualiza os pesos semânticos das colunas e memoriza este perfil para reconhecer automaticamente variações futuras. O <strong>treinador automático</strong> acima já conferiu colunas, sinais, datas e o saldo linha a linha.</p>
         <button id="btn-train-apply" class="btn btn-primary" type="button">
           Treinar IA e Aplicar Layout
         </button>
@@ -229,6 +261,7 @@
           <button id="btn-export-pdf" class="btn btn-navy" type="button">
             Exportar .pdf
           </button>
+          <p id="export-scope-hint" class="export-scope-hint">Nada selecionado: exporta todos os lançamentos.</p>
         </div>
       </div>
 
@@ -332,7 +365,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.14.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.15.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
