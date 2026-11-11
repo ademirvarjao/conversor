@@ -12,6 +12,7 @@
  * (opcional) e todas as funções são testáveis em Node.
  */
 
+import { emptyCounterparties, sanitizeCounterparties } from './counterparty.js';
 import {
   cleanWhitespace,
   normalizeText,
@@ -252,6 +253,9 @@ function createDefaultMemory() {
       apiKey: '',
       model: '',
     },
+    // Conciliação de clientes/fornecedores (PDF Questor): apelidos de histórico
+    // já ligados a um contato, pesos por contato e a última vez que foi usada.
+    counterparties: emptyCounterparties(),
   };
 }
 
@@ -454,6 +458,7 @@ export function normalizeMemory(rawMemory) {
       apiKey: typeof llm.apiKey === 'string' ? llm.apiKey : '',
       model: typeof llm.model === 'string' ? llm.model : '',
     },
+    counterparties: sanitizeCounterparties(rawMemory.counterparties),
   };
 }
 
