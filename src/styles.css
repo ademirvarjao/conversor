@@ -853,6 +853,20 @@ body {
   letter-spacing: 0.12em;
 }
 
+.cloud-account-tag {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e7f3ec;
+  border: 1px solid #bfe0cd;
+  color: #1d6b43;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
 /* Aviso de tabela ausente: só aparece quando o banco responde mas a migração
    do repositório ainda não rodou no projeto. */
 .cloud-setup-hint {

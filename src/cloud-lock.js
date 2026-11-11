@@ -22,11 +22,11 @@ export const CLOUD_LOCK = {
   /** Login do administrador (não é segredo, só evita confusão de usuário). */
   user: 'gogita',
   /** Salt aleatório de 16 bytes (base64). */
-  salt: '4ag/bA9/+ic1f+OBaI0FXw==',
+  salt: 'coEZufz0YtmRiCuD+smglw==',
   /** Iterações do PBKDF2-SHA256. */
   iterations: 210000,
   /** Hash de 32 bytes (base64) da senha. */
-  hash: 'Yti3LTJZbtC1Yr5UBQUUVXYMJIbY2z0UkCDf/2du8NE=',
+  hash: 'Vpbu6pVAvSvjqiSjEHfuJ3kf8uJMCUyMivr2JOOeFn8=',
 };
 
 /** Onde guardamos o desbloqueio (por aba do navegador). */

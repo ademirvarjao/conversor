@@ -90,15 +90,36 @@ fica atrás de **login e senha** ([`src/cloud-lock.js`](src/cloud-lock.js)):
   o envio automático, para ninguém usar a nuvem por essa página.
 
 > **Alcance real:** o Conversor é um site estático, então a trava é um **deterrente local** (protege
-> contra quem usa o computador/navegador, não contra alguém que altere o JavaScript ou chame a API do
-> Supabase diretamente). O sigilo dos modelos continua garantido pela criptografia: o banco guarda
-> apenas texto cifrado com a chave de acesso. Para barreira de servidor de verdade, o caminho é
-> Supabase Auth + RLS por usuário.
+> contra quem usa o computador/navegador, não contra alguém que altere o JavaScript). A barreira de
+> **servidor** é a conta na nuvem (Supabase Auth + RLS), descrita abaixo.
+
+#### Conta na nuvem — Supabase Auth + RLS (v1.12.0)
+A chave de acesso protege o **conteúdo**; a conta protege o **acesso**. Com uma conta do
+Supabase Auth ([`src/cloud-auth.js`](src/cloud-auth.js)), cada consulta ao banco vai com o
+`Authorization: Bearer <token do usuário>` e o **Row Level Security** passa a valer por dono:
+
+- a conta vê e grava **apenas os cofres dela** (`owner_id = auth.uid()`);
+- cofre com dono **não** pode ser lido, sobrescrito ou apagado por quem não é o dono — nem
+  com a chave pública do projeto, nem sabendo o `slot`;
+- linhas antigas (sem dono) continuam funcionando e são **adotadas** no primeiro envio autenticado;
+- a coluna nasce com `default auth.uid()`, então o app não escolhe o dono: quem escolhe é o token;
+- sem conta, o app segue exatamente como antes (chave anônima, cofres sem dono).
+
+Na interface (**Memória da IA → Nuvem → Conta na nuvem**) há **Entrar**, **Criar conta** e
+**Sair da conta**. A senha da conta não é guardada em nenhum lugar: o que fica no
+`localStorage` são só os tokens da sessão, renovados automaticamente antes de vencer
+(`expires_in` + refresh token). Se o projeto estiver com *Confirm email* ligado, o app avisa que
+é preciso confirmar o e-mail antes do primeiro login.
+
+A migração que liga isso é
+[`supabase/migrations/20261111160000_conversor_models_owner.sql`](supabase/migrations/20261111160000_conversor_models_owner.sql)
+(aplicada pela integração Supabase + GitHub, como as demais). Para trocar a senha da conta use
+**Sair da conta** e o painel do Supabase (**Authentication → Users**), onde também dá para
+desligar o cadastro público se você for o único usuário.
 
 #### Banco de dados (sem passo manual)
 O banco é **do repositório**: o schema mora em
-[`supabase/migrations/20261111120000_conversor_models.sql`](supabase/migrations/20261111120000_conversor_models.sql)
-e a integração **Supabase + GitHub** aplica a migração sozinha a cada push na `main` —
+[`supabase/migrations/`](supabase/migrations/) (tabela + cofre por dono) e a integração **Supabase + GitHub** aplica a migração sozinha a cada push na `main` —
 não é preciso abrir o SQL Editor. A migração é idempotente (`create table if not exists`,
 `drop policy if exists`), então pode rodar quantas vezes for preciso.
 

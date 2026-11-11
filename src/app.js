@@ -33,6 +33,7 @@ import {
 import { normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
+import { describeSession, loadSession, signIn, signOut, signUp } from './cloud-auth.js';
 import {
   CLOUD_LOCK,
   LOCKOUT_MS,
@@ -99,6 +100,8 @@ const cloud = {
   ping: null,
   /** Trava da aba: só o administrador cria/entra com chave, envia e baixa modelos. */
   locked: !loadUnlock(),
+  /** Conta na nuvem (Supabase Auth): dona dos cofres criados a partir daqui. */
+  session: loadSession(),
   attempts: 0,
   cooldownUntil: 0,
 };
@@ -1783,12 +1786,95 @@ function lockCloudPanel() {
   showToast('Nuvem bloqueada neste navegador.', 'warn');
 }
 
+/* -------------------------------------------------------------------------- */
+/*                        Conta na nuvem (Supabase Auth)                      */
+/* -------------------------------------------------------------------------- */
+
+function renderCloudAccount() {
+  const sessao = cloud.session;
+  const signedIn = Boolean(sessao?.accessToken);
+
+  dom['cloud-account-signed-out']?.classList.toggle('hidden', signedIn);
+  dom['cloud-account-signed-in']?.classList.toggle('hidden', !signedIn);
+
+  const state = dom['cloud-account-state'];
+  if (state) {
+    state.textContent = signedIn
+      ? `${describeSession(sessao)}. Os cofres enviados agora pertencem a esta conta — só ela os vê.`
+      : 'Sem conta: o banco só protege o conteúdo pela chave de acesso. Entre para que os cofres fiquem presos à sua conta (RLS).';
+  }
+
+  for (const id of ['btn-cloud-signin', 'btn-cloud-signup', 'btn-cloud-signout']) {
+    if (dom[id]) dom[id].disabled = cloud.busy;
+  }
+  for (const id of ['cloud-account-email', 'cloud-account-password']) {
+    if (dom[id]) dom[id].disabled = cloud.busy || signedIn;
+  }
+}
+
+/** Tenta reivindicar o cofre da chave atual para a conta que acabou de entrar. */
+async function adoptVaultAfterSignIn() {
+  if (!cloud.config || !cloud.identity) return;
+  const result = await pushNow({ silent: true });
+  if (result) {
+    showToast('Modelos sincronizados: o cofre agora pertence a esta conta.', 'success');
+  }
+}
+
+async function submitCloudAccount(action) {
+  if (cloud.busy) return;
+  if (!cloud.config) {
+    showToast('Configure o banco compartilhado primeiro.', 'warn');
+    return;
+  }
+
+  const email = dom['cloud-account-email']?.value || '';
+  const password = dom['cloud-account-password']?.value || '';
+
+  await withCloudBusy(async () => {
+    try {
+      if (action === 'signup') {
+        const result = await signUp(cloud.config, email, password);
+        if (dom['cloud-account-password']) dom['cloud-account-password'].value = '';
+        if (result.needsConfirmation) {
+          showToast(
+            `Conta criada para ${result.email}. Confirme o e-mail que o Supabase enviou e depois clique em Entrar.`,
+            'warn',
+            { duration: 9000 }
+          );
+          return;
+        }
+        cloud.session = result.session;
+        showToast('Conta criada e conectada.', 'success');
+      } else {
+        cloud.session = await signIn(cloud.config, email, password);
+        if (dom['cloud-account-password']) dom['cloud-account-password'].value = '';
+        showToast(`Conta conectada: ${describeSession(cloud.session)}.`, 'success');
+      }
+      await adoptVaultAfterSignIn();
+    } catch (error) {
+      showToast(error?.message || 'Não foi possível entrar na conta.', 'error', { duration: 8000 });
+    }
+  });
+}
+
+async function leaveCloudAccount() {
+  if (cloud.busy) return;
+  await withCloudBusy(async () => {
+    await signOut(cloud.config, cloud.session);
+    cloud.session = null;
+    showToast('Saiu da conta. A chave de acesso continua valendo neste navegador.', 'warn');
+  });
+}
+
 function renderCloudPanel() {
   const unlocked = applyCloudLock();
   if (!unlocked) {
     renderTopKey();
     return;
   }
+
+  renderCloudAccount();
 
   const hasConfig = !!cloud.config;
   const identity = cloud.identity;
@@ -2231,6 +2317,17 @@ function bindCloudEvents() {
   dom['cloud-lock-form']?.addEventListener('submit', submitCloudUnlock);
   dom['btn-cloud-unlock']?.addEventListener('click', submitCloudUnlock);
   dom['btn-cloud-lock']?.addEventListener('click', lockCloudPanel);
+
+  // Conta na nuvem (Supabase Auth).
+  dom['btn-cloud-signin']?.addEventListener('click', () => submitCloudAccount('signin'));
+  dom['btn-cloud-signup']?.addEventListener('click', () => submitCloudAccount('signup'));
+  dom['btn-cloud-signout']?.addEventListener('click', leaveCloudAccount);
+  dom['cloud-account-password']?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitCloudAccount('signin');
+    }
+  });
   dom['cloud-key-top-input']?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();

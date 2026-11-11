@@ -332,7 +332,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.11.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.12.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -445,6 +445,41 @@
           </div>
 
           <div id="cloud-panel" class="hidden">
+          <div class="settings-block cloud-account">
+            <h3>Conta na nuvem <span class="cloud-account-tag">recomendado</span></h3>
+            <p>
+              A chave de acesso protege o <strong>conteúdo</strong> (o banco só guarda texto cifrado).
+              A conta protege o <strong>acesso</strong>: com ela, o banco entrega e aceita apenas os
+              cofres dela — ninguém mais lê, sobrescreve ou apaga os seus modelos, nem com a chave
+              pública do projeto.
+            </p>
+            <p id="cloud-account-state" class="cloud-hint" role="status"></p>
+            <div id="cloud-account-signed-out">
+              <div class="cloud-lock-fields">
+                <div class="field-group">
+                  <label for="cloud-account-email">E-mail da conta</label>
+                  <input id="cloud-account-email" type="email" autocomplete="username" placeholder="voce@exemplo.com" spellcheck="false" />
+                </div>
+                <div class="field-group">
+                  <label for="cloud-account-password">Senha da conta</label>
+                  <input id="cloud-account-password" type="password" autocomplete="current-password" placeholder="mínimo 8 caracteres" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button id="btn-cloud-signin" class="btn btn-sm btn-primary" type="button">Entrar</button>
+                <button id="btn-cloud-signup" class="btn btn-sm btn-secondary" type="button">Criar conta</button>
+              </div>
+              <p class="cloud-hint">
+                É uma conta do Supabase Auth do seu projeto (e-mail + senha). A senha não fica
+                guardada no app: só os tokens da sessão, neste navegador. Se o projeto exigir
+                confirmação de e-mail, confirme antes de entrar.
+              </p>
+            </div>
+            <div id="cloud-account-signed-in" class="btn-row hidden">
+              <button id="btn-cloud-signout" class="btn btn-sm btn-ghost-dark" type="button">Sair da conta</button>
+            </div>
+          </div>
+
           <div class="settings-block">
             <h3>Modelos treinados no banco compartilhado</h3>
             <p>
