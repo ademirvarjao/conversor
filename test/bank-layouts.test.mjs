@@ -302,3 +302,58 @@ describe('catálogo publicado × embutido', () => {
     );
   });
 });
+
+describe('reconhecimento não estraga o que a IA já acertou', () => {
+  // Itaú Sul: o banco é Itaú (bate no catálogo), mas o extrato usa
+  // "Pagto."/"Recbto." — colunas que não existem no padrão do Itaú.
+  const headers = ['Lancto', 'Data', 'Beneficiário', 'Histórico', 'Pagto.', 'Recbto.', 'Saldo'];
+  const analysis = {
+    status: 'new_layout',
+    mappings: [
+      { colIdx: 0, header: 'Lancto', role: 'ignore', historyOrder: 0 },
+      { colIdx: 1, header: 'Data', role: 'date', historyOrder: 0 },
+      { colIdx: 2, header: 'Beneficiário', role: 'history', historyOrder: 1 },
+      { colIdx: 3, header: 'Histórico', role: 'history', historyOrder: 2 },
+      { colIdx: 4, header: 'Pagto.', role: 'value_out', historyOrder: 0 },
+      { colIdx: 5, header: 'Recbto.', role: 'value_in', historyOrder: 0 },
+      { colIdx: 6, header: 'Saldo', role: 'ignore', historyOrder: 0 },
+    ],
+  };
+  const parsed = file(headers, { bannerLines: ['Itaú Unibanco S.A.'], rows: [['1', '01/10/2026', 'X', 'Y', '', '10,00', '100,00']] });
+
+  it('só reescreve colunas que estão no padrão do banco', () => {
+    const recognition = recognizeLayout(parsed, {});
+    assert.equal(recognition.bank?.id, 'itau');
+
+    const applied = applyRecognition(analysis, recognition);
+    const roleOf = (header) => applied.mappings.find((mapping) => mapping.header === header).role;
+    assert.equal(roleOf('Pagto.'), 'value_out', 'coluna fora do padrão mantém o papel da IA');
+    assert.equal(roleOf('Recbto.'), 'value_in');
+    assert.equal(roleOf('Data'), 'date');
+    assert.equal(roleOf('Saldo'), 'ignore');
+  });
+
+  it('nunca propõe “ignorar” uma coluna que o banco não cobre', () => {
+    const recognition = recognizeLayout(parsed, {});
+    const diffs = diffRoles(analysis, recognition);
+    assert.ok(!diffs.some((diff) => diff.header === 'Pagto.' || diff.header === 'Recbto.'));
+  });
+
+  it('rede de segurança: reconhecimento não deixa o arquivo sem data nem sem valor', () => {
+    const recognition = {
+      source: 'catalog',
+      bank: { id: 'x', name: 'Banco X' },
+      confidence: 0.9,
+      roles: [
+        { colIdx: 1, header: 'Data', role: 'history', historyOrder: 1, rule: '^data' },
+        { colIdx: 4, header: 'Pagto.', role: 'ignore', historyOrder: 0, rule: '(sem regra)' },
+        { colIdx: 5, header: 'Recbto.', role: 'ignore', historyOrder: 0, rule: '(sem regra)' },
+      ],
+    };
+
+    const applied = applyRecognition(analysis, recognition);
+    const roles = applied.mappings.map((mapping) => mapping.role);
+    assert.ok(roles.includes('date'), 'data preservada');
+    assert.ok(roles.includes('value_in') && roles.includes('value_out'), 'valores preservados');
+  });
+});

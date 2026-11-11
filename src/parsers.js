@@ -250,6 +250,12 @@ export function parseMoneyValue(raw) {
     normalized = text;
   }
 
+  // Códigos longos ("20220046445430000000", 20 dígitos) passam pelo formato
+  // numérico e viravam "valor" — o que criava lançamento fantasma em extratos
+  // que imprimem a linha digitável do TED depois do lançamento.
+  const digitCount = text.replace(/[.,]/g, '').length;
+  if (!hasComma && !hasDot && digitCount > 12) return null;
+
   const num = Number(normalized);
   if (!Number.isFinite(num)) return null;
 
@@ -762,10 +768,14 @@ function isStatementNoise(text) {
   const norm = normalizeText(text);
   if (!norm) return true;
   if (/^(novos lancamentos|atualizado em|em caso de duvidas)\b/.test(norm)) return true;
-  if (/\b(sac|central de atendimento|ouvidoria|fale conosco)\b/.test(norm) && /\b0800\b/.test(norm)) {
+  // "OUVIDORIA SICOOB: 08007250996" — o telefone vem colado, sem espaço.
+  if (/\b(sac|central de atendimento|ouvidoria|fale conosco)\b/.test(norm)) return true;
+  if (/^(www\.|https?:|about:blank)/.test(norm)) return true;
+  if (/\bpagina\s+\d+\s+(de|of)\s+\d+\b/.test(norm)) return true;
+  // Rodapé de sistemas que imprimem avisos e links no fim do extrato.
+  if (/^(acesse o menu|limites de credito disponiveis|este documento|documento emitido)\b/.test(norm)) {
     return true;
   }
-  if (/^(www\.|https?:)/.test(norm)) return true;
   return false;
 }
 
@@ -777,33 +787,140 @@ function isBannerOrSummary(text) {
   );
 }
 
+
+/* -------------------------------------------------------------------------- */
+/*                     PDF: cabeçalho e colunas da tabela                     */
+/* -------------------------------------------------------------------------- */
+
+/** Rótulos que aparecem num cabeçalho de extrato/relatório. */
+const COLUMN_LABEL_RE =
+  /\b(data|dt|valor|valores|vlr|vl|historico|descricao|desc|documento|dcto|docto|doc|saldo|credito|debito|entrada|saida|lancamento|origem|tipo|complemento|agencia|conta|hora|hora|dependencia|historico|quantia|tarifa)\b/;
+
 /**
- * Reconstrói a tabela (cabeçalhos + linhas) a partir das linhas de texto
- * extraídas do PDF. Função pura e independente do PDF.js.
- *
- * @param {Array<{page:number,y:number,h:number,items:Array}>} allPageLines
- * @returns {{headers:string[],rows:string[][],bannerLines:string[],skippedRows:number,columnCount:number}}
+ * Junta fragmentos do cabeçalho que são o mesmo rótulo quebrado
+ * ("Crédito" + "(R$)" → "Crédito (R$)"; "DATA" + "MOV." → "DATA MOV.").
  */
-export function buildTableFromTextLines(allPageLines) {
-  if (!Array.isArray(allPageLines) || allPageLines.length === 0) {
-    throw new Error('Nenhum texto extraível encontrado no PDF (pode ser um documento digitalizado).');
+function mergeHeaderItems(items) {
+  const sorted = [...items].sort((a, b) => a.x - b.x);
+  const merged = [];
+
+  for (const item of sorted) {
+    const last = merged[merged.length - 1];
+    const lastRight = last ? last.x + (last.w || 0) : -Infinity;
+    if (last && item.x - lastRight <= 8) {
+      last.str = `${last.str} ${item.str}`.trim();
+      last.w = Math.max(lastRight, item.x + (item.w || 0)) - last.x;
+      continue;
+    }
+    merged.push({
+      str: item.str,
+      x: item.x,
+      w: item.w || 0,
+      numRight: item.numRight ?? item.x + (item.w || 0),
+    });
   }
 
-  // 1. Linhas candidatas a dados: contêm data + valor, ou data e 3+ colunas.
-  const candidateDataLines = allPageLines.filter((line) => {
-    const hasDate = line.items.some((item) => parseDateValue(item.str) !== null);
-    const hasMoney = line.items.some((item) => parseMoneyValue(item.str) !== null);
-    if (!hasDate && !hasMoney) return false;
-    // "Extrato de: ... 01/10/2026 e 31/10/2026" tem data mas é cabeçalho.
-    if (isPeriodBanner(lineText(line))) return false;
-    return (hasDate && hasMoney) || (hasDate && line.items.length >= 3);
-  });
+  return merged;
+}
 
-  if (candidateDataLines.length === 0) {
-    throw new Error('Não foi possível identificar linhas tabulares com datas/valores no PDF.');
+/**
+ * Encontra a linha de cabeçalho da tabela: só texto, pelo menos dois rótulos
+ * conhecidos e nenhum número solto (para não confundir com uma faixa de
+ * identificação do tipo "COOP.: 4327 - 3").
+ *
+ * @returns {{line:object, items:Array<{str:string,x:number,w:number}>, score:number}|null}
+ */
+export function findHeaderRow(allPageLines) {
+  let best = null;
+
+  for (const line of allPageLines) {
+    const items = mergeHeaderItems(line.items);
+    if (items.length < 2) continue;
+
+    // Cabeçalho é texto puro: um "4327" ou "15:51:37" solto já o desqualifica.
+    const allText = items.every(
+      (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
+    );
+    if (!allText) continue;
+
+    const labels = items.filter((item) => COLUMN_LABEL_RE.test(normalizeText(item.str)));
+    if (labels.length < 2) continue;
+
+    const norm = normalizeText(lineText(line));
+    const hasValueOrBalance = /\b(valor|saldo|credito|debito|entrada|saida)\b/.test(norm);
+    const score = labels.length * 2 + items.length + (hasValueOrBalance ? 3 : 0);
+
+    if (!best || score > best.score) best = { line, items, score };
   }
 
-  // 2. Descobrir âncoras de colunas pela frequência das posições X.
+  return best;
+}
+
+/**
+ * Colunas ancoradas nos rótulos do cabeçalho.
+ *
+ * A fronteira entre duas colunas é o meio do vão entre o fim de um rótulo e o
+ * começo do próximo — e não o meio entre os centros — porque rótulos de coluna
+ * numérica costumam ficar bem à esquerda dos números (alinhados à direita).
+ */
+export function buildColumnsFromHeaderRow(headerRow) {
+  const items = headerRow.items;
+  if (!items || items.length < 3) return null;
+
+  const bounds = items.map((item, idx) => ({
+    idx,
+    anchor: (item.x + (item.x + (item.w || 0))) / 2,
+    start: -Infinity,
+    end: Infinity,
+    label: item.str,
+  }));
+
+  for (let i = 0; i < items.length - 1; i++) {
+    const right = items[i].x + (items[i].w || 0);
+    const nextStart = items[i + 1].x;
+    const boundary = right <= nextStart ? (right + nextStart) / 2 : (items[i].x + nextStart) / 2;
+    bounds[i].end = boundary;
+    bounds[i + 1].start = boundary;
+  }
+
+  return bounds;
+}
+
+/**
+ * O modelo do cabeçalho só vale se todos os rótulos receberem dados e se
+ * alguma coluna concentrar datas. Sem isso, voltamos ao agrupamento por
+ * posição (que funciona bem em extratos com muitas colunas estreitas).
+ */
+export function headerColumnsLookSane(bounds, dataLines) {
+  const stats = bounds.map(() => ({ items: 0, dates: 0, money: 0 }));
+  const centerOf = (item) => item.x + (item.w || 0) / 2;
+
+  for (const line of dataLines) {
+    for (const item of line.items) {
+      const center = centerOf(item);
+      let idx = bounds.findIndex((bound) => center >= bound.start && center < bound.end);
+      if (idx < 0) {
+        idx = bounds.reduce(
+          (best, bound, i) =>
+            Math.abs(center - bound.anchor) < Math.abs(center - bounds[best].anchor) ? i : best,
+          0
+        );
+      }
+      stats[idx].items += 1;
+      if (parseDateValue(item.str) !== null) stats[idx].dates += 1;
+      if (parseMoneyValue(item.str) !== null) stats[idx].money += 1;
+    }
+  }
+
+  const vazias = stats.filter((stat) => stat.items === 0).length;
+  if (vazias > 0) return false;
+  if (!stats.some((stat) => stat.dates >= 1)) return false;
+  if (!stats.some((stat) => stat.money >= 1)) return false;
+  return true;
+}
+
+/** Agrupamento de colunas pela posição X dos dados (plano B). */
+function clusterColumnsFromData(candidateDataLines, allPageLines) {
   const allItems = [];
   for (const line of candidateDataLines) {
     for (const item of line.items) {
@@ -818,12 +935,6 @@ export function buildTableFromTextLines(allPageLines) {
   );
   const minSupport = Math.max(2, Math.floor(candidateDataLines.length * 0.3));
 
-  // Suporte real de cada coluna: contamos as ocorrências em TODAS as linhas do
-  // documento, não apenas nas que trazem data. Em layouts com bloco de histórico
-  // de duas ou três linhas (extrato Itaú, por exemplo) a data aparece só na
-  // linha do meio do bloco; a coluna de histórico teria então suporte
-  // artificialmente baixo e seria descartada — e os textos dela caíam dentro da
-  // coluna de data, virando "Data Lançamentos".
   const documentItems = [];
   for (const line of allPageLines) {
     for (const item of line.items) documentItems.push(item);
@@ -838,10 +949,7 @@ export function buildTableFromTextLines(allPageLines) {
 
   let colClusters = rawClusters.filter((cluster) => {
     if (cluster.count >= minSupport) return true;
-    // Coluna legítima, mas com poucas linhas contendo data própria.
     if (supportOf(cluster) >= minSupport) return true;
-    // Preserva colunas raras que contenham valores monetários (ex.: "Crédito"
-    // preenchido em poucas linhas).
     return allItems.some(
       (entry) => entry.isMoney && entry.x >= cluster.min - 2 && entry.x <= cluster.max + 2
     );
@@ -853,7 +961,6 @@ export function buildTableFromTextLines(allPageLines) {
   const itemsInCluster = (cluster) =>
     allItems.filter((entry) => entry.x >= cluster.min - 2 && entry.x <= cluster.max + 2);
 
-  // Unir clusters de valores alinhados à direita (ex.: "12,50" e "150.000,00").
   let mergedRight = true;
   while (mergedRight && colClusters.length > 2) {
     mergedRight = false;
@@ -869,8 +976,7 @@ export function buildTableFromTextLines(allPageLines) {
 
       if (leftMoneyRatio >= 0.7 && rightMoneyRatio >= 0.7 && right.min - left.max <= 35) {
         const leftRight = leftItems.reduce((sum, entry) => sum + entry.right, 0) / leftItems.length;
-        const rightRight =
-          rightItems.reduce((sum, entry) => sum + entry.right, 0) / rightItems.length;
+        const rightRight = rightItems.reduce((sum, entry) => sum + entry.right, 0) / rightItems.length;
         if (Math.abs(leftRight - rightRight) <= 10) {
           left.min = Math.min(left.min, right.min);
           left.max = Math.max(left.max, right.max);
@@ -884,8 +990,6 @@ export function buildTableFromTextLines(allPageLines) {
     }
   }
 
-  // Unir clusters que são continuação "inline" da mesma coluna lógica
-  // (ex.: "154 - E801..." seguido alguns pontos depois por "04.02").
   let mergedInline = true;
   while (mergedInline && colClusters.length > 2) {
     mergedInline = false;
@@ -928,7 +1032,11 @@ export function buildTableFromTextLines(allPageLines) {
     }
   }
 
-  // 3. Limites horizontais de cada coluna descoberta.
+  return colClusters;
+}
+
+/** Fronteiras horizontais a partir dos clusters (plano B). */
+function boundsFromClusters(colClusters) {
   const colBounds = colClusters.map((cluster, idx) => ({
     idx,
     anchor: cluster.anchor,
@@ -943,16 +1051,129 @@ export function buildTableFromTextLines(allPageLines) {
     colBounds[i + 1].start = boundary;
   }
 
-  // Âncora da borda DIREITA de cada coluna monetária. Valores de dinheiro são
-  // alinhados à direita: "-4.100,00" começa bem antes do "36,55" da coluna ao
-  // lado e, olhando só o x inicial, cairia na coluna errada (era o que jogava
-  // o PIX enviado do extrato do Bradesco na coluna de crédito).
-  const moneyRightAnchors = colClusters.map((cluster) => {
-    const rights = allItems
-      .filter((entry) => entry.isMoney && entry.x >= cluster.min - 2 && entry.x <= cluster.max + 2)
-      .map((entry) => entry.right)
-      .sort((a, b) => a - b);
-    return rights.length > 0 ? rights[Math.floor(rights.length / 2)] : null;
+  return colBounds;
+}
+
+/**
+ * Reconstrói a tabela (cabeçalhos + linhas) a partir das linhas de texto
+ * extraídas do PDF. Função pura e independente do PDF.js.
+ *
+ * @param {Array<{page:number,y:number,h:number,items:Array}>} allPageLines
+ * @returns {{headers:string[],rows:string[][],bannerLines:string[],skippedRows:number,columnCount:number}}
+ */
+export function buildTableFromTextLines(allPageLines) {
+  if (!Array.isArray(allPageLines) || allPageLines.length === 0) {
+    throw new Error('Nenhum texto extraível encontrado no PDF (pode ser um documento digitalizado).');
+  }
+
+  // 0. Cabeçalho da tabela (âncora de tudo): só o que está ABAIXO dele é dado.
+  const headerRow = findHeaderRow(allPageLines);
+  const headerPage = headerRow ? headerRow.line.page : null;
+  const headerY = headerRow ? headerRow.line.y : null;
+
+  // 1. Linhas candidatas a dados: contêm data + valor, ou data e 3+ colunas.
+  const candidateDataLines = allPageLines.filter((line) => {
+    // Faixa de identificação acima do cabeçalho ("14/10/2022 EXTRATO CONTA
+    // CORRENTE 15:51:37") tem data e valor, mas é cabeçalho, não lançamento.
+    if (line.page === headerPage && headerY !== null && line.y > headerY) return false;
+
+    const hasDate = line.items.some((item) => parseDateValue(item.str) !== null);
+    const hasMoney = line.items.some((item) => parseMoneyValue(item.str) !== null);
+    if (!hasDate && !hasMoney) return false;
+    // "Extrato de: ... 01/10/2026 e 31/10/2026" tem data mas é cabeçalho.
+    if (isPeriodBanner(lineText(line))) return false;
+    return (hasDate && hasMoney) || (hasDate && line.items.length >= 3);
+  });
+
+  if (candidateDataLines.length === 0) {
+    throw new Error(
+      'Não foi possível identificar linhas tabulares com datas/valores no PDF. ' +
+        'Se o arquivo é um cadastro/relatório (sem lançamentos), ele não entra aqui: ' +
+        'use a página do conciliador para os cadastros.'
+    );
+  }
+
+  // 2. Colunas: preferimos as posições do CABEÇALHO da tabela; se ele não for
+  // encontrado, montamos as colunas pela frequência das posições X dos dados.
+  //
+  // Ancorar no cabeçalho é o que salva layouts “em lista” como o do Sicoob, em
+  // que a descrição quebra em várias linhas na MESMA coluna e um pedaço dela
+  // ("- STR") começa 45 pt à direita do rótulo: pelo agrupamento de posições
+  // isso virava uma coluna fantasma ("Coluna 5") e jogava o valor para a
+  // coluna errada.
+  const headerColumns = headerRow ? buildColumnsFromHeaderRow(headerRow) : null;
+  const headerModel =
+    headerColumns && headerColumns.length >= 3 && headerColumnsLookSane(headerColumns, candidateDataLines)
+      ? headerColumns
+      : null;
+
+  let colClusters;
+  let colBounds;
+
+  if (headerModel) {
+    colClusters = headerModel.map((column) => ({
+      anchor: column.anchor,
+      min: column.anchor,
+      max: column.anchor,
+      count: 0,
+      label: column.label,
+    }));
+    colBounds = headerModel;
+  } else {
+    colClusters = clusterColumnsFromData(candidateDataLines, allPageLines);
+    colBounds = boundsFromClusters(colClusters);
+  }
+
+  // Estatística de cada coluna (extensão real dos dados e âncoras de valores
+  // alinhados à direita). Rodada em duas passagens: primeiro pela faixa do
+  // cabeçalho, depois refinando os valores pela borda direita.
+  const assignByBand = (item) => {
+    const center = item.x + (item.w || 0) / 2;
+    for (const bounds of colBounds) {
+      if (center >= bounds.start && center < bounds.end) return bounds.idx;
+    }
+    let bestIdx = 0;
+    let bestDistance = Infinity;
+    for (const bounds of colBounds) {
+      const distance = Math.abs(center - bounds.anchor);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIdx = bounds.idx;
+      }
+    }
+    return bestIdx;
+  };
+
+  const buildStats = (assign) => {
+    const stats = colBounds.map((bounds) => ({
+      min: bounds.anchor,
+      max: bounds.anchor + 40,
+      moneyRights: [],
+      dates: 0,
+      items: 0,
+    }));
+    for (const line of candidateDataLines) {
+      for (const item of line.items) {
+        const idx = assign(item);
+        const stat = stats[idx];
+        if (!stat) continue;
+        stat.items += 1;
+        stat.min = Math.min(stat.min, item.x);
+        stat.max = Math.max(stat.max, item.x + (item.w || 20));
+        if (parseMoneyValue(item.str) !== null) {
+          stat.moneyRights.push(item.numRight ?? item.x + (item.w || 0));
+        }
+        if (parseDateValue(item.str) !== null) stat.dates += 1;
+      }
+    }
+    return stats;
+  };
+
+  const bandStats = buildStats(assignByBand);
+  const moneyRightAnchors = bandStats.map((stat) => {
+    if (stat.moneyRights.length === 0) return null;
+    const sorted = [...stat.moneyRights].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
   });
 
   const assignItemToColumn = (item) => {
@@ -972,21 +1193,14 @@ export function buildTableFromTextLines(allPageLines) {
       // alinhadas à direita); caso contrário fica a regra por posição.
       if (bestIdx >= 0 && bestGap <= 10) return bestIdx;
     }
-
-    for (const bounds of colBounds) {
-      if (item.x >= bounds.start && item.x < bounds.end) return bounds.idx;
-    }
-    let bestIdx = 0;
-    let bestDistance = Infinity;
-    for (const bounds of colBounds) {
-      const distance = Math.abs(item.x - bounds.anchor);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        bestIdx = bounds.idx;
-      }
-    }
-    return bestIdx;
+    return assignByBand(item);
   };
+
+  const colDataExtents = buildStats(assignItemToColumn).map((stat) => ({
+    minX: stat.min,
+    maxX: stat.max,
+  }));
+
 
   // 4. Localizar a zona de cabeçalho acima da primeira linha de dados.
   // Preferimos uma linha com VALOR: linhas que só têm data (faixa de período,
@@ -1044,20 +1258,21 @@ export function buildTableFromTextLines(allPageLines) {
 
   // 5. Mapear cada fragmento de cabeçalho à coluna mais provável.
   const headerParts = Array.from({ length: colBounds.length }, () => []);
-  const colDataExtents = colBounds.map((bounds) => ({ minX: bounds.anchor, maxX: bounds.anchor + 40 }));
 
-  for (const line of candidateDataLines.slice(0, 40)) {
-    for (const item of line.items) {
-      const colIdx = assignItemToColumn(item);
-      colDataExtents[colIdx].minX = Math.min(colDataExtents[colIdx].minX, item.x);
-      colDataExtents[colIdx].maxX = Math.max(
-        colDataExtents[colIdx].maxX,
-        item.x + (item.w || 20)
-      );
-    }
-  }
+  // Se o cabeçalho foi reconhecido semanticamente, ele manda: linhas vizinhas
+  // ("COOP.: 4327 - 3 SICOOB EMPRESAS RJ") não entram como nome de coluna.
+  const labelLines = headerRow
+    ? allPageLines.filter(
+        (line) =>
+          line.page === headerRow.line.page &&
+          Math.abs(line.y - headerRow.line.y) <= 12 &&
+          line.items.every(
+            (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
+          )
+      )
+    : headerLines;
 
-  for (const headerLine of headerLines) {
+  for (const headerLine of labelLines) {
     // Uma coluna costuma ter um rótulo por linha de cabeçalho; quando o rótulo
     // flutua entre duas colunas (caso de coluna numérica alinhada à direita) ele
     // não deve repetir a coluna do rótulo anterior da mesma linha.
@@ -1141,6 +1356,12 @@ export function buildTableFromTextLines(allPageLines) {
   const rows = [];
   const skipped = [];
   const entries = [];
+  // Linhas de saldo (SALDO ANTERIOR / SALDO DO DIA / SALDO EM CONTA…). Quando o
+  // extrato NÃO tem coluna de saldo, o valor dessas linhas cai na mesma coluna
+  // dos lançamentos, então elas não podem virar lançamento nem sumir: viram
+  // **checkpoints** para a conferência de saldo do treinador.
+  const checkpoints = [];
+  const hasSaldoColumn = headers.some((header) => /\bsaldo\b/i.test(normalizeText(header)));
 
   for (const line of allPageLines) {
     const norm = normalizeText(lineText(line));
@@ -1164,6 +1385,34 @@ export function buildTableFromTextLines(allPageLines) {
     const hasDate = rowStrings.some((value) => parseDateValue(value) !== null);
     const nonEmptyCount = rowStrings.filter(Boolean).length;
     const text = lineText(line);
+
+    // Linha de saldo (âncora/checkpoint): nunca é lançamento.
+    const moneyCells = rowStrings
+      .map((value) => parseMoneyValue(value))
+      .filter((money) => money !== null);
+    const textCells = rowStrings.filter(
+      (value) =>
+        cleanWhitespace(value) &&
+        parseMoneyValue(value) === null &&
+        parseDateValue(value) === null
+    );
+    const label = normalizeText(textCells.join(' '));
+    const isSaldoRow = /^saldo\b/.test(label) && moneyCells.length > 0;
+
+    // Sem coluna de saldo, a linha de saldo é checkpoint (e sai das linhas).
+    // COM coluna de saldo (Itaú, Bradesco) ela continua sendo linha: é dali que
+    // o treinador tira as âncoras da conferência.
+    if (isSaldoRow && !hasSaldoColumn) {
+      checkpoints.push({
+        label: cleanWhitespace(textCells.join(' ')),
+        value: moneyCells[0].value,
+        dcTag: moneyCells[0].dcTag || null,
+        page: line.page,
+        y: line.y,
+      });
+      skipped.push(norm);
+      continue;
+    }
 
     // Cabeçalho de grupo de um relatório agrupado por cliente/fornecedor:
     // texto único, encostado na margem esquerda (à esquerda da 1ª coluna de
@@ -1313,7 +1562,12 @@ export function buildTableFromTextLines(allPageLines) {
       }
     }
     if (!assembled.some(Boolean)) continue;
-    assembledRows.push({ cells: assembled, inheritsDate: Boolean(block.inheritsDate) });
+    assembledRows.push({
+      cells: assembled,
+      inheritsDate: Boolean(block.inheritsDate),
+      page: block.page,
+      y: block.y,
+    });
   }
 
   // Data herdada: descobrimos qual coluna é a de data (a que tem mais datas
@@ -1342,12 +1596,26 @@ export function buildTableFromTextLines(allPageLines) {
 
   for (const row of assembledRows) rows.push(row.cells);
 
+  // Índice da linha em que cada checkpoint aparece: o treinador soma os
+  // lançamentos entre dois checkpoints para conferir o saldo.
+  const rowPositions = assembledRows.map((row) => ({ page: row.page, y: row.y }));
+  for (const checkpoint of checkpoints) {
+    const index = rowPositions.findIndex(
+      (position) =>
+        position.page > checkpoint.page ||
+        (position.page === checkpoint.page && position.y < checkpoint.y)
+    );
+    checkpoint.rowIdx = index === -1 ? assembledRows.length : index;
+    delete checkpoint.y;
+  }
+
   return {
     headers,
     rows,
     bannerLines: bannerLines.filter(Boolean),
     skippedRows: skipped.length,
     columnCount: colBounds.length,
+    checkpoints,
   };
 }
 
@@ -1384,5 +1652,6 @@ export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib, options = {}
     rows: table.rows,
     bannerLines: table.bannerLines,
     skippedRows: table.skippedRows,
+    checkpoints: table.checkpoints || [],
   };
 }
