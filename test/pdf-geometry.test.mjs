@@ -466,6 +466,104 @@ describe('buildTableFromTextLines — casos especiais', () => {
     assert.equal(table.rows.length, 1);
   });
 
+  it('aceita lançamento sem data na virada de página (documento + valor + saldo)', () => {
+    const table = buildTableFromTextLines([
+      line(1, 760, [
+        ['Data', 40, 20],
+        ['Lançamento', 100, 45],
+        ['Dcto.', 250, 25],
+        ['Crédito (R$)', 330, 50],
+        ['Débito (R$)', 420, 45],
+        ['Saldo (R$)', 500, 45],
+      ]),
+      line(1, 740, [
+        ['05/10/2026', 40, 45],
+        ['RECEBIMENTO FORNECEDOR', 100, 110],
+        ['102805', 250, 30],
+        ['120,00', 350, 30],
+        ['1.620,00', 510, 35],
+      ]),
+      // ---- página 2, sem cabeçalho: linha numérica no topo dos dados ----
+      line(2, 828, [
+        ['8554385', 250, 30],
+        ['22,08', 350, 30],
+        ['1.626,18', 510, 35],
+      ]),
+      line(2, 812, [
+        ['06/10/2026', 40, 45],
+        ['RECEBIMENTO FORNECEDOR', 100, 110],
+        ['8698071', 250, 30],
+        ['335,56', 350, 30],
+        ['1.961,74', 510, 35],
+      ]),
+      // Débito existe na página para fixar a coluna do extrato.
+      line(2, 796, [
+        ['07/10/2026', 40, 45],
+        ['TARIFA BANCARIA', 100, 90],
+        ['61026', 250, 30],
+        ['', 440, 10],
+        ['-45,90', 435, 32],
+        ['1.915,84', 510, 35],
+      ]),
+    ]);
+
+    assert.equal(table.rows.length, 4, 'nenhum lançamento descartado');
+    assert.deepEqual(table.rows[0], ['05/10/2026', 'RECEBIMENTO FORNECEDOR', '102805', '120,00', '', '1.620,00']);
+    // A linha sem data herda o dia anterior em vez de virar banner do topo.
+    assert.deepEqual(table.rows[1], ['05/10/2026', '', '8554385', '22,08', '', '1.626,18']);
+    assert.deepEqual(table.rows[2], ['06/10/2026', 'RECEBIMENTO FORNECEDOR', '8698071', '335,56', '', '1.961,74']);
+    // Valor negativo alinhado à direita cai na coluna de débito, não na de crédito.
+    assert.deepEqual(table.rows[3], ['07/10/2026', 'TARIFA BANCARIA', '61026', '', '-45,90', '1.915,84']);
+  });
+
+  it('não confunde faixa de resumo do topo com lançamento sem data', () => {
+    const table = buildTableFromTextLines([
+      line(1, 760, [
+        ['Data', 40, 20],
+        ['Histórico', 100, 45],
+        ['Valor', 300, 30],
+      ]),
+      line(1, 740, [
+        ['05/10/2026', 40, 45],
+        ['PAGAMENTO', 100, 70],
+        ['100,00', 290, 45],
+      ]),
+      // Faixa de saldos no topo da página 2: só números, mas LONGE dos dados.
+      line(2, 800, [
+        ['2.520,90', 40, 45],
+        ['0,00', 200, 30],
+      ]),
+      line(2, 700, [
+        ['06/10/2026', 40, 45],
+        ['PAGAMENTO', 100, 70],
+        ['200,00', 290, 45],
+      ]),
+    ]);
+
+    assert.equal(table.rows.length, 2);
+    assert.equal(table.rows[1][2], '200,00');
+  });
+
+  it('descarta rodapé do extrato (hyperlink e SAC) sem perder lançamentos', () => {
+    const table = buildTableFromTextLines([
+      line(1, 760, [
+        ['Data', 40, 20],
+        ['Histórico', 100, 45],
+        ['Valor', 300, 30],
+      ]),
+      line(1, 740, [
+        ['05/10/2026', 40, 45],
+        ['PAGAMENTO', 100, 70],
+        ['100,00', 290, 45],
+      ]),
+      line(1, 40, [['novos lançamentos', 40, 90]]),
+      line(1, 25, [['atualizado em 06/11/2026 SAC 0800 728', 40, 200]]),
+    ]);
+
+    assert.equal(table.rows.length, 1);
+    assert.equal(table.rows[0][1], 'PAGAMENTO');
+  });
+
   it('lança erro quando não há linhas tabulares', () => {
     assert.throws(
       () =>

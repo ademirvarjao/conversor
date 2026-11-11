@@ -545,6 +545,9 @@ describe('transformRowsWithConfig', () => {
   });
 });
 
+const learnedProfilesOf = (memory) =>
+  (memory.learnedProfiles || []).filter((profile) => !profile.builtIn);
+
 describe('memória da IA', () => {
   beforeEach(() => installFakeLocalStorage());
   afterEach(() => {
@@ -553,9 +556,60 @@ describe('memória da IA', () => {
 
   it('cria memória padrão quando não há nada salvo', () => {
     const memory = loadAiMemory();
-    assert.equal(memory.learnedProfiles.length, 0);
+    assert.equal(learnedProfilesOf(memory).length, 0, 'nenhum perfil aprendido ainda');
     assert.equal(memory.version, 2);
     assert.ok(memory.tokenWeights.historico);
+  });
+
+  it('já vem com os layouts de fábrica (Itaú e Bradesco) treinados', () => {
+    const memory = loadAiMemory();
+    const seeds = memory.learnedProfiles.filter((profile) => profile.builtIn);
+    assert.equal(seeds.length, 2);
+    assert.deepEqual(
+      seeds.map((profile) => profile.id).sort(),
+      ['seed-extrato-bradesco', 'seed-extrato-itau']
+    );
+    for (const seed of seeds) {
+      assert.equal(seed.fileType, 'pdf');
+      assert.ok(seed.mappings.some((mapping) => mapping.role === 'date'));
+      assert.ok(seed.mappings.some((mapping) => ['value_in', 'value_out', 'value_auto'].includes(mapping.role)));
+    }
+  });
+
+  it('injetar os layouts de fábrica em memória já gravada sem eles', () => {
+    // Usuário antigo: memória salva só com o perfil que ele mesmo treinou.
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        learnedProfiles: [
+          {
+            id: 'meu-perfil',
+            name: 'Layout antigo do usuário',
+            fileType: 'pdf',
+            headers: ['Data', 'Histórico', 'Valor'],
+            mappings: [
+              { header: 'Data', role: 'date' },
+              { header: 'Histórico', role: 'history' },
+              { header: 'Valor', role: 'value_auto' },
+            ],
+          },
+        ],
+      })
+    );
+
+    const memory = loadAiMemory();
+    const seeds = memory.learnedProfiles.filter((profile) => profile.builtIn).map((profile) => profile.id);
+    assert.deepEqual(seeds.sort(), ['seed-extrato-bradesco', 'seed-extrato-itau']);
+    assert.equal(memory.learnedProfiles.filter((profile) => !profile.builtIn).length, 1);
+    // Gravar de novo não duplica os de fábrica.
+    saveAiMemory(memory);
+    assert.equal(loadAiMemory().learnedProfiles.filter((profile) => profile.builtIn).length, 2);
+  });
+
+  it('importar backup antigo não apaga os layouts de fábrica', () => {
+    const memory = normalizeMemory({ learnedProfiles: [] });
+    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 2);
   });
 
   it('adota a memória guardada em chave de versão anterior (migração)', () => {
@@ -565,28 +619,28 @@ describe('memória da IA', () => {
     localStorage.setItem(antiga, JSON.stringify(memoria));
 
     const adotada = loadAiMemory();
-    assert.equal(adotada.learnedProfiles.length, 1);
-    assert.equal(adotada.learnedProfiles[0].name, 'Extrato da versão antiga');
+    assert.equal(learnedProfilesOf(adotada).length, 1);
+    assert.equal(learnedProfilesOf(adotada)[0].name, 'Extrato da versão antiga');
     // Regravada na chave atual, sem apagar a antiga (reserva).
     assert.ok(localStorage.getItem(STORAGE_KEY), 'gravou na chave atual');
     assert.ok(localStorage.getItem(antiga), 'manteve a chave antiga intacta');
-    assert.equal(loadAiMemory().learnedProfiles.length, 1);
+    assert.equal(learnedProfilesOf(loadAiMemory()).length, 1);
   });
 
   it('ignora chave antiga corrompida e continua procurando', () => {
     localStorage.setItem('outro_app_ai_memory_v3', '{quebrado');
     const memory = loadAiMemory();
-    assert.equal(memory.learnedProfiles.length, 0);
+    assert.equal(learnedProfilesOf(memory).length, 0);
     assert.equal(memory.version, 2);
   });
 
   it('sobrevive a conteúdo corrompido no localStorage', () => {
     localStorage.setItem(STORAGE_KEY, '{não é json');
-    assert.equal(loadAiMemory().learnedProfiles.length, 0);
+    assert.equal(learnedProfilesOf(loadAiMemory()).length, 0);
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ learnedProfiles: 'x' }));
     const memory = loadAiMemory();
-    assert.deepEqual(memory.learnedProfiles, []);
+    assert.deepEqual(learnedProfilesOf(memory), []);
     assert.equal(memory.optionalLlm.provider, 'none');
   });
 
@@ -597,14 +651,15 @@ describe('memória da IA', () => {
 
     assert.equal(saveAiMemory(memory), true);
     const reloaded = loadAiMemory();
-    assert.equal(reloaded.learnedProfiles.length, 1);
-    assert.equal(reloaded.learnedProfiles[0].name, 'Extrato Banco');
+    assert.equal(learnedProfilesOf(reloaded).length, 1);
+    assert.equal(learnedProfilesOf(reloaded)[0].name, 'Extrato Banco');
   });
 
-  it('resetar volta ao padrão', () => {
+  it('resetar volta ao padrão (mantendo os layouts de fábrica)', () => {
     const memory = resetAiMemory();
-    assert.equal(memory.learnedProfiles.length, 0);
-    assert.equal(loadAiMemory().learnedProfiles.length, 0);
+    assert.equal(learnedProfilesOf(memory).length, 0);
+    assert.equal(learnedProfilesOf(loadAiMemory()).length, 0);
+    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 2);
   });
 
   it('normaliza payloads importados e descarta lixo', () => {
@@ -621,8 +676,8 @@ describe('memória da IA', () => {
       optionalLlm: { provider: 'hacker', apiKey: 42 },
     });
 
-    assert.equal(memory.learnedProfiles.length, 1);
-    assert.equal(memory.learnedProfiles[0].fileType, 'pdf');
+    assert.equal(learnedProfilesOf(memory).length, 1);
+    assert.equal(learnedProfilesOf(memory)[0].fileType, 'pdf');
     assert.equal(memory.tokenWeights.historico.history, 12); // limitado
     assert.equal(memory.tokenWeights.invalido, undefined);
     assert.equal(memory.stats.totalFilesProcessed, 3);
@@ -676,8 +731,8 @@ describe('memória da IA', () => {
       memory = trainAiWithLayout(file, analysis, 'Perfil Único', memory);
     }
 
-    assert.equal(memory.learnedProfiles.length, 1);
-    assert.equal(memory.learnedProfiles[0].usageCount, 3);
+    assert.equal(learnedProfilesOf(memory).length, 1);
+    assert.equal(learnedProfilesOf(memory)[0].usageCount, 3);
     assert.ok(memory.learningLog.length >= 3);
   });
 
@@ -745,7 +800,7 @@ describe('memória da IA', () => {
   it('funciona sem localStorage disponível', () => {
     delete globalThis.localStorage;
     const memory = loadAiMemory();
-    assert.equal(memory.learnedProfiles.length, 0);
+    assert.equal(learnedProfilesOf(memory).length, 0);
     assert.equal(saveAiMemory(memory), false);
   });
 });

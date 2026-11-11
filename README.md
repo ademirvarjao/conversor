@@ -41,6 +41,10 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Relatórios agrupados por cliente/fornecedor**: o nome do grupo (uma linha só com texto, alinhada à margem esquerda) é reconhecido e usado como **prefixo do histórico** dos lançamentos seguintes — típico de "Contas Recebidas por Cliente".
 - **Previsto × realizado**: quando o arquivo traz `Data Venc`/`Valor Venc` e `Data Rec`/`Valor Recebido`, a conciliação usa **a data e o valor do fato** (recebimento/pagamento) e ignora o previsto, com aviso no Painel da IA.
 - **Colunas de identificação não viram valor**: `Lancto`, `Documento`, `Nº`, `Código` e sequências numéricas (inteiros, únicos e crescentes) são ignorados automaticamente — antes o número do lançamento entraria na soma.
+- **Extratos de banco já vêm treinados (v1.14.0)**: os layouts do **Itaú** (`Data | Lançamentos | Razão Social | CNPJ/CPF | Valor (R$) | Saldo (R$)`) e do **Bradesco** (`Data | Lançamento | Dcto. | Crédito (R$) | Débito (R$) | Saldo (R$)`) são reconhecidos na primeira importação, por perfil de fábrica (`src/seed-profiles.js`) — ninguém precisa treinar à mão. Esses perfis chegam à memória de qualquer usuário novo e sobrevivem a reset/importação de backup.
+- **Crédito e débito pelo sinal e pela coluna**: no Bradesco o valor vem negativo na coluna de débito e positivo na de crédito; as âncoras de borda direita dos números separam `-4.100,00` de um crédito de mesmo tamanho. No Itaú o valor é único (sem sinal de coluna) e o **CNPJ/CPF em coluna própria** não vira histórico duplicado — ele é concatenado depois da razão social, na ordem do extrato.
+- **Lançamento sem data**: linha de continuação (documento + valor + saldo, sem data) herda o dia do lançamento anterior, inclusive na **virada de página** — no extrato do Bradesco 22,08 de 05/10 estava sendo perdido. Faixas de resumo no topo da página (`R$ 2.520,90 R$ 0,00…`) continuam sendo banner, porque só aceitamos a linha numérica quando ela está colada (≤30 pt) acima de um lançamento com data.
+- **Rodapé do extrato não é lançamento**: `novos lançamentos`, `atualizado em …` e o aviso de SAC/0800 do Itaú deixam de entrar como linha (eram 2 linhas de lixo nas 590 do arquivo).
 - **Detecção de evolução de layout**: aponta exatamente o que mudou (`NOVA`, `RENOMEADA`, `AUSENTE`) e aplica o melhor mapeamento.
 - **Aprendizado supervisionado**: ao confirmar/corrigir o mapeamento, o motor reforça ou penaliza os pesos dos tokens (com limites para evitar "explosão" de pesos), atualiza o perfil do layout e registra o evento.
 - **Memória persistente** em `localStorage`, com exportação/importação de `conversor-ia-memoria.json` para versionar no repositório ou compartilhar entre máquinas. Backups inválidos são normalizados/descartados sem quebrar a aplicação.
@@ -206,6 +210,7 @@ conversor/
 │   ├── app.js                    # Controlador de UI, upload, filtros, modal
 │   ├── parsers.js                # PDF (extração + geometria) e XLSX
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
+│   ├── seed-profiles.js          # Perfis de fábrica (extratos Itaú e Bradesco)
 │   ├── counterparty.js           # Conciliação clientes/fornecedores (cadastro Questor)
 │   ├── counterparty-page.js      # Controlador da página conciliador.html
 │   ├── exporters.js              # Exportação .xlsx, .pdf e .csv
