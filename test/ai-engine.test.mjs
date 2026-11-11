@@ -23,6 +23,7 @@ function installFakeLocalStorage() {
     setItem: (key, value) => store.set(key, String(value)),
     removeItem: (key) => store.delete(key),
     clear: () => store.clear(),
+    key: (index) => [...store.keys()][index] ?? null,
     get length() {
       return store.size;
     },
@@ -39,7 +40,7 @@ const statementFile = {
   fileType: 'xlsx',
   headers: ['Dt. Mov.', 'Doc.', 'Histórico Banco', 'Entrada (+)', 'Saída (-)', 'Saldo Dia'],
   rows: [
-    ['02/09/2026', 'TRF-93593', 'TRANSFERENCIA CUSTODIO', '8.002,12', '', '8.002,12'],
+    ['02/09/2026', 'TRF-93593', 'TRANSFERENCIA ATLAS', '8.002,12', '', '8.002,12'],
     ['08/09/2026', '182-1', 'CORINTOS LOGISTICA', '89.628,03', '', '97.630,15'],
     ['10/09/2026', 'TAR-001', 'TARIFA MANUTENCAO', '', '45,90', '97.584,25'],
   ],
@@ -413,7 +414,7 @@ describe('transformRowsWithConfig', () => {
       [8002.12, 89628.03, -45.9]
     );
     assert.equal(records[0].dateBr, '02/09/2026');
-    assert.equal(records[0].history, 'TRF-93593 TRANSFERENCIA CUSTODIO');
+    assert.equal(records[0].history, 'TRF-93593 TRANSFERENCIA ATLAS');
     assert.equal(records[0].sourceFile, 'Extrato.xlsx');
   });
 
@@ -555,6 +556,28 @@ describe('memória da IA', () => {
     assert.equal(memory.learnedProfiles.length, 0);
     assert.equal(memory.version, 2);
     assert.ok(memory.tokenWeights.historico);
+  });
+
+  it('adota a memória guardada em chave de versão anterior (migração)', () => {
+    const antiga = 'conversor_legado_ai_memory_v1';
+    const treinada = analyzeFileLayout(statementFile, loadAiMemory());
+    const memoria = trainAiWithLayout(statementFile, treinada, 'Extrato da versão antiga', loadAiMemory());
+    localStorage.setItem(antiga, JSON.stringify(memoria));
+
+    const adotada = loadAiMemory();
+    assert.equal(adotada.learnedProfiles.length, 1);
+    assert.equal(adotada.learnedProfiles[0].name, 'Extrato da versão antiga');
+    // Regravada na chave atual, sem apagar a antiga (reserva).
+    assert.ok(localStorage.getItem(STORAGE_KEY), 'gravou na chave atual');
+    assert.ok(localStorage.getItem(antiga), 'manteve a chave antiga intacta');
+    assert.equal(loadAiMemory().learnedProfiles.length, 1);
+  });
+
+  it('ignora chave antiga corrompida e continua procurando', () => {
+    localStorage.setItem('outro_app_ai_memory_v3', '{quebrado');
+    const memory = loadAiMemory();
+    assert.equal(memory.learnedProfiles.length, 0);
+    assert.equal(memory.version, 2);
   });
 
   it('sobrevive a conteúdo corrompido no localStorage', () => {

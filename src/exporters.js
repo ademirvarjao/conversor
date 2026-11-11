@@ -46,7 +46,7 @@ function normalizeRecords(rows) {
  * Exporta os registros para .xlsx em uma única aba (pronta para importação contábil).
  * @returns {Promise<ArrayBuffer>}
  */
-export async function exportToXlsx(rows, outputName = 'Conciliacao_Custodio.xlsx', ExcelJSRef, options = {}) {
+export async function exportToXlsx(rows, outputName = 'Conciliacao.xlsx', ExcelJSRef, options = {}) {
   const ExcelJS = ExcelJSRef || (typeof window !== 'undefined' ? window.ExcelJS : undefined);
   if (!ExcelJS) throw new Error('Biblioteca ExcelJS não carregada.');
 
@@ -156,7 +156,7 @@ function resolveAutoTable(doc) {
  *   gera o documento sem baixar (usado em testes e pré-visualização).
  * @returns {object} instância do jsPDF (útil para testes/preview)
  */
-export function exportToPdf(rows, summary, outputName = 'Conciliacao_Custodio.pdf', options = {}) {
+export function exportToPdf(rows, summary, outputName = 'Conciliacao.pdf', options = {}) {
   const jspdfNamespace = typeof window !== 'undefined' ? window.jspdf : undefined;
   const jsPDF = jspdfNamespace?.jsPDF;
   if (!jsPDF) throw new Error('Biblioteca jsPDF não carregada.');
