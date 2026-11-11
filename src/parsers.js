@@ -1,10 +1,34 @@
 /**
  * Conversor Custódio — Parsers de Entrada (.pdf e .xlsx)
- * Extração geométrica adaptativa para PDFs (via PDF.js) e planilhas Excel (via ExcelJS).
+ *
+ * Estratégia:
+ *  - PDF: o PDF.js extrai os fragmentos de texto com coordenadas; a reconstrução
+ *    das colunas (geometria) é feita por funções puras e testáveis
+ *    (`buildTableFromTextLines`), sem dependência do navegador.
+ *  - XLSX: lido via ExcelJS, com detecção automática de banners, cabeçalho
+ *    multi-linha e remoção de linhas de total/resumo.
  */
 
+import { formatIsoToBrDate } from './format.js';
+
+// Reexportado para conveniência de quem consome o parser (app, testes).
+export { formatIsoToBrDate };
+
+/** Limite defensivo de colunas lidas por planilha (evita planilhas "infinitas"). */
+const MAX_COLUMNS = 256;
+
+/** Limite defensivo de linhas de dados por arquivo. */
+const MAX_DATA_ROWS = 200000;
+
+/** Tolerância vertical (pt) para considerar fragmentos na mesma linha visual. */
+const LINE_TOLERANCE = 2.5;
+
 export function cleanWhitespace(str) {
-  return String(str ?? '').replace(/\s+/g, ' ').trim();
+  return String(str ?? '')
+    .replace(/[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function normalizeText(str) {
@@ -22,131 +46,154 @@ export function tokenizeHeader(str) {
     .filter(Boolean);
 }
 
-/**
- * Tenta interpretar uma data nos formatos comuns BR/ISO/Excel.
- * Retorna string ISO 'YYYY-MM-DD' ou null.
- */
-export function parseDateValue(val) {
-  if (val == null || val === '') return null;
+/* -------------------------------------------------------------------------- */
+/*                                   Datas                                    */
+/* -------------------------------------------------------------------------- */
 
-  if (val instanceof Date && !Number.isNaN(val.getTime())) {
-    const y = val.getUTCFullYear();
-    const m = val.getUTCMonth() + 1;
-    const d = val.getUTCDate();
-    if (y >= 1900 && y <= 2100) {
-      return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    }
+function pad(value, size = 2) {
+  return String(value).padStart(size, '0');
+}
+
+/**
+ * Monta uma data ISO apenas se ela existir de verdade no calendário
+ * (impede 31/02/2026 ou 00/00/0000).
+ */
+export function buildIsoDate(year, month, day) {
+  if (![year, month, day].every(Number.isInteger)) return null;
+  if (year < 1900 || year > 2199 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (
+    utc.getUTCFullYear() !== year ||
+    utc.getUTCMonth() !== month - 1 ||
+    utc.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return `${pad(year, 4)}-${pad(month)}-${pad(day)}`;
+}
+
+/** Expande anos de 2 dígitos: 00–69 → 2000–2069; 70–99 → 1970–1999. */
+function expandTwoDigitYear(yy) {
+  return yy <= 69 ? 2000 + yy : 1900 + yy;
+}
+
+export function excelSerialToIso(serial) {
+  if (!Number.isFinite(serial) || serial <= 0) return null;
+  // Época do Excel (com o bug histórico de 1900): 1899-12-30.
+  const utcMs = Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000;
+  const date = new Date(utcMs);
+  const iso = buildIsoDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+  return iso;
+}
+
+/**
+ * Interpreta datas nos formatos usuais de relatórios financeiros.
+ * Aceita Date e textos BR/ISO. Retorna 'YYYY-MM-DD' ou null.
+ *
+ * Números NÃO são tratados como serial do Excel por padrão: em conciliações
+ * um número como 45000 costuma ser R$ 45.000,00, não uma data. Use a opção
+ * `allowExcelSerial` (ou `excelSerialToIso`) quando souber que a coluna é data.
+ */
+export function parseDateValue(value, { allowExcelSerial = false } = {}) {
+  if (value == null || value === '') return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    // Os valores de data do Excel/ExcelJS são gravados em UTC (meia-noite).
+    return buildIsoDate(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate());
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    if (allowExcelSerial) return excelSerialToIso(value);
     return null;
   }
 
-  if (typeof val === 'number' && Number.isFinite(val) && val > 20000 && val < 80000) {
-    // Excel serial date (epoch 1899-12-30)
-    const utcMs = Date.UTC(1899, 11, 30) + Math.round(val) * 86400000;
-    const d = new Date(utcMs);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  }
+  const text = cleanWhitespace(value);
+  if (!text || text.length > 40) return null;
 
-  const s = cleanWhitespace(val);
-  // dd/mm/yyyy ou dd-mm-yyyy ou dd.mm.yyyy
-  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:\s.*)?$/);
-  if (m) {
-    const day = parseInt(m[1], 10);
-    const mon = parseInt(m[2], 10);
-    const yr = parseInt(m[3], 10);
-    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31 && yr >= 1900 && yr <= 2100) {
-      return `${String(yr).padStart(4, '0')}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
+  // dd/mm/yyyy | dd-mm-yyyy | dd.mm.yyyy (opcionalmente com hora)
+  let match = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})(?:[\sT].*)?$/.exec(text);
+  if (match) {
+    return buildIsoDate(Number(match[3]), Number(match[2]), Number(match[1]));
   }
 
   // dd/mm/yy
-  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})$/);
-  if (m) {
-    const day = parseInt(m[1], 10);
-    const mon = parseInt(m[2], 10);
-    const yr = 2000 + parseInt(m[3], 10);
-    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31) {
-      return `${String(yr).padStart(4, '0')}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
+  match = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})$/.exec(text);
+  if (match) {
+    return buildIsoDate(expandTwoDigitYear(Number(match[3])), Number(match[2]), Number(match[1]));
   }
 
-  // yyyy-mm-dd ou yyyy/mm/dd
-  m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:[T\s].*)?$/);
-  if (m) {
-    const yr = parseInt(m[1], 10);
-    const mon = parseInt(m[2], 10);
-    const day = parseInt(m[3], 10);
-    if (mon >= 1 && mon <= 12 && day >= 1 && day <= 31 && yr >= 1900 && yr <= 2100) {
-      return `${String(yr).padStart(4, '0')}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
+  // yyyy-mm-dd | yyyy/mm/dd (opcionalmente com hora)
+  match = /^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?:[\sT].*)?$/.exec(text);
+  if (match) {
+    return buildIsoDate(Number(match[1]), Number(match[2]), Number(match[3]));
   }
 
   return null;
 }
 
-export function formatIsoToBrDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y}`;
-}
+/* -------------------------------------------------------------------------- */
+/*                                  Valores                                   */
+/* -------------------------------------------------------------------------- */
 
-export function isoToUtcDate(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
-}
+const CURRENCY_SYMBOLS = /R\$|US\$|BRL|USD|EUR|GBP|\$|€|£/gi;
+const D_C_SUFFIX = /\s*[([]?\s*([DCdc])\s*[)\]]?$/;
 
 /**
- * Faz o parse de um valor monetário em diversos formatos:
- * -R$ 2.000,00 | R$ 8.002,12 | 1234,56 | -1234.56 | (1.234,56) | 1.234,56 D | 1.234,56 C
- * Retorna { value: number, hasExplicitSign: boolean, dcTag: 'D'|'C'|null } ou null.
+ * Interpreta valores monetários nos formatos:
+ *   -R$ 2.000,00 | R$ 8.002,12 | 1234,56 | -1234.56 | (1.234,56)
+ *   1.234,56 D | 1.234,56 C | 1.234,56- | 12.345,67 R$
+ *
+ * Retorna { value, hasExplicitSign, dcTag } ou null.
  */
 export function parseMoneyValue(raw) {
   if (raw == null || raw === '') return null;
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return {
-      value: Math.round(raw * 100) / 100,
-      hasExplicitSign: raw < 0,
-      dcTag: null,
-    };
+
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw)) return null;
+    return { value: Math.round(raw * 100) / 100, hasExplicitSign: raw < 0, dcTag: null };
   }
 
-  let s = cleanWhitespace(raw);
-  if (!s) return null;
+  let text = cleanWhitespace(raw).replace(/[\u2212\u2013\u2014]/g, '-');
+  if (!text || text.length > 40) return null;
 
-  // Ignorar datas ou códigos com barras/muitos hífens que não parecem valores
-  if (/^\d{1,2}[\/]\d{1,2}[\/]\d{2,4}$/.test(s)) return null;
+  // Datas e códigos com barras não são valores monetários.
+  if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$/.test(text) && /[/]/.test(text)) return null;
+  if (!/\d/.test(text)) return null;
 
   let dcTag = null;
-  const dcMatch = s.match(/\s*([DCdc])(?:\s*\))?$/);
-  if (dcMatch && /\d/.test(s)) {
+  const dcMatch = D_C_SUFFIX.exec(text);
+  if (dcMatch) {
     dcTag = dcMatch[1].toUpperCase();
-    s = s.slice(0, dcMatch.index).trim();
+    text = text.slice(0, dcMatch.index).trim();
+    if (!text) return null;
   }
 
   let negative = false;
   let hasExplicitSign = false;
 
-  if (/^\(.*\)$/.test(s)) {
+  if (/^\(.*\)$/.test(text)) {
     negative = true;
     hasExplicitSign = true;
-    s = s.slice(1, -1).trim();
+    text = text.slice(1, -1).trim();
   }
 
-  // Remove currency symbols (R$, US$, $, EUR)
-  if (/^-/.test(s) || /^R\$\s*-/i.test(s) || /^-\s*R\$/i.test(s)) {
-    negative = true;
-    hasExplicitSign = true;
-  } else if (/^\+/.test(s)) {
-    hasExplicitSign = true;
-  }
+  // Símbolos de moeda antes/depois do número
+  text = text.replace(CURRENCY_SYMBOLS, ' ').trim();
 
-  s = s.replace(/R\$|US\$|BRL|\$/gi, '').trim();
-  if (s.startsWith('-')) {
+  if (/^-/.test(text)) {
     negative = true;
     hasExplicitSign = true;
-    s = s.slice(1).trim();
-  } else if (s.startsWith('+')) {
+    text = text.slice(1).trim();
+  } else if (/^\+/.test(text)) {
     hasExplicitSign = true;
-    s = s.slice(1).trim();
+    text = text.slice(1).trim();
+  } else if (/-$/.test(text)) {
+    // Formato contábil "1.234,56-"
+    negative = true;
+    hasExplicitSign = true;
+    text = text.slice(0, -1).trim();
   }
 
   if (dcTag === 'D') {
@@ -157,234 +204,223 @@ export function parseMoneyValue(raw) {
     hasExplicitSign = true;
   }
 
-  // Remove internal spaces (e.g. "2 .000,00")
-  s = s.replace(/\s+/g, '');
+  // Remove espaços internos ("2 .000,00") e asteriscos de destaque.
+  text = text.replace(/[\s*]/g, '');
 
-  // Must now look like a number (digits with . and/or ,)
-  if (!/^\d[\d.,]*$/.test(s)) return null;
+  if (!/^\d[\d.,]*$/.test(text)) return null;
 
-  // Determine decimal separator
-  const hasComma = s.includes(',');
-  const hasDot = s.includes('.');
+  const hasComma = text.includes(',');
+  const hasDot = text.includes('.');
+
+  // Códigos/documentos com zero à esquerda (ex.: "02092026") não são valores.
+  if (!hasComma && !hasDot && /^0\d/.test(text)) return null;
   let normalized;
 
   if (hasComma && hasDot) {
-    // Compare last positions
-    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
-      // BR: 1.234,56
-      normalized = s.replace(/\./g, '').replace(',', '.');
-    } else {
-      // US: 1,234.56
-      normalized = s.replace(/,/g, '');
-    }
+    // O separador decimal é o último a aparecer: 1.234,56 (BR) | 1,234.56 (US)
+    normalized =
+      text.lastIndexOf(',') > text.lastIndexOf('.')
+        ? text.replace(/\./g, '').replace(',', '.')
+        : text.replace(/,/g, '');
   } else if (hasComma) {
-    // Check if comma is decimal (e.g. ,00 or ,5 or ,123 when single comma <=2 decimals)
-    const parts = s.split(',');
-    if (parts.length === 2 && parts[1].length <= 2) {
-      normalized = s.replace(',', '.');
-    } else if (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3) {
-      // Ambiguous like 1,234 — in BR finance usually decimal or thousand; treat 3 digits after comma with no dot as thousand if integer >= 100? Usually decimal has 2 digits.
-      normalized = s.replace(/,/g, '');
-    } else {
-      normalized = s.replace(',', '.');
-    }
+    const parts = text.split(',');
+    // "1,234" e "1,234,567" tendem a ser separador de milhar (sem centavos)
+    const isThousands =
+      parts.length > 2 || (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3);
+    normalized = isThousands ? text.replace(/,/g, '') : text.replace(',', '.');
   } else if (hasDot) {
-    const parts = s.split('.');
-    if (parts.length === 2 && parts[1].length <= 2) {
-      normalized = s;
-    } else if (parts.every((p, idx) => idx === 0 || p.length === 3)) {
-      // 1.234 or 1.234.567 (BR thousands without cents)
-      normalized = s.replace(/\./g, '');
-    } else {
-      normalized = s;
-    }
+    const parts = text.split('.');
+    const isThousands =
+      parts.length > 2 || (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3);
+    normalized = isThousands ? text.replace(/\./g, '') : text;
   } else {
-    normalized = s;
+    normalized = text;
   }
 
   const num = Number(normalized);
   if (!Number.isFinite(num)) return null;
+
   const signed = negative ? -Math.abs(num) : num;
-  return {
-    value: Math.round(signed * 100) / 100,
-    hasExplicitSign,
-    dcTag,
-  };
+  return { value: Math.round(signed * 100) / 100, hasExplicitSign, dcTag };
 }
 
-function cellToString(val) {
-  if (val == null) return '';
-  if (val instanceof Date) {
-    const y = val.getUTCFullYear();
-    const m = String(val.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(val.getUTCDate()).padStart(2, '0');
-    return `${d}/${m}/${y}`;
+/* -------------------------------------------------------------------------- */
+/*                             Células de planilha                            */
+/* -------------------------------------------------------------------------- */
+
+function cellToString(value) {
+  if (value == null) return '';
+  if (value instanceof Date) {
+    return formatIsoToBrDate(parseDateValue(value));
   }
-  if (typeof val === 'object') {
-    if (val.richText && Array.isArray(val.richText)) {
-      return val.richText.map((r) => r.text || '').join('');
-    }
-    if (val.text != null) return String(val.text);
-    if (val.result !== undefined) return cellToString(val.result);
-    if (val.hyperlink) return String(val.hyperlink);
-    if (val.error) return '';
+  if (typeof value === 'object') {
+    if (Array.isArray(value.richText)) return value.richText.map((r) => r?.text ?? '').join('');
+    if (value.text != null) return String(value.text);
+    if (value.result !== undefined) return cellToString(value.result);
+    if (value.hyperlink) return String(value.hyperlink);
+    if (value.error) return '';
+    if (value.formula || value.sharedFormula) return '';
+    return '';
   }
-  return String(val);
+  return String(value);
 }
 
-function cellToRawValue(val) {
-  if (val == null) return null;
-  if (typeof val === 'object' && !(val instanceof Date)) {
-    if (val.result !== undefined) return val.result;
-    if (val.richText && Array.isArray(val.richText)) {
-      return val.richText.map((r) => r.text || '').join('');
-    }
-    if (val.text != null) return val.text;
-    if (val.error) return null;
-  }
-  return val;
+/**
+ * Extrai o valor "bruto" de uma célula do ExcelJS, resolvendo fórmulas,
+ * rich text e links. Datas e números permanecem com o tipo original.
+ */
+function cellToRawValue(value) {
+  if (value == null) return null;
+  if (typeof value !== 'object' || value instanceof Date) return value;
+  if (value.result !== undefined) return cellToRawValue(value.result);
+  if (Array.isArray(value.richText)) return value.richText.map((r) => r?.text ?? '').join('');
+  if (value.text != null) return value.text;
+  if (value.error) return '';
+  if (value.hyperlink) return value.hyperlink;
+  return null;
 }
 
-function isSummaryOrNoiseRow(rowCells) {
+const NOISE_ROW_PREFIX =
+  /^(total|totais|subtotal|saldo\s+(anterior|atual|final|inicial|do\s+dia|em\s+conta)|resumo|pagina\s+\d+|emitido\s+em|gerado\s+em|relatorio\s+gerado)/;
+
+export function isSummaryOrNoiseRow(rowCells) {
   const joined = normalizeText(rowCells.map(cellToString).join(' '));
   if (!joined) return true;
-  if (/^(total|subtotal|saldo\s+(anterior|atual|final|inicial|do\s+dia)|resumo|pagina\s+\d+|emitido\s+em)/.test(joined)) {
-    return true;
-  }
-  // Row with "TOTAL:" and only 1 or 2 non-empty cells
-  const nonEmpty = rowCells.filter((c) => cleanWhitespace(cellToString(c)) !== '');
-  if (nonEmpty.length <= 2 && /\btotal\b|\bsaldo\b|\bcnpj\b|\bperiodo\b|\bconciliacao\b/.test(joined)) {
+  if (NOISE_ROW_PREFIX.test(joined)) return true;
+
+  const nonEmpty = rowCells.filter((cell) => cleanWhitespace(cellToString(cell)) !== '');
+  if (
+    nonEmpty.length <= 2 &&
+    /\b(total|saldo|cnpj|cpf|periodo|conciliacao|agencia|conta corrente)\b/.test(joined)
+  ) {
     return true;
   }
   return false;
 }
 
+const HEADER_KEYWORD_RE =
+  /\b(data|dt|valor|vr|vlr|vl|historico|descricao|desc|titulo|tipo|fornecedor|cliente|favorecido|beneficiario|centro|natureza|credito|debito|devedor|credor|lancamento|documento|doc|nf|observacao|obs|saldo|entrada|saida|banco|conta|parcela|complemento|local|categoria|plano|forma|pagamento|recebimento|vencimento|competencia|emissao|movimento)\b/;
+
 /**
- * Parser de arquivos .xlsx (usando ExcelJS)
+ * Converte as abas de um workbook em tabelas { headers, rows }.
+ * Função pura (recebe um workbook já carregado) — facilita testes.
  */
-export async function parseXlsxFile(arrayBuffer, fileName, ExcelJSRef) {
-  const ExcelJS = ExcelJSRef || window.ExcelJS;
-  if (!ExcelJS) throw new Error('Biblioteca ExcelJS não carregada.');
-
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(arrayBuffer);
-
+export function extractSheetsFromWorkbook(workbook) {
   const sheets = [];
-  for (const ws of wb.worksheets) {
-    if (ws.state === 'hidden' || ws.state === 'veryHidden') continue;
 
-    // Extrair matriz de valores brutos respeitando células mescladas no cabeçalho
+  for (const worksheet of workbook.worksheets) {
+    if (worksheet.state === 'hidden' || worksheet.state === 'veryHidden') continue;
+
+    // Células mescladas: só a célula "mestre" carrega o valor; as demais são
+    // ignoradas para não duplicar banners e títulos.
+    const mergedSlaves = new Set();
+    const mergedRanges = worksheet.model?.merges || [];
+    for (const rangeRef of mergedRanges) {
+      const [startRef, endRef] = String(rangeRef).split(':');
+      const start = decodeCellRef(startRef);
+      const end = decodeCellRef(endRef || startRef);
+      if (!start || !end) continue;
+      for (let row = start.row; row <= end.row; row++) {
+        for (let col = start.col; col <= end.col; col++) {
+          if (row === start.row && col === start.col) continue;
+          mergedSlaves.add(`${row}:${col}`);
+        }
+      }
+    }
+
     const rawRows = [];
     let maxCols = 0;
-    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      const vals = [];
-      const colCount = Math.max(row.cellCount, ws.columnCount || 0);
-      for (let c = 1; c <= colCount; c++) {
-        const cell = row.getCell(c);
-        vals.push(cellToRawValue(cell.value));
+
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      const cellCount = Math.min(Math.max(row.cellCount || 0, 0), MAX_COLUMNS);
+      const cells = [];
+      for (let col = 1; col <= cellCount; col++) {
+        if (mergedSlaves.has(`${rowNumber}:${col}`)) {
+          cells.push(null);
+          continue;
+        }
+        cells.push(cellToRawValue(row.getCell(col).value));
       }
-      // Trim trailing empty cells
-      while (vals.length > 0 && (vals[vals.length - 1] == null || cleanWhitespace(cellToString(vals[vals.length - 1])) === '')) {
-        vals.pop();
+      while (cells.length > 0 && cleanWhitespace(cellToString(cells[cells.length - 1])) === '') {
+        cells.pop();
       }
-      if (vals.length > 0) {
-        maxCols = Math.max(maxCols, vals.length);
-        rawRows.push({ rowNumber, cells: vals });
-      }
+      if (cells.length === 0) return;
+      maxCols = Math.max(maxCols, cells.length);
+      rawRows.push({ rowNumber, cells });
     });
 
     if (rawRows.length === 0) continue;
-
-    // Pad rows to maxCols
-    for (const r of rawRows) {
-      while (r.cells.length < maxCols) r.cells.push(null);
+    for (const row of rawRows) {
+      while (row.cells.length < maxCols) row.cells.push(null);
     }
 
-    // Detectar linha de cabeçalho: primeira linha densa (>=2 colunas não-vazias) que precede linhas de dados com data ou número
-    let headerIdx = 0;
-    let bestScore = -1;
-    const scanLimit = Math.min(rawRows.length - 1, 25);
-
-    for (let i = 0; i < scanLimit; i++) {
-      const cells = rawRows[i].cells;
-      const nonEmpty = cells.filter((c) => cleanWhitespace(cellToString(c)) !== '');
-      if (nonEmpty.length < 2) continue;
-
-      // Cabeçalhos geralmente têm texto (não datas puras nem números puros)
-      const textOnly = nonEmpty.filter((c) => !parseDateValue(c) && !parseMoneyValue(c));
-      const textRatio = textOnly.length / nonEmpty.length;
-
-      // Verificar se as próximas linhas têm datas ou valores
-      let nextDataSignal = 0;
-      for (let k = i + 1; k < Math.min(rawRows.length, i + 6); k++) {
-        const nc = rawRows[k].cells;
-        const hasDate = nc.some((c) => parseDateValue(c) !== null);
-        const hasMoney = nc.some((c) => parseMoneyValue(c) !== null);
-        if (hasDate) nextDataSignal += 2;
-        if (hasMoney) nextDataSignal += 1.5;
-      }
-
-      const headerKeywords = nonEmpty.filter((c) =>
-        /\b(data|dt|valor|vr|vlr|historico|descricao|titulo|tipo|fornecedor|cliente|centro|natureza|credito|debito|lancamento|documento)\b/.test(
-          normalizeText(cellToString(c))
-        )
-      ).length;
-
-      const score = textRatio * 3 + nonEmpty.length * 0.6 + nextDataSignal + headerKeywords * 2.5;
-      if (score > bestScore && textRatio >= 0.5) {
-        bestScore = score;
-        headerIdx = i;
-      }
-    }
-
-    // Se a linha 0 já parece dados diretos sem cabeçalho
-    const firstRowHasDate = rawRows[0].cells.some((c) => parseDateValue(c) !== null);
+    const headerIdx = detectHeaderRowIndex(rawRows, maxCols);
     let headers;
     let dataStartIdx;
     let bannerLines = [];
 
-    if (firstRowHasDate && bestScore < 4) {
+    if (headerIdx === -1) {
       headers = Array.from({ length: maxCols }, (_, idx) => `Coluna ${idx + 1}`);
       dataStartIdx = 0;
     } else {
-      bannerLines = rawRows.slice(0, headerIdx).map((r) => cleanWhitespace(r.cells.map(cellToString).join(' '))).filter(Boolean);
-      headers = rawRows[headerIdx].cells.map((c, idx) => {
-        const s = cleanWhitespace(cellToString(c));
-        return s || `Coluna ${idx + 1}`;
+      bannerLines = rawRows
+        .slice(0, headerIdx)
+        .map((row) => cleanWhitespace(row.cells.map(cellToString).join(' ')))
+        .filter(Boolean);
+      headers = rawRows[headerIdx].cells.map((cell, idx) => {
+        const text = cleanWhitespace(cellToString(cell));
+        return text || `Coluna ${idx + 1}`;
       });
       dataStartIdx = headerIdx + 1;
     }
 
-    // Remover colunas 100% vazias
+    // Descarta colunas 100% vazias (sem título próprio e sem dados).
     const activeColIndices = [];
-    for (let c = 0; c < maxCols; c++) {
-      const hasHeader = headers[c] && !/^Coluna \d+$/.test(headers[c]);
-      const hasData = rawRows.slice(dataStartIdx).some((r) => cleanWhitespace(cellToString(r.cells[c])) !== '');
-      if (hasHeader || hasData) activeColIndices.push(c);
+    const dataRows = rawRows.slice(dataStartIdx);
+    for (let col = 0; col < maxCols; col++) {
+      const hasOwnHeader = headers[col] && !/^Coluna \d+$/.test(headers[col]);
+      const hasData = dataRows.some((row) => cleanWhitespace(cellToString(row.cells[col])) !== '');
+      if (hasOwnHeader || hasData) activeColIndices.push(col);
     }
 
-    const cleanHeaders = activeColIndices.map((c) => headers[c]);
+    const cleanHeaders = activeColIndices.map((col) => headers[col]);
+    const headerSignature = cleanHeaders.map((header) => normalizeText(header)).join('|');
     const rows = [];
     let skippedRows = 0;
 
-    for (let i = dataStartIdx; i < rawRows.length; i++) {
-      const slice = activeColIndices.map((c) => rawRows[i].cells[c]);
+    for (const rawRow of dataRows) {
+      if (rows.length >= MAX_DATA_ROWS) {
+        skippedRows += rawRow ? 1 : 0;
+        continue;
+      }
+      const slice = activeColIndices.map((col) => rawRow.cells[col] ?? null);
       if (isSummaryOrNoiseRow(slice)) {
         skippedRows++;
         continue;
       }
-      // Pular repetição de cabeçalho
-      const normRow = slice.map((c) => normalizeText(cellToString(c)));
-      const normHeaders = cleanHeaders.map((h) => normalizeText(h));
-      if (normRow.join('|') === normHeaders.join('|')) {
+      const normalized = slice.map((cell) => normalizeText(cellToString(cell)));
+      if (normalized.join('|') === headerSignature) {
         skippedRows++;
         continue;
       }
-      rows.push(slice.map((c) => (c instanceof Date ? c : cellToString(c))));
+      rows.push(slice);
+    }
+
+    if (rows.length === 0) {
+      // Aba apenas com cabeçalho/banner: mantém para permitir troca manual de aba,
+      // porém não compete com abas que possuem dados.
+      sheets.push({
+        sheetName: worksheet.name,
+        headers: cleanHeaders,
+        rows: [],
+        bannerLines,
+        skippedRows,
+      });
+      continue;
     }
 
     sheets.push({
-      sheetName: ws.name,
+      sheetName: worksheet.name,
       headers: cleanHeaders,
       rows,
       bannerLines,
@@ -392,19 +428,108 @@ export async function parseXlsxFile(arrayBuffer, fileName, ExcelJSRef) {
     });
   }
 
-  if (sheets.length === 0) {
-    throw new Error(`Nenhuma aba com dados encontrada em "${fileName}".`);
+  return sheets;
+}
+
+function decodeCellRef(ref) {
+  const match = /^([A-Z]+)(\d+)$/i.exec(String(ref ?? '').trim());
+  if (!match) return null;
+  return { col: columnLetterToNumber(match[1]), row: Number(match[2]) };
+}
+
+function columnLetterToNumber(letters) {
+  let value = 0;
+  for (const char of letters.toUpperCase()) {
+    value = value * 26 + (char.charCodeAt(0) - 64);
+  }
+  return value;
+}
+
+/**
+ * Descobre a linha de cabeçalho analisando densidade, tipo de conteúdo e a
+ * presença de datas/valores nas linhas seguintes. Retorna -1 quando o arquivo
+ * aparenta ser uma tabela sem cabeçalho.
+ */
+function detectHeaderRowIndex(rawRows, maxCols) {
+  const scanLimit = Math.min(Math.max(rawRows.length - 1, 0), 25);
+  let bestIdx = -1;
+  let bestScore = 0;
+  let firstRowHasDate = parseDateValue(rawRows[0].cells.find((cell) => parseDateValue(cell))) !== null;
+
+  for (let i = 0; i < scanLimit; i++) {
+    const cells = rawRows[i].cells;
+    const nonEmpty = cells.filter((cell) => cleanWhitespace(cellToString(cell)) !== '');
+    if (nonEmpty.length < 2) continue;
+
+    const textOnly = nonEmpty.filter(
+      (cell) => parseDateValue(cell) === null && parseMoneyValue(cell) === null
+    );
+    const textRatio = textOnly.length / nonEmpty.length;
+    if (textRatio < 0.5) continue;
+
+    let nextDataSignal = 0;
+    for (let k = i + 1; k < Math.min(rawRows.length, i + 6); k++) {
+      const nextCells = rawRows[k].cells;
+      if (nextCells.some((cell) => parseDateValue(cell) !== null)) nextDataSignal += 2;
+      if (nextCells.some((cell) => parseMoneyValue(cell) !== null)) nextDataSignal += 1.5;
+    }
+
+    const keywordHits = nonEmpty.filter((cell) =>
+      HEADER_KEYWORD_RE.test(normalizeText(cellToString(cell)))
+    ).length;
+
+    const score =
+      textRatio * 3 + nonEmpty.length * 0.6 + nextDataSignal + keywordHits * 2.5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
   }
 
-  // Escolher a aba com mais linhas de dados
-  sheets.sort((a, b) => b.rows.length - a.rows.length);
-  const best = sheets[0];
+  if (bestIdx === -1) return firstRowHasDate ? -1 : 0;
+  if (firstRowHasDate && bestScore < 4) return -1;
+  return bestIdx;
+}
+
+/**
+ * Parser de arquivos .xlsx (usando ExcelJS).
+ * Retorna a aba com mais linhas de dados e mantém todas as abas disponíveis.
+ */
+export async function parseXlsxFile(arrayBuffer, fileName, ExcelJSRef) {
+  const ExcelJS = ExcelJSRef || (typeof window !== 'undefined' ? window.ExcelJS : undefined);
+  if (!ExcelJS) throw new Error('Biblioteca ExcelJS não carregada.');
+
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(arrayBuffer);
+  } catch (error) {
+    throw new Error(`Não foi possível ler "${fileName}" como planilha .xlsx (${error.message}).`);
+  }
+
+  const sheets = extractSheetsFromWorkbook(workbook);
+  if (sheets.length === 0) {
+    throw new Error(`Nenhuma aba visível com dados encontrada em "${fileName}".`);
+  }
+
+  const withData = sheets.filter((sheet) => sheet.rows.length > 0);
+  if (withData.length === 0) {
+    throw new Error(
+      `Nenhuma linha de dados encontrada em "${fileName}". Verifique se a planilha possui cabeçalho e lançamentos.`
+    );
+  }
+
+  // A aba com mais lançamentos é a mais provável de ser a conciliação.
+  const best = [...withData].sort((a, b) => b.rows.length - a.rows.length)[0];
 
   return {
     fileName,
     fileType: 'xlsx',
     sheetName: best.sheetName,
-    availableSheets: sheets.map((s) => ({ name: s.sheetName, rowCount: s.rows.length })),
+    availableSheets: sheets.map((sheet) => ({
+      name: sheet.sheetName,
+      rowCount: sheet.rows.length,
+    })),
     allSheetsData: sheets,
     headers: best.headers,
     rows: best.rows,
@@ -413,10 +538,159 @@ export async function parseXlsxFile(arrayBuffer, fileName, ExcelJSRef) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              PDF: extração                                 */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Agrupa valores 1D (x0) próximos em clusters de colunas.
+ * Agrupa fragmentos de texto em linhas visuais.
+ * Recebe itens { str, x, y, w, h } de uma página e devolve linhas ordenadas
+ * de cima para baixo com itens da esquerda para a direita.
  */
-function clusterPositions(xs, tolerance) {
+export function groupItemsIntoLines(items, tolerance = LINE_TOLERANCE) {
+  const usable = items.filter((item) => cleanWhitespace(item.str));
+  if (usable.length === 0) return [];
+
+  const sorted = [...usable].sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines = [];
+  let current = null;
+
+  for (const item of sorted) {
+    if (!current || Math.abs(current.y - item.y) > tolerance) {
+      current = { y: item.y, h: item.h, items: [item] };
+      lines.push(current);
+    } else {
+      current.items.push(item);
+      // Mantém a referência Y "média" para linhas levemente desalinhadas.
+      current.y = (current.y * (current.items.length - 1) + item.y) / current.items.length;
+      current.h = Math.max(current.h, item.h);
+    }
+  }
+
+  for (const line of lines) line.items.sort((a, b) => a.x - b.x);
+  return lines;
+}
+
+function isCurrencySymbolOnly(text) {
+  return /^[-+]?\s*(R\$|US\$|\$|€|£)\s*$/i.test(text);
+}
+
+function isNumericToken(text) {
+  return /^[-+(]?\s*\d[\d.,]*\s*[DCdc)\-]?$/.test(cleanWhitespace(text));
+}
+
+/** Junta símbolos de moeda isolados ao número imediatamente à direita. */
+function mergeCurrencyTokens(items) {
+  const merged = [];
+  for (let i = 0; i < items.length; i++) {
+    const current = items[i];
+    const next = items[i + 1];
+    if (next && isCurrencySymbolOnly(current.str) && isNumericToken(next.str)) {
+      merged.push({
+        x: current.x,
+        y: current.y,
+        w: next.x + next.w - current.x,
+        h: Math.max(current.h, next.h),
+        str: `${current.str} ${next.str}`,
+        isCurrency: true,
+        numRight: next.x + next.w,
+      });
+      i++;
+    } else {
+      merged.push({ ...current });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Extrai as linhas de texto de um PDF usando o PDF.js.
+ * Retorna { pageCount, lines } onde cada linha tem { page, y, h, items }.
+ *
+ * @param {ArrayBuffer|Uint8Array} arrayBuffer
+ * @param {object} pdfjsLib  namespace do PDF.js (injetado para testes)
+ * @param {{ onProgress?: (page:number, total:number)=>void, cMapUrl?: string, standardFontDataUrl?: string }} options
+ */
+export async function extractPdfLines(arrayBuffer, pdfjsLib, options = {}) {
+  if (!pdfjsLib) throw new Error('Biblioteca PDF.js não carregada.');
+
+  const {
+    onProgress,
+    cMapUrl = './vendor/pdfjs/cmaps/',
+    standardFontDataUrl = './vendor/pdfjs/standard_fonts/',
+  } = options;
+
+  const data =
+    arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
+
+  const loadingTask = pdfjsLib.getDocument({
+    data,
+    cMapUrl,
+    cMapPacked: true,
+    standardFontDataUrl,
+    verbosity: 0,
+  });
+
+  let doc;
+  try {
+    doc = await loadingTask.promise;
+  } catch (error) {
+    const name = error?.name || '';
+    if (name === 'PasswordException') {
+      throw new Error('O PDF está protegido por senha. Remova a proteção e tente novamente.');
+    }
+    throw new Error(`Não foi possível abrir o PDF: ${error?.message || 'arquivo inválido ou corrompido'}.`);
+  }
+
+  const lines = [];
+  try {
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+      const page = await doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const items = [];
+
+      for (const item of content.items) {
+        if (!item?.str || !item.str.trim()) continue;
+        const x = item.transform[4];
+        const y = item.transform[5];
+        items.push({
+          str: item.str.trim(),
+          x,
+          y,
+          w: item.width || 0,
+          h: Math.abs(item.transform[3]) || item.height || 10,
+        });
+      }
+
+      for (const line of groupItemsIntoLines(items)) {
+        lines.push({
+          page: pageNumber,
+          y: line.y,
+          h: line.h,
+          items: mergeCurrencyTokens(line.items),
+        });
+      }
+
+      if (typeof onProgress === 'function') onProgress(pageNumber, doc.numPages);
+      page.cleanup?.();
+    }
+    return { pageCount: doc.numPages, lines };
+  } finally {
+    // Libera as estruturas internas do PDF.js (importante em PDFs grandes).
+    try {
+      await doc.destroy();
+    } catch {
+      /* ignora falhas de limpeza */
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          PDF: geometria da tabela                          */
+/* -------------------------------------------------------------------------- */
+
+/** Agrupa posições X próximas em clusters (colunas candidatas). */
+export function clusterPositions(xs, tolerance) {
   if (xs.length === 0) return [];
   const sorted = [...xs].sort((a, b) => a - b);
   const clusters = [{ sum: sorted[0], count: 1, min: sorted[0], max: sorted[0] }];
@@ -433,156 +707,102 @@ function clusterPositions(xs, tolerance) {
       clusters.push({ sum: x, count: 1, min: x, max: x });
     }
   }
-  return clusters.map((c) => ({
-    anchor: c.sum / c.count,
-    min: c.min,
-    max: c.max,
-    count: c.count,
+
+  return clusters.map((cluster) => ({
+    anchor: cluster.sum / cluster.count,
+    min: cluster.min,
+    max: cluster.max,
+    count: cluster.count,
   }));
 }
 
-function isCurrencySymbolOnly(str) {
-  return /^[-+]?\s*(R\$|US\$|\$|€|£)\s*$/i.test(str);
+function lineText(line) {
+  return cleanWhitespace(line.items.map((item) => item.str).join(' '));
 }
 
-function isNumericToken(str) {
-  return /^[-+(]?\s*\d[\d.,]*\s*[DCdc)]?$/.test(cleanWhitespace(str));
+function isBannerOrSummary(text) {
+  const norm = normalizeText(text);
+  return /^(total|totais|subtotal|saldo\s+(anterior|atual|final|inicial|do\s+dia)|resumo|pagina\s+\d+|emitido\s+em|gerado\s+em)\b/.test(
+    norm
+  );
 }
 
 /**
- * Parser geométrico adaptativo de PDFs via PDF.js
- * Extrai linhas horizontais, descobre colunas por ancoragem de coordenadas X,
- * combina cabeçalhos multi-linha (ex: DATA / PAGAMENTO) e ignora cabeçalhos repetidos/totais.
+ * Reconstrói a tabela (cabeçalhos + linhas) a partir das linhas de texto
+ * extraídas do PDF. Função pura e independente do PDF.js.
+ *
+ * @param {Array<{page:number,y:number,h:number,items:Array}>} allPageLines
+ * @returns {{headers:string[],rows:string[][],bannerLines:string[],skippedRows:number,columnCount:number}}
  */
-export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib) {
-  if (!pdfjsLib) throw new Error('Biblioteca PDF.js não carregada.');
+export function buildTableFromTextLines(allPageLines) {
+  if (!Array.isArray(allPageLines) || allPageLines.length === 0) {
+    throw new Error('Nenhum texto extraível encontrado no PDF (pode ser um documento digitalizado).');
+  }
 
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
-    cMapUrl: './vendor/pdfjs/cmaps/',
-    cMapPacked: true,
-    standardFontDataUrl: './vendor/pdfjs/standard_fonts/',
-    verbosity: 0,
+  // 1. Linhas candidatas a dados: contêm data + valor, ou data e 3+ colunas.
+  const candidateDataLines = allPageLines.filter((line) => {
+    const hasDate = line.items.some((item) => parseDateValue(item.str) !== null);
+    const hasMoney = line.items.some((item) => parseMoneyValue(item.str) !== null);
+    return (hasDate && hasMoney) || (hasDate && line.items.length >= 3);
   });
-  const doc = await loadingTask.promise;
-
-  const allPageLines = [];
-  for (let p = 1; p <= doc.numPages; p++) {
-    const page = await doc.getPage(p);
-    const content = await page.getTextContent();
-    const byY = [];
-
-    for (const item of content.items) {
-      if (!item.str || !item.str.trim()) continue;
-      const x = item.transform[4];
-      const y = item.transform[5];
-      const w = item.width || 0;
-      const h = Math.abs(item.transform[3]) || item.height || 10;
-      const str = item.str.trim();
-
-      // Agrupar em linhas horizontais com tolerância de 2.5pt
-      let line = byY.find((l) => Math.abs(l.y - y) <= 2.5);
-      if (!line) {
-        line = { page: p, y, h, items: [] };
-        byY.push(line);
-      }
-      line.items.push({ x, y, w, h, str });
-    }
-
-    // Ordenar linhas de cima para baixo (PDF Y decrescente) e itens da esquerda para direita
-    byY.sort((a, b) => b.y - a.y);
-    for (const line of byY) {
-      line.items.sort((a, b) => a.x - b.x);
-      // Unir símbolo monetário isolado (-R$ / R$) ao número imediatamente à direita
-      const merged = [];
-      for (let i = 0; i < line.items.length; i++) {
-        const cur = line.items[i];
-        const next = line.items[i + 1];
-        if (next && isCurrencySymbolOnly(cur.str) && isNumericToken(next.str)) {
-          merged.push({
-            x: cur.x,
-            y: cur.y,
-            w: (next.x + next.w) - cur.x,
-            h: Math.max(cur.h, next.h),
-            str: `${cur.str} ${next.str}`,
-            isCurrency: true,
-            numX: next.x,
-            numRight: next.x + next.w,
-          });
-          i++;
-        } else {
-          merged.push({ ...cur });
-        }
-      }
-      line.items = merged;
-      allPageLines.push(line);
-    }
-  }
-
-  if (allPageLines.length === 0) {
-    throw new Error(`Nenhum texto extraível encontrado em "${fileName}". (PDF pode ser apenas imagem/escaneado.)`);
-  }
-
-  // 1. Identificar linhas candidatas a dados tabulares: linhas com >= 3 colunas OU contendo data + valor monetário
-  const candidateDataLines = [];
-  for (const line of allPageLines) {
-    const hasDate = line.items.some((it) => parseDateValue(it.str) !== null);
-    const hasMoney = line.items.some((it) => parseMoneyValue(it.str) !== null);
-    if ((hasDate && hasMoney) || (hasDate && line.items.length >= 3)) {
-      candidateDataLines.push(line);
-    }
-  }
 
   if (candidateDataLines.length === 0) {
-    throw new Error(`Não foi possível identificar linhas tabulares com datas/valores em "${fileName}".`);
+    throw new Error('Não foi possível identificar linhas tabulares com datas/valores no PDF.');
   }
 
-  // 2. Descobrir âncoras de colunas usando frequência de posições X0 (e X1 para valores alinhados à direita)
+  // 2. Descobrir âncoras de colunas pela frequência das posições X.
   const allItems = [];
   for (const line of candidateDataLines) {
-    for (const it of line.items) {
-      const right = it.numRight ?? (it.x + (it.w || 0));
-      const isMoney = parseMoneyValue(it.str) !== null;
-      allItems.push({ it, x: it.x, right, isMoney });
+    for (const item of line.items) {
+      const right = item.numRight ?? item.x + (item.w || 0);
+      allItems.push({ item, x: item.x, right, isMoney: parseMoneyValue(item.str) !== null });
     }
   }
 
-  const rawClusters = clusterPositions(allItems.map((a) => a.x), 14);
-  const minSupport = Math.max(2, Math.floor(candidateDataLines.length * 0.30));
+  const rawClusters = clusterPositions(
+    allItems.map((entry) => entry.x),
+    14
+  );
+  const minSupport = Math.max(2, Math.floor(candidateDataLines.length * 0.3));
 
-  // Também preservar clusters raros que tenham valores monetários (ex: coluna "Crédito" preenchida só em 10% das linhas)
-  let colClusters = rawClusters.filter((c) => {
-    if (c.count >= minSupport) return true;
-    const hasMoneyInCluster = allItems.some(
-      (a) => a.isMoney && a.x >= c.min - 2 && a.x <= c.max + 2
+  let colClusters = rawClusters.filter((cluster) => {
+    if (cluster.count >= minSupport) return true;
+    // Preserva colunas raras que contenham valores monetários (ex.: "Crédito"
+    // preenchido em poucas linhas).
+    return allItems.some(
+      (entry) => entry.isMoney && entry.x >= cluster.min - 2 && entry.x <= cluster.max + 2
     );
-    return hasMoneyInCluster && c.count >= 1;
   });
 
-  if (colClusters.length < 2) {
-    colClusters = rawClusters.filter((c) => c.count >= 1);
-  }
+  if (colClusters.length < 2) colClusters = rawClusters;
   colClusters.sort((a, b) => a.anchor - b.anchor);
 
-  // Unir clusters numéricos que compartilham alinhamento à direita (ex: "12,50" e "150.000,00" sem "R$" fixo)
+  const itemsInCluster = (cluster) =>
+    allItems.filter((entry) => entry.x >= cluster.min - 2 && entry.x <= cluster.max + 2);
+
+  // Unir clusters de valores alinhados à direita (ex.: "12,50" e "150.000,00").
   let mergedRight = true;
   while (mergedRight && colClusters.length > 2) {
     mergedRight = false;
     for (let i = 0; i < colClusters.length - 1; i++) {
-      const cA = colClusters[i];
-      const cB = colClusters[i + 1];
-      const itemsA = allItems.filter((a) => a.x >= cA.min - 2 && a.x <= cA.max + 2);
-      const itemsB = allItems.filter((a) => a.x >= cB.min - 2 && a.x <= cB.max + 2);
-      const moneyRatioA = itemsA.filter((a) => a.isMoney).length / Math.max(1, itemsA.length);
-      const moneyRatioB = itemsB.filter((a) => a.isMoney).length / Math.max(1, itemsB.length);
-      if (moneyRatioA >= 0.7 && moneyRatioB >= 0.7 && cB.min - cA.max <= 35) {
-        const avgRightA = itemsA.reduce((s, a) => s + a.right, 0) / itemsA.length;
-        const avgRightB = itemsB.reduce((s, a) => s + a.right, 0) / itemsB.length;
-        if (Math.abs(avgRightA - avgRightB) <= 10) {
-          cA.min = Math.min(cA.min, cB.min);
-          cA.max = Math.max(cA.max, cB.max);
-          cA.anchor = (cA.min + cA.max) / 2;
-          cA.count += cB.count;
+      const left = colClusters[i];
+      const right = colClusters[i + 1];
+      const leftItems = itemsInCluster(left);
+      const rightItems = itemsInCluster(right);
+      const leftMoneyRatio =
+        leftItems.filter((entry) => entry.isMoney).length / Math.max(1, leftItems.length);
+      const rightMoneyRatio =
+        rightItems.filter((entry) => entry.isMoney).length / Math.max(1, rightItems.length);
+
+      if (leftMoneyRatio >= 0.7 && rightMoneyRatio >= 0.7 && right.min - left.max <= 35) {
+        const leftRight = leftItems.reduce((sum, entry) => sum + entry.right, 0) / leftItems.length;
+        const rightRight =
+          rightItems.reduce((sum, entry) => sum + entry.right, 0) / rightItems.length;
+        if (Math.abs(leftRight - rightRight) <= 10) {
+          left.min = Math.min(left.min, right.min);
+          left.max = Math.max(left.max, right.max);
+          left.anchor = (left.min + left.max) / 2;
+          left.count += right.count;
           colClusters.splice(i + 1, 1);
           mergedRight = true;
           break;
@@ -591,205 +811,262 @@ export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib) {
     }
   }
 
-  // Mesclar clusters adjacentes que na verdade são continuação inline dentro da mesma coluna
-  // (ex: "154 - E801... |" seguido a ~6pt por "04.02 |" dentro de "LOCAL | CENTRO DE CUSTO | NATUREZA")
-  let merged = true;
-  while (merged && colClusters.length > 2) {
-    merged = false;
+  // Unir clusters que são continuação "inline" da mesma coluna lógica
+  // (ex.: "154 - E801..." seguido alguns pontos depois por "04.02").
+  let mergedInline = true;
+  while (mergedInline && colClusters.length > 2) {
+    mergedInline = false;
     for (let i = 0; i < colClusters.length - 1; i++) {
-      const cA = colClusters[i];
-      const cB = colClusters[i + 1];
-      const midBoundary = (cA.anchor + cB.min) / 2;
+      const left = colClusters[i];
+      const right = colClusters[i + 1];
+      const boundary = (left.anchor + right.min) / 2;
+      const previousBoundary = i === 0 ? -Infinity : (colClusters[i - 1].anchor + left.min) / 2;
+      const nextBoundary =
+        i + 2 < colClusters.length ? (right.anchor + colClusters[i + 2].min) / 2 : Infinity;
+
+      let pairRows = 0;
+      let typedRows = 0;
       let cleanGapRows = 0;
-      let totalPairRows = 0;
-      let moneyOrDateA = 0;
 
       for (const line of candidateDataLines) {
-        const itemsA = line.items.filter((it) => it.x >= (i === 0 ? -Infinity : (colClusters[i - 1].anchor + cA.min) / 2) && it.x < midBoundary);
-        const itemsB = line.items.filter((it) => it.x >= midBoundary && it.x < (i + 2 < colClusters.length ? (cB.anchor + colClusters[i + 2].min) / 2 : Infinity));
-        if (itemsA.length > 0 && itemsB.length > 0) {
-          totalPairRows++;
-          const textA = cleanWhitespace(itemsA.map((x) => x.str).join(' '));
-          if (parseDateValue(textA) !== null || parseMoneyValue(textA) !== null) {
-            moneyOrDateA++;
-          }
-          const lastA = itemsA[itemsA.length - 1];
-          const firstB = itemsB[0];
-          const rightA = lastA.numRight ?? (lastA.x + (lastA.w || 0));
-          const gap = firstB.x - rightA;
-          if (gap >= 10) cleanGapRows++;
+        const leftItems = line.items.filter((item) => item.x >= previousBoundary && item.x < boundary);
+        const rightItems = line.items.filter((item) => item.x >= boundary && item.x < nextBoundary);
+        if (leftItems.length === 0 || rightItems.length === 0) continue;
+
+        pairRows++;
+        const leftText = cleanWhitespace(leftItems.map((item) => item.str).join(' '));
+        if (parseDateValue(leftText) !== null || parseMoneyValue(leftText) !== null) {
+          typedRows++;
         }
+
+        const lastLeft = leftItems[leftItems.length - 1];
+        const leftRight = lastLeft.numRight ?? lastLeft.x + (lastLeft.w || 0);
+        if (rightItems[0].x - leftRight >= 10) cleanGapRows++;
       }
 
-      const isTypedColA = totalPairRows > 0 && moneyOrDateA / totalPairRows >= 0.5;
-      if (!isTypedColA && totalPairRows > 0 && cleanGapRows / totalPairRows < 0.25) {
-        // cB é continuação inline de cA — mesclar cB em cA
-        cA.max = Math.max(cA.max, cB.max);
+      const isTypedColumn = pairRows > 0 && typedRows / pairRows >= 0.5;
+      if (!isTypedColumn && pairRows > 0 && cleanGapRows / pairRows < 0.25) {
+        left.max = Math.max(left.max, right.max);
+        left.count += right.count;
         colClusters.splice(i + 1, 1);
-        merged = true;
+        mergedInline = true;
         break;
       }
     }
   }
 
-  // Calcular limites horizontais [start, end) de cada coluna descoberta
-  const colBounds = colClusters.map((c, idx) => ({
+  // 3. Limites horizontais de cada coluna descoberta.
+  const colBounds = colClusters.map((cluster, idx) => ({
     idx,
-    anchor: c.anchor,
-    start: idx === 0 ? -Infinity : c.min - 8,
+    anchor: cluster.anchor,
+    start: idx === 0 ? -Infinity : cluster.min - 8,
     end: Infinity,
   }));
+
   for (let i = 0; i < colBounds.length - 1; i++) {
-    // Limite entre coluna i e i+1: logo antes de colClusters[i+1].min (com pequena margem)
     const nextMin = colClusters[i + 1].min;
-    const curAnchor = colClusters[i].anchor;
-    const boundary = Math.max((curAnchor + nextMin) / 2, nextMin - 10);
+    const boundary = Math.max((colClusters[i].anchor + nextMin) / 2, nextMin - 10);
     colBounds[i].end = boundary;
     colBounds[i + 1].start = boundary;
   }
 
-  function assignItemToColumn(item) {
-    // Primeiro tenta por x0 dentro de [start, end)
-    for (const b of colBounds) {
-      if (item.x >= b.start && item.x < b.end) return b.idx;
+  const assignItemToColumn = (item) => {
+    for (const bounds of colBounds) {
+      if (item.x >= bounds.start && item.x < bounds.end) return bounds.idx;
     }
-    // Fallback por menor distância ao anchor
     let bestIdx = 0;
-    let bestDist = Infinity;
-    for (const b of colBounds) {
-      const dist = Math.abs(item.x - b.anchor);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = b.idx;
+    let bestDistance = Infinity;
+    for (const bounds of colBounds) {
+      const distance = Math.abs(item.x - bounds.anchor);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIdx = bounds.idx;
       }
     }
     return bestIdx;
-  }
+  };
 
-  // 3. Localizar zona de cabeçalho acima da primeira linha de dados na Página 1
+  // 4. Localizar a zona de cabeçalho acima da primeira linha de dados.
   const firstDataLine = candidateDataLines[0];
-  const p1LinesAbove = allPageLines.filter(
-    (l) => l.page === firstDataLine.page && l.y > firstDataLine.y
-  );
+  const linesAbove = allPageLines
+    .filter((line) => line.page === firstDataLine.page && line.y > firstDataLine.y)
+    .sort((a, b) => a.y - b.y); // mais próximas do dado primeiro
 
-  // Linhas imediatamente acima (dentro de ~45pt) que não são banner/CNPJ/TOTAL
   const headerLines = [];
   const bannerLines = [];
-  const sortedAbove = [...p1LinesAbove].sort((a, b) => a.y - b.y); // mais próximas do dado primeiro
 
-  for (const l of sortedAbove) {
-    const lineText = cleanWhitespace(l.items.map((i) => i.str).join(' '));
-    const norm = normalizeText(lineText);
-    const isBanner =
-      /\b(cnpj|total|conciliacao|periodo|ag\.|c\/c|banco|emitido|pagina|ltda|s\.a\.|relatorio)\b/.test(norm) ||
-      l.items.length === 1 && lineText.length > 35 && !/\|/.test(lineText);
+  for (const line of linesAbove) {
+    const text = lineText(line);
+    const norm = normalizeText(text);
+    const itemCount = line.items.length;
+    const distance = line.y - firstDataLine.y;
 
-    if (!isBanner && l.y - firstDataLine.y <= 45 && bannerLines.length === 0) {
-      headerLines.push(l);
+    // Só a região imediatamente acima dos dados pode conter cabeçalho/banner.
+    if (distance > 160) break;
+
+    const isSummary = isBannerOrSummary(text);
+    const isFarTitle = distance > 45;
+    const isSingleCellBanner =
+      itemCount === 1 &&
+      (text.length > 25 ||
+        /\b(cnpj|cpf|agencia|conta|periodo|emitido|extrato|relatorio|banco)\b/.test(norm));
+
+    if (isSummary || isFarTitle || isSingleCellBanner) {
+      bannerLines.push(text);
+      continue;
+    }
+
+    if (headerLines.length === 0) {
+      headerLines.push(line);
+      continue;
+    }
+
+    const previousY = headerLines[headerLines.length - 1].y;
+    if (previousY - line.y <= 20 && headerLines.length < 3) {
+      headerLines.push(line);
     } else {
-      bannerLines.push(lineText);
+      bannerLines.push(text);
     }
   }
+
   bannerLines.reverse();
-  headerLines.sort((a, b) => b.y - a.y); // topo para baixo
+  headerLines.sort((a, b) => b.y - a.y); // topo → base
 
-  // Mapear cabeçalhos às colunas descobertas (usando centro X ou sobreposição, ideal para cabeçalhos centralizados/multi-linha)
+  // 5. Mapear cada fragmento de cabeçalho à coluna mais provável.
   const headerParts = Array.from({ length: colBounds.length }, () => []);
-  // Definir caixa visual real de cada coluna a partir dos dados para casar cabeçalhos centralizados
-  const colDataExtents = colBounds.map((b) => ({ minX: b.anchor, maxX: b.anchor + 40 }));
+  const colDataExtents = colBounds.map((bounds) => ({ minX: bounds.anchor, maxX: bounds.anchor + 40 }));
+
   for (const line of candidateDataLines.slice(0, 40)) {
-    for (const it of line.items) {
-      const cIdx = assignItemToColumn(it);
-      colDataExtents[cIdx].minX = Math.min(colDataExtents[cIdx].minX, it.x);
-      colDataExtents[cIdx].maxX = Math.max(colDataExtents[cIdx].maxX, it.x + (it.w || 20));
+    for (const item of line.items) {
+      const colIdx = assignItemToColumn(item);
+      colDataExtents[colIdx].minX = Math.min(colDataExtents[colIdx].minX, item.x);
+      colDataExtents[colIdx].maxX = Math.max(
+        colDataExtents[colIdx].maxX,
+        item.x + (item.w || 20)
+      );
     }
   }
 
-  for (const hl of headerLines) {
-    for (const it of hl.items) {
-      const itCenter = it.x + (it.w || 0) / 2;
-      // Escolher coluna cuja extensão ou intervalo [start, end) contenha o centro do item, ou mais próxima
+  for (const headerLine of headerLines) {
+    for (const item of headerLine.items) {
+      const center = item.x + (item.w || 0) / 2;
       let bestCol = 0;
       let bestScore = -Infinity;
-      for (let c = 0; c < colBounds.length; c++) {
-        const ext = colDataExtents[c];
-        const b = colBounds[c];
-        const inExt = itCenter >= ext.minX - 10 && itCenter <= ext.maxX + 10;
-        const inBound = itCenter >= b.start && itCenter < b.end;
-        const extCenter = (ext.minX + ext.maxX) / 2;
-        const dist = Math.abs(itCenter - extCenter);
-        const score = (inExt ? 1000 : 0) + (inBound ? 500 : 0) - dist;
+      for (let col = 0; col < colBounds.length; col++) {
+        const extent = colDataExtents[col];
+        const bounds = colBounds[col];
+        const inExtent = center >= extent.minX - 10 && center <= extent.maxX + 10;
+        const inBounds = center >= bounds.start && center < bounds.end;
+        const distance = Math.abs(center - (extent.minX + extent.maxX) / 2);
+        const score = (inExtent ? 1000 : 0) + (inBounds ? 500 : 0) - distance;
         if (score > bestScore) {
           bestScore = score;
-          bestCol = c;
+          bestCol = col;
         }
       }
-      headerParts[bestCol].push(it.str);
+      headerParts[bestCol].push(item.str);
     }
   }
 
-  const headers = headerParts.map((parts, idx) => {
-    const joined = cleanWhitespace(parts.join(' '));
-    return joined || `Coluna ${idx + 1}`;
-  });
+  const headers = headerParts.map((parts, idx) => cleanWhitespace(parts.join(' ')) || `Coluna ${idx + 1}`);
 
-  // 4. Montar linhas de dados finais em todas as páginas (ignorando cabeçalhos repetidos, banners e totais)
-  const headerNormSig = normalizeText(headers.join(' '));
-  const dataYCutoffPage1 = firstDataLine.y + 2.5;
+  // 6. Montar as linhas de dados de todas as páginas.
+  const headerSignatures = new Set(headerLines.map((line) => normalizeText(lineText(line))));
+  headerSignatures.add(normalizeText(headers.join(' ')));
+
   const rows = [];
-  let skippedRows = 0;
+  const skipped = [];
 
   for (const line of allPageLines) {
-    if (line.page === firstDataLine.page && line.y > dataYCutoffPage1) continue;
-
-    const lineText = cleanWhitespace(line.items.map((i) => i.str).join(' '));
-    const norm = normalizeText(lineText);
+    const norm = normalizeText(lineText(line));
     if (!norm) continue;
 
-    // Pular repetição de cabeçalho ou rodapés/totais
-    if (norm === headerNormSig || /^(total|subtotal|pagina\s+\d+|emitido)/.test(norm)) {
-      skippedRows++;
+    // Linhas acima da primeira linha de dados (na página 1) são cabeçalho/banner.
+    if (line.page === firstDataLine.page && line.y > firstDataLine.y + LINE_TOLERANCE) continue;
+
+    if (headerSignatures.has(norm)) {
+      skipped.push(norm);
       continue;
     }
 
     const cells = Array.from({ length: colBounds.length }, () => []);
-    for (const it of line.items) {
-      const cIdx = assignItemToColumn(it);
-      cells[cIdx].push(it.str);
-    }
+    for (const item of line.items) cells[assignItemToColumn(item)].push(item.str);
     const rowStrings = cells.map((parts) => cleanWhitespace(parts.join(' ')));
 
-    // Verificar se é uma linha de dados válida (contém data em alguma coluna OU valor + >=2 colunas preenchidas)
-    const hasDate = rowStrings.some((s) => parseDateValue(s) !== null);
+    const hasDate = rowStrings.some((value) => parseDateValue(value) !== null);
     const nonEmptyCount = rowStrings.filter(Boolean).length;
+    const text = lineText(line);
+
+    // Linhas de total/resumo só são descartadas quando não têm data própria:
+    // um lançamento cujo histórico começa por "TOTAL ..." continua válido.
+    if (headerSignatures.has(norm) || (isBannerOrSummary(text) && (!hasDate || nonEmptyCount <= 2))) {
+      skipped.push(norm);
+      continue;
+    }
 
     if (hasDate) {
       rows.push(rowStrings);
-    } else if (rows.length > 0 && nonEmptyCount > 0 && nonEmptyCount <= 2 && !/\btotal\b|\bsaldo\b/.test(norm)) {
-      // Possível continuação de linha (descrição quebrada em 2 linhas no PDF)
-      const hasMoney = rowStrings.some((s) => parseMoneyValue(s) !== null);
+      continue;
+    }
+
+    // Continuação de uma descrição quebrada em duas linhas no PDF.
+    if (rows.length > 0 && nonEmptyCount > 0 && nonEmptyCount <= 2) {
+      const hasMoney = rowStrings.some((value) => parseMoneyValue(value) !== null);
       if (!hasMoney) {
-        const prev = rows[rows.length - 1];
-        for (let c = 0; c < rowStrings.length; c++) {
-          if (rowStrings[c]) {
-            prev[c] = cleanWhitespace(`${prev[c]} ${rowStrings[c]}`);
+        const previous = rows[rows.length - 1];
+        for (let col = 0; col < rowStrings.length; col++) {
+          if (rowStrings[col]) {
+            previous[col] = cleanWhitespace(`${previous[col]} ${rowStrings[col]}`);
           }
         }
-      } else {
-        skippedRows++;
+        continue;
       }
-    } else {
-      skippedRows++;
     }
+
+    skipped.push(norm);
+  }
+
+  return {
+    headers,
+    rows,
+    bannerLines: bannerLines.filter(Boolean),
+    skippedRows: skipped.length,
+    columnCount: colBounds.length,
+  };
+}
+
+/**
+ * Parser geométrico adaptativo de PDFs via PDF.js.
+ * Extrai as linhas de texto e delega a reconstrução da tabela para
+ * `buildTableFromTextLines`.
+ */
+export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib, options = {}) {
+  const { pageCount, lines } = await extractPdfLines(arrayBuffer, pdfjsLib, options);
+
+  if (lines.length === 0) {
+    throw new Error(
+      `Nenhum texto extraível encontrado em "${fileName}". O PDF pode ser apenas imagem/escaneado.`
+    );
+  }
+
+  let table;
+  try {
+    table = buildTableFromTextLines(lines);
+  } catch (error) {
+    throw new Error(`${error.message} (${fileName})`);
+  }
+
+  if (table.rows.length === 0) {
+    throw new Error(`Nenhum lançamento com data foi reconhecido em "${fileName}".`);
   }
 
   return {
     fileName,
     fileType: 'pdf',
-    pageCount: doc.numPages,
-    headers,
-    rows,
-    bannerLines,
-    skippedRows,
+    pageCount,
+    headers: table.headers,
+    rows: table.rows,
+    bannerLines: table.bannerLines,
+    skippedRows: table.skippedRows,
   };
 }

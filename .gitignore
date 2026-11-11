@@ -1,4 +1,18 @@
-.DS_Store
+# Dependências (o projeto não usa bundler; vendor/ é versionado de propósito)
 node_modules/
+
+# Sistema operacional / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Logs e artefatos locais
 *.log
 .env
+.env.*
+coverage/
+dist/
+tmp/
+*.pdf.tmp
