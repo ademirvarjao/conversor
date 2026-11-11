@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
@@ -40,6 +40,36 @@ describe('index.html x controlador', () => {
       assert.ok(html.includes(`src="${source}"`), `index.html não referencia ${source}`);
     }
     assert.ok(html.includes('type="module"'), 'app.js precisa ser carregado como módulo');
+  });
+
+  it('usa o título curto do produto', () => {
+    assert.match(html, /<title>Conversor — Conciliação Financeira<\/title>/);
+  });
+
+  it('não usa o nome antigo do produto em nenhum arquivo-fonte', async () => {
+    const names = [...(await readdir(path.join(ROOT, 'src'))), ...(await readdir(path.join(ROOT, 'test')))];
+    const files = [
+      'index.html',
+      'README.md',
+      'package.json',
+      ...names.filter((name) => /\.(m?js|css|json|md)$/.test(name)).flatMap((name) => [
+        path.join('src', name),
+        path.join('test', name),
+      ]),
+    ];
+
+    const offenders = [];
+    for (const relative of files) {
+      let content;
+      try {
+        content = await readFile(path.join(ROOT, relative), 'utf8');
+      } catch {
+        continue; // arquivo do caminho cruzado (src/ vs test/) não existe
+      }
+      if (/cust[óo]dio/i.test(content)) offenders.push(relative);
+    }
+
+    assert.deepEqual(offenders, [], `arquivos com o nome antigo: ${offenders.join(', ')}`);
   });
 
   it('declara idioma, viewport e descrição', () => {

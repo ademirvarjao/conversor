@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Conversor — Conciliação Financeira Inteligente (.xlsx &amp; .pdf)</title>
+  <title>Conversor — Conciliação Financeira</title>
   <meta name="description" content="Importe extratos e relatórios .pdf e .xlsx, padronize em data | valor | histórico e exporte a conciliação em planilha ou PDF. IA adaptativa de layouts, 100% no navegador." />
   <meta name="color-scheme" content="light" />
   <meta name="theme-color" content="#0f2744" />
@@ -244,7 +244,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.5.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.5.1</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -358,7 +358,16 @@
 
             <div id="cloud-identity-active" class="hidden">
               <p>Sua chave de acesso — guarde com você:</p>
-              <p class="cloud-code" id="cloud-code-display">--------</p>
+              <input
+                id="cloud-code-display"
+                class="cloud-code"
+                type="text"
+                value="—"
+                readonly
+                aria-label="Sua chave de acesso"
+                spellcheck="false"
+                autocomplete="off"
+              />
               <div class="btn-row">
                 <button id="btn-cloud-copy" class="btn btn-sm btn-secondary" type="button">Copiar chave</button>
                 <button id="btn-cloud-download" class="btn btn-sm btn-ghost-dark" type="button">Baixar cartão da chave</button>

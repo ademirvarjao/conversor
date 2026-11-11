@@ -1127,7 +1127,7 @@ function bindOutputEvents() {
       const stamp = new Date().toISOString().slice(0, 10);
       await exportToXlsx(
         rows,
-        `Conciliacao_Custodio_${stamp}.xlsx`,
+        `Conciliacao_${stamp}.xlsx`,
         typeof window !== 'undefined' ? window.ExcelJS : undefined
       );
       showToast(`${rows.length} lançamento(s) exportado(s) em .xlsx.`);
@@ -1151,7 +1151,7 @@ function bindOutputEvents() {
       const summary = state.exportOnlyFiltered
         ? summarizeRecords(rows, { skippedCount: state.summary.skippedCount })
         : state.summary;
-      exportToPdf(rows, summary, `Conciliacao_Custodio_${stamp}.pdf`);
+      exportToPdf(rows, summary, `Conciliacao_${stamp}.pdf`);
       showToast(`${rows.length} lançamento(s) exportado(s) em .pdf.`);
     } catch (error) {
       showToast(`Erro ao exportar .pdf: ${error.message}`, 'error');
@@ -1222,10 +1222,10 @@ function bindModalEvents() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'custodio-ia-memoria.json';
+    link.download = 'conversor-ia-memoria.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
-    showToast('Memória exportada em custodio-ia-memoria.json.');
+    showToast('Memória exportada em conversor-ia-memoria.json.');
   });
 
   dom['import-memory-input']?.addEventListener('change', async () => {
@@ -1315,8 +1315,10 @@ function renderCloudPanel() {
   dom['cloud-identity-empty']?.classList.toggle('hidden', !!identity);
   dom['cloud-identity-active']?.classList.toggle('hidden', !identity);
 
-  if (identity && dom['cloud-code-display']) {
-    dom['cloud-code-display'].textContent = formatAccessCode(identity.code);
+  if (dom['cloud-code-display']) {
+    // Campo somente leitura: além do botão "Copiar chave", o usuário pode
+    // selecionar e copiar com Ctrl+C (inclusive no celular).
+    dom['cloud-code-display'].value = identity ? formatAccessCode(identity.code) : '—';
   }
 
   const disableActions = !hasConfig || !identity || cloud.busy;
@@ -1443,6 +1445,25 @@ function scheduleCloudPush() {
   }, 900);
 }
 
+/** Copia a chave; devolve `true` quando o navegador permitiu. */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* permissão negada ou contexto inseguro */
+  }
+  // Plano B: seleciona o campo para o usuário copiar com Ctrl+C.
+  const field = dom['cloud-code-display'];
+  if (field && typeof field.select === 'function') {
+    field.focus();
+    field.select();
+  }
+  return false;
+}
+
 function downloadKeyCard(identity) {
   const code = formatAccessCode(identity.code);
   const content = [
@@ -1505,7 +1526,13 @@ function bindCloudEvents() {
         saveIdentity(identity);
         cloud.identity = identity;
         renderCloudPanel();
-        showToast(`Chave criada: ${formatAccessCode(code)}. Guarde-a para recuperar em outra máquina.`);
+        const shown = formatAccessCode(code);
+        const copied = await copyText(shown);
+        showToast(
+          copied
+            ? `Chave ${shown} criada e copiada. Guarde-a para recuperar em outra máquina.`
+            : `Chave ${shown} criada. Ela está selecionada na tela — copie e guarde.`
+        );
         // Já publica o que existe localmente, para a equipe ver os modelos atuais.
         if (cloud.config) await pushNow({ silent: true });
       } catch (error) {
@@ -1554,12 +1581,17 @@ function bindCloudEvents() {
   dom['btn-cloud-copy']?.addEventListener('click', async () => {
     if (!cloud.identity) return;
     const code = formatAccessCode(cloud.identity.code);
-    try {
-      await navigator.clipboard.writeText(code);
-      showToast('Chave copiada.');
-    } catch {
-      showToast(`Copie manualmente: ${code}`, 'warn');
+    if (await copyText(code)) {
+      showToast(`Chave ${code} copiada.`);
+    } else {
+      showToast(`Chave selecionada — copie com Ctrl+C: ${code}`, 'warn');
     }
+  });
+
+  // Clicar na chave já a deixa selecionada para copiar.
+  dom['cloud-code-display']?.addEventListener('click', () => {
+    if (!cloud.identity) return;
+    dom['cloud-code-display'].select?.();
   });
 
   dom['btn-cloud-download']?.addEventListener('click', () => {
@@ -1668,7 +1700,7 @@ function runDemo() {
         'Parcela 2',
       ],
     ],
-    bannerLines: ['CUSTÓDIO SOLUÇÕES EM CONSTRUÇÕES LTDA'],
+    bannerLines: ['ATLAS SOLUÇÕES EM CONSTRUÇÕES LTDA'],
     skippedRows: 0,
   };
 
@@ -1679,7 +1711,7 @@ function runDemo() {
     availableSheets: [{ name: 'Extrato', rowCount: 3 }],
     headers: ['Dt. Mov.', 'Doc.', 'Histórico Banco', 'Entrada (+)', 'Saída (-)', 'Saldo Dia'],
     rows: [
-      ['02/09/2026', 'TRF-93593', 'TRANSFERENCIA CUSTODIO SOLUCOES', '8.002,12', '', '8.002,12'],
+      ['02/09/2026', 'TRF-93593', 'TRANSFERENCIA ATLAS SOLUCOES', '8.002,12', '', '8.002,12'],
       [
         '08/09/2026',
         '182-1',
@@ -1767,4 +1799,4 @@ try {
 }
 
 // Exposto para depuração manual no console e para testes de integração.
-if (typeof window !== 'undefined') window.__conversorCustodio = { state };
+if (typeof window !== 'undefined') window.__conversor = { state };

@@ -1,5 +1,5 @@
 /**
- * Conversor Custódio — Parsers de Entrada (.pdf e .xlsx)
+ * Conversor — Parsers de Entrada (.pdf e .xlsx)
  *
  * Estratégia:
  *  - PDF: o PDF.js extrai os fragmentos de texto com coordenadas; a reconstrução

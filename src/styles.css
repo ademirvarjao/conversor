@@ -626,17 +626,28 @@ body {
 }
 
 .cloud-code {
+  display: block;
+  width: 100%;
+  max-width: 340px;
   margin: 8px 0;
   font-family: var(--font-mono);
   font-size: 1.35rem;
   font-weight: 700;
   letter-spacing: 0.16em;
+  text-align: center;
   color: var(--navy);
   background: #eff6ff;
   border: 1px dashed var(--primary);
   border-radius: 10px;
   padding: 10px 14px;
-  display: inline-block;
+  cursor: text;
+  user-select: all;
+}
+
+.cloud-code:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  background: #fff;
 }
 
 .cloud-hint {
