@@ -199,6 +199,62 @@ body {
   color: #fff;
 }
 
+.key-paste {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.key-paste:focus-within {
+  border-color: rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+}
+
+.key-paste-input {
+  width: 126px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.key-paste-input::placeholder {
+  color: rgba(226, 232, 240, 0.68);
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.key-paste-input:focus {
+  outline: none;
+}
+
+.btn.btn-key-use {
+  padding: 6px 11px;
+  font-size: 0.78rem;
+  background: #38bdf8;
+  border-color: #38bdf8;
+  color: #06263f;
+  font-weight: 700;
+}
+
+.btn.btn-key-use:hover:not(:disabled) {
+  background: #7dd3fc;
+  border-color: #7dd3fc;
+}
+
 .badge-pill {
   background: rgba(255, 255, 255, 0.16);
   padding: 2px 8px;
@@ -1437,6 +1493,14 @@ body {
   }
   .key-access {
     width: 100%;
+    flex-wrap: wrap;
+  }
+  .key-paste {
+    flex: 1 1 200px;
+  }
+  .key-paste-input {
+    flex: 1;
+    width: auto;
   }
   .key-access .btn-key {
     flex: 1;
