@@ -20,8 +20,10 @@ import {
   candidatesFor,
   contactCode,
   contactSummary,
+  accountMemorySummary,
   learnFromReconciliation,
   learnManualLink,
+  learnRowAccount,
   applyRowAccount,
   isManualAccountCell,
   setRowCellAccount,
@@ -112,6 +114,9 @@ const REQUIRED_IDS = [
   'btn-cp-account-apply',
   'cp-selected-count',
   'cp-account-hint',
+  'btn-cp-apply-suggestions',
+  'cp-memory-state',
+  'cp-link-memory',
   'cp-select-all',
   'cp-page-size',
   'btn-cp-clear-selection',
@@ -208,6 +213,64 @@ function cpAlert(message, tone = 'info') {
   box.innerHTML = message;
 }
 
+/** Mostra o quanto a memória já sabe sobre contas (treino do conciliador). */
+function renderMemoryState() {
+  const element = dom['cp-memory-state'];
+  if (!element) return;
+
+  const summary = accountMemorySummary(state.memory);
+  const contacts = Object.keys(sanitizeCounterparties(state.memory.counterparties).contacts).length;
+  if (summary.total === 0 && contacts === 0) {
+    element.textContent = 'Memória: nenhuma conta memorizada ainda';
+    return;
+  }
+
+  element.textContent =
+    `Memória: ${summary.byHistory} histórico(s) • ${summary.byContact} contato(s) com conta` +
+    (contacts > 0 ? ` • ${contacts} contato(s) conciliado(s)` : '');
+}
+
+/**
+ * Guarda a conta digitada à mão na memória da IA (histórico + contato) e
+ * persiste. Com `persist: false`, quem chamou assume o salvamento no fim.
+ */
+function rememberAccount(row, side, account, { persist = true } = {}) {
+  if (!row || !account) return;
+
+  state.memory.counterparties = learnRowAccount(state.memory, {
+    history: row.rawHistory || row.history,
+    contact: row.contact,
+    side,
+    account,
+  });
+
+  if (persist) {
+    persistMemory();
+    renderMemoryState();
+    scheduleCloudPush();
+  }
+}
+
+let storageWarned = false;
+
+/**
+ * Salva a memória avisando **uma vez** quando o navegador bloqueia (modo
+ * privado, cota cheia). Antes a falha era silenciosa: o usuário achava que o
+ * treino tinha sido guardado.
+ */
+function persistMemory() {
+  if (saveAiMemory(state.memory)) return true;
+  if (!storageWarned) {
+    storageWarned = true;
+    showToast(
+      'O navegador bloqueou o salvamento da memória (modo privado ou armazenamento cheio). As contas aprendidas valem só nesta sessão.',
+      'warn',
+      { duration: 9000 }
+    );
+  }
+  return false;
+}
+
 function counterpartyMemory() {
   if (!state.memory.counterparties) {
     state.memory.counterparties = sanitizeCounterparties(null);
@@ -255,7 +318,10 @@ async function pushModels({ silent = false } = {}) {
     if (!silent) showToast(`Falha ao enviar: ${error.message}`, 'error');
   } finally {
     cloud.busy = false;
-    renderCloudState(dom['cp-cloud-state']?.textContent || '', 'idle');
+    // Só reabilita os botões: o texto/tom do resultado continua visível.
+    for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
+      if (dom[id]) dom[id].disabled = !(cloud.config && cloud.identity);
+    }
   }
 }
 
@@ -277,16 +343,20 @@ async function pullModels() {
     }
 
     state.memory = applyVaultPayload(state.memory, remote.payload);
-    saveAiMemory(state.memory);
+    persistMemory();
+    renderMemoryState();
     cloud.identity = touchIdentitySync({ ...cloud.identity }, remote.updatedAt);
     renderCloudState('Modelos atualizados', 'ok');
-    showToast('Modelos da nuvem aplicados a esta máquina.');
+    showToast('Modelos da nuvem aplicados a esta máquina — as contas memorizadas já valem aqui.');
   } catch (error) {
     renderCloudState('Falha ao baixar', 'error');
     showToast(`Falha ao baixar: ${error.message}`, 'error');
   } finally {
     cloud.busy = false;
-    setTimeout(() => renderCloudState(describeIdentity(), 'idle'), 1200);
+    for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
+      if (dom[id]) dom[id].disabled = !(cloud.config && cloud.identity);
+    }
+    setTimeout(() => renderCloudState(describeIdentity(), 'idle'), 4000);
   }
 }
 
@@ -296,11 +366,19 @@ function describeIdentity() {
   return `Modelos: chave ${code || '—'}`;
 }
 
+let cloudPushTimer = null;
+
+/**
+ * Envia os modelos em segundo plano. O timer é único: várias edições seguidas
+ * (lote, sugestões, vínculos) geram **um** envio, e não um por linha.
+ */
 function scheduleCloudPush() {
   if (!cloud.config || !cloud.identity) return;
-  setTimeout(() => {
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => {
+    cloudPushTimer = null;
     void pushModels({ silent: true });
-  }, 900);
+  }, 1200);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -511,18 +589,28 @@ async function runReconciliation() {
     dom['cp-link-panel']?.classList.add('hidden');
 
     // A IA aprende a cada uso: os vínculos aceitos viram apelidos persistentes.
+    // A estatística conta só o que é **novo** — refazer a conciliação não pode
+    // somar de novo os mesmos vínculos.
+    const before = Object.keys(sanitizeCounterparties(state.memory.counterparties).aliases).length;
     const learned = learnFromReconciliation(state.memory, rows);
+    const after = Object.keys(learned.counterparties.aliases).length;
     state.memory.counterparties = learned.counterparties;
     state.learnedCount = learned.learnedCount;
     state.memory.stats.correctionsLearned =
-      (state.memory.stats.correctionsLearned || 0) + learned.learnedCount;
-    saveAiMemory(state.memory);
+      (state.memory.stats.correctionsLearned || 0) + Math.max(0, after - before);
+    persistMemory();
+    renderMemoryState();
     scheduleCloudPush();
 
     render();
+
+    const suggested = rows.filter((row) => row.accountSuggestion).length;
+    const fromMemory = rows.filter((row) => row.counterpartSource === 'memory').length;
     cpAlert('');
     showToast(
-      `Conciliação concluída: ${stats.matched} de ${stats.total} lançamentos vinculados (${stats.ambiguous} para revisar).`
+      `Conciliação concluída: ${stats.matched} de ${stats.total} lançamentos vinculados (${stats.ambiguous} para revisar).` +
+        (fromMemory ? ` ${fromMemory} conta(s) da memória.` : '') +
+        (suggested ? ` ${suggested} conta(s) sugerida(s).` : '')
     );
   } catch (error) {
     console.error(error);
@@ -589,6 +677,20 @@ function rowsPerPage() {
   return state.pageSize === 'all' ? Infinity : Number(state.pageSize) || DEFAULT_PAGE_SIZE;
 }
 
+/** Chip clicável com a conta que a memória sugere para a linha. */
+function suggestionChip(row) {
+  const suggestion = row?.accountSuggestion;
+  if (!suggestion) return '';
+
+  const label = suggestion.side === 'credit' ? 'crédito' : 'débito';
+  return `<button
+      class="cp-suggest"
+      type="button"
+      data-cp-suggest="${row.id}"
+      title="Conta ${suggestion.account} memorizada pelo ${suggestion.source} — clique para preencher o ${label}"
+    >sugestão: ${suggestion.account} no ${label}</button>`;
+}
+
 function renderRows() {
   const tbody = dom['cp-tbody'];
   if (!tbody) return;
@@ -622,7 +724,9 @@ function renderRows() {
           <td class="col-hist">
             <span class="cp-history">${escapeHtml(row.history)}</span><br />
             ${statusBadge(row)}
+            ${row.counterpartSource === 'memory' ? '<span class="cp-badge is-memory" title="Conta preenchida pela memória da IA">conta da memória</span>' : ''}
             ${row.contact ? `<span class="cp-contact">${escapeHtml(row.contact.name)}</span>` : ''}
+            ${suggestionChip(row)}
           </td>
           <td class="col-cp-link">
             <button class="cp-link-btn" type="button" data-cp-link="${row.id}" title="Vincular este lançamento a outro contato">
@@ -643,6 +747,17 @@ function renderRows() {
   if (dom['cp-btn-next']) dom['cp-btn-next'].disabled = state.page >= totalPages;
 
   renderSelection(rows);
+  renderSuggestionButton();
+}
+
+/** Habilita o botão "Aplicar sugeridas" conforme as sugestões do filtro. */
+function renderSuggestionButton() {
+  const button = dom['btn-cp-apply-suggestions'];
+  if (!button) return;
+
+  const pending = visibleRows().filter((row) => row.accountSuggestion).length;
+  button.disabled = pending === 0;
+  button.textContent = pending > 0 ? `Aplicar ${pending} sugerida(s)` : 'Aplicar sugeridas';
 }
 
 /**
@@ -796,6 +911,48 @@ function batchAccount(side) {
   return contactCode(dom[side === 'credit' ? 'cp-credit-account-input' : 'cp-debit-account-input']?.value ?? '');
 }
 
+/** Aplica a conta sugerida pela memória em um único lançamento. */
+function applySuggestion(rowId) {
+  const row = state.rows.find((item) => item.id === Number(rowId));
+  const suggestion = row?.accountSuggestion;
+  if (!row || !suggestion) return;
+
+  setRowCellAccount(row, suggestion.side, suggestion.account);
+  delete row.accountSuggestion;
+  rememberAccount(row, suggestion.side, suggestion.account);
+
+  state.stats = summarizeReconciliation(state.rows);
+  render();
+
+  showToast(
+    `Conta ${suggestion.account} aplicada no ${suggestion.side === 'credit' ? 'crédito' : 'débito'} — memória reforçada.`
+  );
+}
+
+/** Aplica de uma vez todas as contas sugeridas no filtro atual. */
+function applySuggestionsBatch() {
+  const targets = visibleRows().filter((row) => row.accountSuggestion);
+  if (targets.length === 0) {
+    showToast('Nenhuma conta sugerida neste filtro.', 'warn');
+    return;
+  }
+
+  for (const row of targets) {
+    const suggestion = row.accountSuggestion;
+    setRowCellAccount(row, suggestion.side, suggestion.account);
+    delete row.accountSuggestion;
+    rememberAccount(row, suggestion.side, suggestion.account, { persist: false });
+  }
+
+  persistMemory();
+  renderMemoryState();
+  scheduleCloudPush();
+
+  state.stats = summarizeReconciliation(state.rows);
+  render();
+  showToast(`${targets.length} conta(s) sugerida(s) aplicada(s) — a memória foi reforçada.`);
+}
+
 /**
  * Aplica as contas do lote, conforme o escopo escolhido.
  *
@@ -837,12 +994,20 @@ function applyAccountBatch() {
       const before = side === 'credit' ? row.creditAccount : row.debitAccount;
       setRowCellAccount(row, side, account);
       const after = side === 'credit' ? row.creditAccount : row.debitAccount;
-      if (before !== after) changed += 1;
+      if (before !== after) {
+        changed += 1;
+        // Cada conta aplicada vira treino: histórico + contato.
+        rememberAccount(row, side, account, { persist: false });
+      }
     }
 
     const label = side === 'credit' ? 'crédito' : 'débito';
     if (changed > 0) parts.push(account ? `${label} ${account} em ${changed}` : `limpeza no ${label} em ${changed}`);
   }
+
+  persistMemory();
+  renderMemoryState();
+  scheduleCloudPush();
 
   state.stats = summarizeReconciliation(state.rows);
   render();
@@ -902,6 +1067,8 @@ function applyCellAccount(input) {
   }
 
   setRowCellAccount(row, side, account);
+  delete row.accountSuggestion;
+  rememberAccount(row, side, account);
   state.stats = summarizeReconciliation(state.rows);
   render();
 
@@ -926,6 +1093,9 @@ function applyAccountToLinkingRow() {
   const account = contactCode(raw);
 
   applyRowAccount(row, account);
+  if (account) {
+    rememberAccount(row, row.direction === DIRECTION.PAYMENT ? 'credit' : 'debit', account);
+  }
   state.stats = summarizeReconciliation(state.rows);
   state.linkingId = null;
   dom['cp-link-panel']?.classList.add('hidden');
@@ -1006,8 +1176,24 @@ function openLinkPanel(rowId) {
   state.linkSearch = '';
   if (dom['cp-link-search']) dom['cp-link-search'].value = '';
   if (dom['cp-link-history']) dom['cp-link-history'].textContent = row.rawHistory;
+  const suggestion = row.accountSuggestion;
   if (dom['cp-link-account-input']) {
-    dom['cp-link-account-input'].value = row.counterpartAccount || '';
+    dom['cp-link-account-input'].value = row.counterpartAccount || suggestion?.account || '';
+  }
+  if (dom['cp-link-memory']) {
+    if (suggestion) {
+      dom['cp-link-memory'].textContent =
+        `Sugestão da memória: ${suggestion.account} (pelo ${suggestion.source}, ` +
+        `${suggestion.hits} confirmação(ões)) — já preenchida acima.`;
+    } else if (row.counterpartAccount) {
+      dom['cp-link-memory'].textContent =
+        row.counterpartSource === 'memory'
+          ? `Conta ${row.counterpartAccount} veio da memória (${row.counterpartHits || 1} confirmação(ões)).`
+          : `Conta ${row.counterpartAccount} já preenchida nesta linha — ajuste no campo acima se precisar.`;
+    } else {
+      dom['cp-link-memory'].textContent =
+        'A memória ainda não tem conta para este histórico: ao aplicar, ela passa a sugerir nas próximas vezes.';
+    }
   }
   if (dom['cp-link-account-hint']) {
     const isPayment = row.direction === DIRECTION.PAYMENT;
@@ -1045,7 +1231,10 @@ function applyLink(code) {
   else row.creditAccount = account;
 
   state.memory.counterparties = learnManualLink(state.memory, { history: row.rawHistory, contact });
-  saveAiMemory(state.memory);
+  if (row.debitAccount) rememberAccount(row, 'debit', row.debitAccount, { persist: false });
+  if (row.creditAccount) rememberAccount(row, 'credit', row.creditAccount, { persist: false });
+  persistMemory();
+  renderMemoryState();
   scheduleCloudPush();
 
   state.stats = summarizeReconciliation(state.rows);
@@ -1132,10 +1321,18 @@ function bindEvents() {
   });
 
   dom['cp-tbody']?.addEventListener('click', (event) => {
+    const suggestion = event.target.closest('[data-cp-suggest]');
+    if (suggestion) {
+      applySuggestion(suggestion.dataset.cpSuggest);
+      return;
+    }
+
     const button = event.target.closest('[data-cp-link]');
     if (!button) return;
     openLinkPanel(Number(button.dataset.cpLink));
   });
+
+  dom['btn-cp-apply-suggestions']?.addEventListener('click', applySuggestionsBatch);
 
   dom['cp-tbody']?.addEventListener('change', (event) => {
     const cell = event.target.closest('[data-cp-cell]');
@@ -1238,6 +1435,7 @@ function init() {
 
   counterpartyMemory();
   renderCloudState(describeIdentity(), 'idle');
+  renderMemoryState();
   bindEvents();
   render();
 

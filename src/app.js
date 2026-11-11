@@ -839,7 +839,16 @@ async function processUploadedFiles(fileList) {
       }
     }
 
-    if (added > 0) saveAiMemory(state.memory);
+    if (added > 0) {
+      if (!saveAiMemory(state.memory)) {
+        showToast(
+          'O navegador bloqueou o salvamento da memória da IA (modo privado ou armazenamento cheio) — o treino vale só nesta sessão.',
+          'warn',
+          { duration: 9000 }
+        );
+      }
+      scheduleCloudPush();
+    }
     updateAiBadge();
     rebuildUnifiedOutput();
 
@@ -1434,7 +1443,13 @@ function bindModalEvents() {
   });
 
   dom['btn-export-memory']?.addEventListener('click', () => {
-    const json = JSON.stringify(state.memory, null, 2);
+    // Backup nunca leva a chave do LLM: o arquivo é feito para versionar e
+    // compartilhar, e a chave é um dado pessoal que só fica neste navegador.
+    const backup = {
+      ...state.memory,
+      optionalLlm: { ...state.memory.optionalLlm, apiKey: '' },
+    };
+    const json = JSON.stringify(backup, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1456,7 +1471,14 @@ function bindModalEvents() {
         throw new Error('O arquivo não parece ser uma memória do Conversor.');
       }
 
-      state.memory = normalizeMemory(payload);
+      const imported = normalizeMemory(payload);
+      // A configuração do LLM é local: o backup não a substitui.
+      imported.optionalLlm = {
+        provider: state.memory.optionalLlm?.provider || 'none',
+        apiKey: state.memory.optionalLlm?.apiKey || '',
+        model: state.memory.optionalLlm?.model || '',
+      };
+      state.memory = imported;
       saveAiMemory(state.memory);
       updateAiBadge();
       renderAiModal();
@@ -1476,6 +1498,7 @@ function bindModalEvents() {
     state.memory = resetAiMemory();
     updateAiBadge();
     renderAiModal();
+    scheduleCloudPush();
     showToast('Memória da IA restaurada para o padrão inicial.', 'warn');
   });
 
@@ -1687,11 +1710,19 @@ async function cloudPull({ silent = false } = {}) {
 }
 
 /** Envia em segundo plano depois de treinar (sem travar a interface). */
+let cloudPushTimer = null;
+
+/**
+ * Envia em segundo plano depois de treinar (sem travar a interface). O timer é
+ * único: várias alterações seguidas geram **um** envio, não um por alteração.
+ */
 function scheduleCloudPush() {
   if (!cloud.config || !cloud.identity) return;
-  setTimeout(() => {
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => {
+    cloudPushTimer = null;
     void cloudPush({ silent: true });
-  }, 900);
+  }, 1200);
 }
 
 /** Copia a chave; devolve `true` quando o navegador permitiu. */

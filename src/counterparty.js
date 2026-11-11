@@ -69,6 +69,13 @@ const AMBIGUITY_MARGIN = 0.06;
 const MAX_ALIASES = 800;
 const MAX_KNOWN_CONTACTS = 4000;
 const MAX_TOKEN_WEIGHT = 6;
+/** Quantos históricos/contatos com conta memorizada ficam guardados. */
+const MAX_ACCOUNT_ENTRIES = 600;
+/**
+ * A partir de quantas confirmações a conta aprendida é aplicada sozinha. Com
+ * uma só confirmação ela aparece como **sugestão** clicável.
+ */
+const ACCOUNT_AUTO_CONFIRM_HITS = 2;
 
 /* -------------------------------------------------------------------------- */
 /*                             Texto e normalização                          */
@@ -816,7 +823,7 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
     // sem pontuação), escolhida pela natureza: pagamento → fornecedor credora
     // (débito); recebimento → cliente devedora (crédito).
     const account = contact ? contactCode(contact.code) : '';
-    rows.push({
+    const row = {
       date: transaction.date,
       dateIso: transaction.dateIso,
       direction: transaction.direction,
@@ -840,7 +847,24 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
       score: Number(best.score.toFixed(3)),
       status: best.status,
       learnedAlias: !!best.learnedAlias,
-    });
+    };
+
+    // Treino de contas: aplica a conta já confirmada; as demais ficam como
+    // sugestão clicável na tabela.
+    const suggestion = accountSuggestion(row, learned?.accounts);
+    if (suggestion) {
+      if (suggestion.hits >= ACCOUNT_AUTO_CONFIRM_HITS) {
+        if (suggestion.side === 'credit') row.creditAccount = suggestion.account;
+        else row.debitAccount = suggestion.account;
+        row.counterpartAccount = suggestion.account;
+        row.counterpartSource = 'memory';
+        row.counterpartHits = suggestion.hits;
+      } else {
+        row.accountSuggestion = suggestion;
+      }
+    }
+
+    rows.push(row);
   }
 
   return { rows, stats: summarizeReconciliation(rows) };
@@ -915,7 +939,63 @@ export function summarizeReconciliation(rows) {
 /* -------------------------------------------------------------------------- */
 
 export function emptyCounterparties() {
-  return { version: 1, aliases: {}, tokenWeights: {}, contacts: {}, uses: 0, updatedAt: null };
+  return {
+    version: 2,
+    aliases: {},
+    tokenWeights: {},
+    contacts: {},
+    /**
+     * Contas digitadas à mão, memorizadas por origem do histórico e por
+     * contato: `{ byHistory: { chave: { debit, credit, hits, updatedAt } },
+     * byContact: { contato: { debit, credit, hits, updatedAt } } }`.
+     */
+    accounts: { byHistory: {}, byContact: {} },
+    uses: 0,
+    updatedAt: null,
+  };
+}
+
+/** Normaliza o bloco de contas memorizadas (nunca lança). */
+function sanitizeAccounts(raw) {
+  const byHistory = {};
+  const byContact = {};
+
+  const readBucket = (source, target, keyLimit) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+    for (const [key, info] of Object.entries(source)) {
+      if (!info || typeof info !== 'object') continue;
+      const cleanKey = String(key).trim().slice(0, keyLimit);
+      if (!cleanKey) continue;
+
+      const debit = contactCode(info.debit).slice(0, 40);
+      const credit = contactCode(info.credit).slice(0, 40);
+      if (!debit && !credit) continue;
+
+      target[cleanKey] = {
+        debit,
+        credit,
+        hits: Math.max(0, Math.floor(Number(info.hits) || 0)),
+        updatedAt: typeof info.updatedAt === 'string' ? info.updatedAt : null,
+      };
+    }
+  };
+
+  readBucket(raw?.byHistory, byHistory, 80);
+  readBucket(raw?.byContact, byContact, 40);
+  return { byHistory, byContact };
+}
+
+/** Mantém só as entradas mais recentes, para a memória não crescer sem limite. */
+function trimAccounts(accounts) {
+  for (const bucket of [accounts.byHistory, accounts.byContact]) {
+    const keys = Object.keys(bucket);
+    if (keys.length <= MAX_ACCOUNT_ENTRIES) continue;
+
+    keys
+      .sort((a, b) => String(bucket[a].updatedAt || '').localeCompare(String(bucket[b].updatedAt || '')))
+      .slice(MAX_ACCOUNT_ENTRIES)
+      .forEach((key) => delete bucket[key]);
+  }
 }
 
 /** Normaliza o bloco de aprendizado vindo do localStorage ou de um backup. */
@@ -964,10 +1044,11 @@ export function sanitizeCounterparties(raw) {
   }
 
   return {
-    version: 1,
+    version: 2,
     aliases,
     tokenWeights,
     contacts,
+    accounts: sanitizeAccounts(raw.accounts),
     uses: Math.max(0, Math.floor(Number(raw.uses) || 0)),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : null,
   };
@@ -1059,6 +1140,96 @@ export function learnManualLink(memory, { history, contact }, options = {}) {
   learned.updatedAt = options.now || new Date().toISOString();
 
   return learned;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Contas memorizadas (treino)                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Memoriza a conta que o usuário digitou para um histórico/contato.
+ *
+ * Guarda nas duas chaves possíveis — o histórico normalizado (vale para
+ * lançamentos iguais futuros) e o contato (vale para qualquer histórico
+ * daquele cliente/fornecedor). Repetir a **mesma** conta soma confiança; digitar
+ * outra conta reinicia a contagem daquele lado.
+ *
+ * @returns {object} o bloco `counterparties` já normalizado
+ */
+export function learnRowAccount(memory, { history, contact, side, account }, options = {}) {
+  const learned = sanitizeCounterparties(memory?.counterparties);
+  const cell = side === 'credit' ? 'credit' : 'debit';
+  const code = contactCode(account);
+  if (!code) return learned;
+
+  const now = options.now || new Date().toISOString();
+  const historyKey = historyCore(history);
+  const contactKey = contactCode(contact?.code);
+
+  const targets = [];
+  if (historyKey && historyKey.length >= 4) targets.push([learned.accounts.byHistory, historyKey]);
+  if (contactKey) targets.push([learned.accounts.byContact, contactKey]);
+
+  for (const [bucket, key] of targets) {
+    const current = bucket[key] || { debit: '', credit: '', hits: 0, updatedAt: null };
+    const repeated = current[cell] === code;
+    bucket[key] = {
+      debit: current.debit || '',
+      credit: current.credit || '',
+      [cell]: code,
+      hits: repeated ? (Number(current.hits) || 0) + 1 : 1,
+      updatedAt: now,
+    };
+  }
+
+  trimAccounts(learned.accounts);
+  learned.updatedAt = now;
+  return learned;
+}
+
+/** Quantas contas a memória já guardou (para exibir no painel). */
+export function accountMemorySummary(memory) {
+  const learned = sanitizeCounterparties(memory?.counterparties);
+  const byHistory = Object.keys(learned.accounts.byHistory).length;
+  const byContact = Object.keys(learned.accounts.byContact).length;
+  return { byHistory, byContact, total: byHistory + byContact };
+}
+
+/**
+ * Conta que a memória sugere para completar um lançamento.
+ *
+ * - Com contato: só a **coluna oposta** (a contrapartida), nunca a conta do
+ *   próprio contato.
+ * - Sem contato: primeiro a coluna da direção (a conta do cliente/fornecedor),
+ *   depois a oposta.
+ *
+ * @returns {{side: 'debit'|'credit', account: string, hits: number, source: string}|null}
+ */
+export function accountSuggestion(row, accounts) {
+  if (!row || !accounts) return null;
+
+  const contactSide = contactAccountSide(row);
+  const oppositeSide = contactSide === 'debit' ? 'credit' : 'debit';
+  const sides = row.contact ? [oppositeSide] : [contactSide, oppositeSide];
+
+  const historyKey = historyCore(row.rawHistory || row.history || '');
+  const byHistory = historyKey ? accounts.byHistory?.[historyKey] : null;
+  const byContact = row.contact ? accounts.byContact?.[contactCode(row.contact.code)] : null;
+
+  for (const source of [
+    { name: 'histórico', entry: byHistory },
+    { name: 'contato', entry: byContact },
+  ]) {
+    if (!source.entry) continue;
+    for (const side of sides) {
+      const filled = side === 'credit' ? row.creditAccount : row.debitAccount;
+      const account = contactCode(source.entry[side]);
+      if (filled || !account) continue;
+      return { side, account, hits: Number(source.entry.hits) || 0, source: source.name };
+    }
+  }
+
+  return null;
 }
 
 /* -------------------------------------------------------------------------- */

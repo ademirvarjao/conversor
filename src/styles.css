@@ -2273,3 +2273,38 @@ body {
   border-color: var(--primary);
   background: #fff;
 }
+
+/* Treino de contas no conciliador: chip de sugestão e memória */
+.cp-suggest {
+  display: inline-block;
+  margin-top: 6px;
+  margin-left: 4px;
+  padding: 3px 9px;
+  border: 1px dashed var(--primary);
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cp-suggest:hover {
+  background: #dbeafe;
+}
+
+.cp-suggest:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.cp-badge.is-memory {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.cp-memory-state {
+  max-width: 42ch;
+  white-space: normal;
+  line-height: 1.25;
+}
