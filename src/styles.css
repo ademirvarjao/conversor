@@ -811,6 +811,48 @@ body {
   flex: 1 1 220px;
 }
 
+/* Portão de login da aba Nuvem. */
+.cloud-lock h3 {
+  margin-bottom: 6px;
+}
+
+.cloud-lock-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.cloud-lock-fields .field-group {
+  flex: 1 1 180px;
+}
+
+.cloud-lock-error {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fdecec;
+  border: 1px solid #f3bdbd;
+  color: #a12622;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.cloud-lock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.cloud-lock-actions .cloud-hint {
+  margin: 0;
+}
+
+.btn-key.is-locked .key-code {
+  letter-spacing: 0.12em;
+}
+
 /* Aviso de tabela ausente: só aparece quando o banco responde mas a migração
    do repositório ainda não rodou no projeto. */
 .cloud-setup-hint {
