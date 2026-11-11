@@ -161,6 +161,11 @@
           <strong>débito</strong>; em pagamentos (débito) ela vai para o <strong>crédito</strong>. Deixe o campo vazio e
           aplique para limpar.
         </p>
+        <p class="cp-account-hint">
+          Nas colunas <strong>debito</strong> e <strong>credito</strong> da tabela, as células vazias aceitam digitação:
+          clique e informe a conta para completar o lançamento. Contas que vieram do cadastro do contato não são
+          substituídas por ali.
+        </p>
       </div>
 
       <div class="toolbar cp-toolbar">
@@ -178,15 +183,15 @@
 
       <div class="table-wrap output-table-wrap">
         <table class="data-table cp-table">
-          <caption class="sr-only">Conciliação no layout data, débito, crédito, valor e histórico — débito e crédito trazem a conta do contato (contactb) sem pontuação</caption>
+          <caption class="sr-only">Conciliação no layout data, débito, crédito, valor e histórico — débito e crédito trazem a conta do contato (contactb) sem pontuação; células vazias aceitam digitação</caption>
           <thead>
             <tr>
               <th scope="col" class="col-select">
                 <input id="cp-select-all" type="checkbox" aria-label="Selecionar todos os lançamentos desta página" />
               </th>
               <th scope="col" class="col-date">data</th>
-              <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos">debito</th>
-              <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos">credito</th>
+              <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos — célula vazia aceita digitação">debito</th>
+              <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos — célula vazia aceita digitação">credito</th>
               <th scope="col" class="col-money">valor</th>
               <th scope="col" class="col-hist">historico</th>
               <th scope="col" class="col-cp-link">vínculo</th>
@@ -250,7 +255,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.9.4</span> — os arquivos nunca saem do navegador;
+        Conversor <span id="app-version" class="footer-version">v1.9.5</span> — os arquivos nunca saem do navegador;
         só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.
       </p>
       <p>Layout da conciliação: <code>data</code> | <code>debito</code> | <code>credito</code> | <code>valor</code> | <code>historico</code>.</p>
