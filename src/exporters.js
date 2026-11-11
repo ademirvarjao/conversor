@@ -1,73 +1,85 @@
 /**
  * Conversor Custódio — Exportadores (.xlsx e .pdf)
- * Gera planilhas Excel e relatórios PDF padronizados no layout:
- * data (dd/mm/aaaa) | valor (0000,00 / -0000,00) | historico (texto)
+ *
+ * Layout padronizado: data (dd/mm/aaaa) | valor (0000,00 / -0000,00) | historico (texto)
+ * Ambos os exportadores são funções puras de geração de arquivo: recebem os
+ * registros já normalizados e devolvem/baixam o documento.
  */
 
-import { isoToUtcDate } from './parsers.js';
+import { formatValuePlainBr, isoToUtcDate } from './format.js';
+import { formatPeriodLabel, summarizeRecords } from './summary.js';
 
-export function formatValuePlainBr(num) {
-  const rounded = Math.round(Number(num) * 100) / 100;
-  const fixed = Math.abs(rounded).toFixed(2).replace('.', ',');
-  return rounded < 0 ? `-${fixed}` : fixed;
-}
+/** Limite de linhas da planilha Excel (menos a linha de cabeçalho e margem). */
+const EXCEL_ROW_LIMIT = 1048576 - 2;
 
-export function formatValueCurrencyBr(num) {
-  const rounded = Math.round(Number(num) * 100) / 100;
-  const formatted = Math.abs(rounded).toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return rounded < 0 ? `-R$ ${formatted}` : `R$ ${formatted}`;
-}
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function triggerDownload(blob, fileName) {
+  if (typeof document === 'undefined') return;
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
   setTimeout(() => {
-    document.body.removeChild(a);
+    link.remove();
     URL.revokeObjectURL(url);
   }, 1500);
 }
 
+function normalizeRecords(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row) => row && isoToUtcDate(row.dateIso))
+    .map((row) => ({
+      dateIso: row.dateIso,
+      dateBr: row.dateBr || '',
+      value: Math.round(Number(row.value) * 100) / 100 || 0,
+      history: String(row.history ?? ''),
+      sourceFile: row.sourceFile || '',
+    }));
+}
+
 /**
- * Exporta registros ordenados para .xlsx (aba única 'Conciliacao')
+ * Exporta os registros para .xlsx em uma única aba (pronta para importação contábil).
+ * @returns {Promise<ArrayBuffer>}
  */
-export async function exportToXlsx(rows, outputName = 'Conciliacao_Custodio.xlsx', ExcelJSRef) {
-  const ExcelJS = ExcelJSRef || window.ExcelJS;
+export async function exportToXlsx(rows, outputName = 'Conciliacao_Custodio.xlsx', ExcelJSRef, options = {}) {
+  const ExcelJS = ExcelJSRef || (typeof window !== 'undefined' ? window.ExcelJS : undefined);
   if (!ExcelJS) throw new Error('Biblioteca ExcelJS não carregada.');
 
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'Conversor Custódio';
-  wb.created = new Date();
+  const records = normalizeRecords(rows);
+  if (records.length === 0) throw new Error('Não há lançamentos válidos para exportar.');
+  if (records.length > EXCEL_ROW_LIMIT) {
+    throw new Error(
+      `O arquivo tem ${records.length} lançamentos e o Excel aceita até ${EXCEL_ROW_LIMIT}. Divida a conciliação.`
+    );
+  }
 
-  const ws = wb.addWorksheet('Conciliacao', {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Conversor Custódio';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet(options.sheetName || 'Conciliacao', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
 
-  ws.columns = [
+  const longestHistory = records.reduce((max, record) => Math.max(max, record.history.length), 0);
+
+  worksheet.columns = [
     { header: 'data', key: 'data', width: 14 },
     { header: 'valor', key: 'valor', width: 16 },
-    {
-      header: 'historico',
-      key: 'historico',
-      width: Math.min(220, Math.max(60, ...rows.map((r) => (r.history?.length || 0) + 6))),
-    },
+    { header: 'historico', key: 'historico', width: Math.min(120, Math.max(60, longestHistory + 6)) },
   ];
 
-  const headerRow = ws.getRow(1);
+  const headerRow = worksheet.getRow(1);
   headerRow.height = 24;
   headerRow.eachCell((cell, colNumber) => {
     cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2744' } };
-    cell.alignment = {
-      horizontal: colNumber === 3 ? 'left' : 'center',
-      vertical: 'middle',
-    };
+    cell.alignment = { horizontal: colNumber === 3 ? 'left' : 'center', vertical: 'middle' };
     cell.border = {
       top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
       bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
@@ -83,99 +95,139 @@ export async function exportToXlsx(rows, outputName = 'Conciliacao_Custodio.xlsx
     right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
   };
 
-  for (let i = 0; i < rows.length; i++) {
-    const rec = rows[i];
-    const row = ws.addRow({
-      data: isoToUtcDate(rec.dateIso),
-      valor: Math.round(rec.value * 100) / 100,
-      historico: String(rec.history ?? ''),
+  for (const record of records) {
+    const row = worksheet.addRow({
+      data: isoToUtcDate(record.dateIso),
+      valor: record.value,
+      historico: record.history,
     });
     row.height = 18;
 
-    const cDate = row.getCell(1);
-    cDate.numFmt = 'dd/mm/yyyy';
-    cDate.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
-    cDate.alignment = { horizontal: 'center', vertical: 'middle' };
-    cDate.border = thinBorder;
+    const dateCell = row.getCell(1);
+    dateCell.numFmt = 'dd/mm/yyyy';
+    dateCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
+    dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    dateCell.border = thinBorder;
 
-    const cVal = row.getCell(2);
-    cVal.numFmt = '0.00';
-    cVal.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
-    cVal.alignment = { horizontal: 'right', vertical: 'middle' };
-    cVal.border = thinBorder;
+    const valueCell = row.getCell(2);
+    valueCell.numFmt = '0.00';
+    valueCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
+    valueCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    valueCell.border = thinBorder;
 
-    const cHist = row.getCell(3);
-    cHist.numFmt = '@';
-    cHist.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
-    cHist.alignment = { horizontal: 'left', vertical: 'middle' };
-    cHist.border = thinBorder;
+    const historyCell = row.getCell(3);
+    historyCell.numFmt = '@';
+    historyCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
+    historyCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
+    historyCell.border = thinBorder;
   }
 
-  ws.autoFilter = {
+  worksheet.autoFilter = {
     from: { row: 1, column: 1 },
-    to: { row: rows.length + 1, column: 3 },
+    to: { row: records.length + 1, column: 3 },
   };
 
-  const buffer = await wb.xlsx.writeBuffer();
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    triggerDownload(blob, outputName);
+  const buffer = await workbook.xlsx.writeBuffer();
+
+  if (typeof document !== 'undefined' && typeof Blob !== 'undefined') {
+    triggerDownload(new Blob([buffer], { type: XLSX_MIME }), outputName);
   }
   return buffer;
 }
 
-/**
- * Exporta registros ordenados para .pdf (usando jsPDF + autoTable)
- */
-export function exportToPdf(rows, summary, outputName = 'Conciliacao_Custodio.pdf') {
-  const jspdfNs = window.jspdf;
-  if (!jspdfNs || !jspdfNs.jsPDF) {
-    throw new Error('Biblioteca jsPDF não carregada.');
-  }
+/* -------------------------------------------------------------------------- */
+/*                                    PDF                                     */
+/* -------------------------------------------------------------------------- */
 
-  const { jsPDF } = jspdfNs;
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4',
-  });
+function resolveAutoTable(doc) {
+  if (typeof doc.autoTable === 'function') return (options) => doc.autoTable(options);
+  if (typeof globalThis !== 'undefined' && typeof globalThis.autoTable === 'function') {
+    return (options) => globalThis.autoTable(doc, options);
+  }
+  if (typeof window !== 'undefined' && typeof window.autoTable === 'function') {
+    return (options) => window.autoTable(doc, options);
+  }
+  throw new Error('Plugin jsPDF-AutoTable não inicializado.');
+}
+
+/**
+ * Exporta os registros para um relatório A4 paisagem paginado.
+ * @param {object} [options] `{ title?, autoSave? }` — `autoSave: false` apenas
+ *   gera o documento sem baixar (usado em testes e pré-visualização).
+ * @returns {object} instância do jsPDF (útil para testes/preview)
+ */
+export function exportToPdf(rows, summary, outputName = 'Conciliacao_Custodio.pdf', options = {}) {
+  const jspdfNamespace = typeof window !== 'undefined' ? window.jspdf : undefined;
+  const jsPDF = jspdfNamespace?.jsPDF;
+  if (!jsPDF) throw new Error('Biblioteca jsPDF não carregada.');
+
+  const records = normalizeRecords(rows);
+  if (records.length === 0) throw new Error('Não há lançamentos válidos para exportar.');
+
+  const totals = summary && Number.isFinite(summary.netTotal) ? summary : summarizeRecords(records);
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const autoTable = resolveAutoTable(doc);
 
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 12;
+  const title = options.title || 'CONVERSOR CUSTÓDIO — Conciliação Unificada';
+  const generatedAt = new Date().toLocaleString('pt-BR');
 
-  // Cabeçalho institucional
-  doc.setFillColor(15, 39, 68);
-  doc.rect(0, 0, pageWidth, 24, 'F');
+  const drawHeader = () => {
+    doc.setFillColor(15, 39, 68);
+    doc.rect(0, 0, pageWidth, 24, 'F');
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('CONVERSOR CUSTÓDIO — Conciliação Unificada', marginX, 10.5);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(title, marginX, 10.5);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  const periodLabel = summary.minDateBr && summary.maxDateBr
-    ? `Período: ${summary.minDateBr} a ${summary.maxDateBr}`
-    : 'Período não identificado';
-  doc.text(
-    `${periodLabel}   •   Lançamentos: ${rows.length}   •   Recebimentos: ${formatValuePlainBr(summary.totalIn)}   •   Pagamentos: ${formatValuePlainBr(summary.totalOut)}   •   Saldo: ${formatValuePlainBr(summary.netTotal)}`,
-    marginX,
-    17.5
-  );
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(
+      [
+        formatPeriodLabel(totals),
+        `Lançamentos: ${records.length}`,
+        `Recebimentos: ${formatValuePlainBr(totals.totalIn)}`,
+        `Pagamentos: ${formatValuePlainBr(Math.abs(totals.totalOut))}`,
+        `Saldo: ${formatValuePlainBr(totals.netTotal)}`,
+      ].join('   •   '),
+      marginX,
+      17.5
+    );
+  };
 
-  const body = rows.map((r) => [
-    r.dateBr,
-    formatValuePlainBr(r.value),
-    String(r.history ?? ''),
+  const drawFooter = (pageNumber) => {
+    const pageCount = doc.internal.getNumberOfPages();
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Conversor Custódio • Gerado em ${generatedAt}`, marginX, pageHeight - 6);
+    doc.text(`Página ${pageNumber} de ${pageCount}`, pageWidth - marginX, pageHeight - 6, {
+      align: 'right',
+    });
+  };
+
+  const body = records.map((record) => [
+    record.dateBr || record.dateIso.split('-').reverse().join('/'),
+    formatValuePlainBr(record.value),
+    record.history,
   ]);
 
-  const tableOpts = {
+  const foot = [
+    [
+      'TOTAIS',
+      formatValuePlainBr(totals.netTotal),
+      `${records.length} lançamento(s) • Entradas ${formatValuePlainBr(totals.totalIn)} • Saídas ${formatValuePlainBr(Math.abs(totals.totalOut))}`,
+    ],
+  ];
+
+  autoTable({
     startY: 28,
     margin: { left: marginX, right: marginX, top: 28, bottom: 14 },
     head: [['data', 'valor', 'historico']],
     body,
+    foot,
     theme: 'grid',
     styles: {
       font: 'helvetica',
@@ -193,52 +245,31 @@ export function exportToPdf(rows, summary, outputName = 'Conciliacao_Custodio.pd
       fontSize: 8.5,
       halign: 'left',
     },
+    footStyles: {
+      fillColor: [241, 245, 249],
+      textColor: [15, 39, 68],
+      fontStyle: 'bold',
+      fontSize: 8,
+      halign: 'left',
+    },
     columnStyles: {
       0: { cellWidth: 23, halign: 'center' },
-      1: { cellWidth: 28, halign: 'right', fontStyle: 'bold' },
+      1: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
       2: { cellWidth: 'auto', halign: 'left' },
     },
-    alternateRowStyles: {
-      fillColor: [248, 250, 252],
-    },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
     didParseCell(hookData) {
       if (hookData.section === 'body' && hookData.column.index === 1) {
-        const rawText = String(hookData.cell.raw || '');
-        if (rawText.startsWith('-')) {
-          hookData.cell.styles.textColor = [185, 28, 28];
-        } else {
-          hookData.cell.styles.textColor = [4, 120, 87];
-        }
-      }
-      if (hookData.section === 'head' && hookData.column.index <= 1) {
-        hookData.cell.styles.halign = hookData.column.index === 0 ? 'center' : 'right';
+        const raw = String(hookData.cell.raw || '');
+        hookData.cell.styles.textColor = raw.startsWith('-') ? [185, 28, 28] : [4, 120, 87];
       }
     },
     didDrawPage(data) {
-      const pageCount = doc.internal.getNumberOfPages();
-      doc.setFontSize(7.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text(
-        `Conversor Custódio • Gerado em ${new Date().toLocaleString('pt-BR')}`,
-        marginX,
-        doc.internal.pageSize.getHeight() - 6
-      );
-      doc.text(
-        `Página ${data.pageNumber} de ${pageCount}`,
-        pageWidth - marginX,
-        doc.internal.pageSize.getHeight() - 6,
-        { align: 'right' }
-      );
+      if (data.pageNumber > 1) drawHeader();
+      drawFooter(data.pageNumber);
     },
-  };
+  });
 
-  if (typeof doc.autoTable === 'function') {
-    doc.autoTable(tableOpts);
-  } else if (typeof window.autoTable === 'function') {
-    window.autoTable(doc, tableOpts);
-  } else {
-    throw new Error('Plugin jsPDF-AutoTable não inicializado.');
-  }
-
-  doc.save(outputName);
+  if (options.autoSave !== false) doc.save(outputName);
+  return doc;
 }
