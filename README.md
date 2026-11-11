@@ -71,7 +71,9 @@ A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitur
    git remote add origin https://github.com/SEU-USUARIO/conversor-custodio.git
    git push -u origin main
    ```
-2. Em **Settings → Pages**, escolha **GitHub Actions** (o workflow `.github/workflows/deploy.yml` já está configurado) **ou** **Deploy from a branch** → `main` → `/ (root)`.
+2. **Habilite o GitHub Pages** em **Settings → Pages → Build and deployment → Source** e escolha **GitHub Actions**.
+   > Esse passo é obrigatório e só pode ser feito por quem administra o repositório. Sem ele, o workflow de deploy não encontra o site do Pages e para (o log mostra exatamente esse aviso).
+   > Alternativa automatizada: crie um secret `PAGES_TOKEN` com um PAT que tenha permissão de Pages — o workflow então habilita o site sozinho.
 3. Em ~30 segundos o app estará em `https://SEU-USUARIO.github.io/conversor-custodio/`.
 
 O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e pull request.
@@ -109,6 +111,15 @@ conversor-custodio/
 - **Acessibilidade**: navegação por teclado, foco visível, `aria-live` para resultados, modal com foco controlado/`Esc`, tabelas com `scope` e legendas, respeito a `prefers-reduced-motion`.
 - **Segurança**: todo conteúdo de arquivo é escapado antes de ir para o DOM (`escapeHtml`), chaves de API ficam apenas no `localStorage` do usuário e a importação de memória é validada.
 - **Sem build, sem CDN**: bibliotecas vendorizadas, módulos ES nativos — o deploy é um `git push`.
+
+## Solução de problemas
+
+| Sintoma | Causa | Como resolver |
+| --- | --- | --- |
+| O workflow de deploy falha em **“Configurar GitHub Pages”** com `Get Pages site failed ... Not Found` | O site do Pages nunca foi habilitado no repositório | **Settings → Pages → Source: GitHub Actions** e rode o workflow novamente |
+| A página do Pages abre sem estilo / sem funcionar | O deploy publicou apenas parte dos arquivos | Rode o workflow novamente; ele publica `index.html`, `src/` e `vendor/` (incluindo `src/parsers.js`) |
+| “Nenhum texto extraível encontrado” ao importar PDF | PDF escaneado (sem camada de texto) | Use um PDF exportado do sistema de origem ou aplique OCR antes |
+| Planilha importa muitas linhas ignoradas | Linhas sem data ou sem valor na coluna mapeada | Ajuste o mapeamento no **Passo 2** — a IA aprende com a correção |
 
 ## Limitações conhecidas
 
