@@ -8,7 +8,9 @@ import {
   buildContactsFromLines,
   buildContactsFromTable,
   buildSourceTransactions,
+  contactAccountSide,
   contactCode,
+  isManualAccountCell,
   contactSummary,
   historyCore,
   learnFromReconciliation,
@@ -20,6 +22,8 @@ import {
   reconcileCounterparties,
   sanitizeCounterparties,
   scoreCandidates,
+  setRowCellAccount,
+  syncCounterpartAccount,
   significantTokens,
   summarizeReconciliation,
 } from '../src/counterparty.js';
@@ -475,6 +479,92 @@ describe('conta de contrapartida digitada à mão', () => {
         ['999', '1000077'],
       ]
     );
+  });
+});
+
+describe('edição das colunas de débito e crédito na tabela', () => {
+  it('preenche a célula vazia do lado oposto e ela vira a contrapartida', () => {
+    const pagamento = {
+      direction: DIRECTION.PAYMENT,
+      debitAccount: '6209355',
+      creditAccount: '',
+      counterpartAccount: '',
+    };
+    setRowCellAccount(pagamento, 'credit', '1.234-5');
+    assert.equal(pagamento.creditAccount, '12345', 'a conta digitada entra sem pontuação');
+    assert.equal(pagamento.debitAccount, '6209355');
+    assert.equal(pagamento.counterpartAccount, '12345');
+
+    const recebimento = {
+      direction: DIRECTION.RECEIPT,
+      debitAccount: '',
+      creditAccount: '1000077',
+      counterpartAccount: '',
+    };
+    setRowCellAccount(recebimento, 'debit', '500046');
+    assert.equal(recebimento.debitAccount, '500046');
+    assert.equal(recebimento.creditAccount, '1000077');
+    assert.equal(recebimento.counterpartAccount, '500046');
+  });
+
+  it('não sobrescreve a conta que veio do cadastro do contato', () => {
+    const row = {
+      direction: DIRECTION.PAYMENT,
+      debitAccount: '6209355',
+      creditAccount: '',
+      counterpartAccount: '',
+    };
+    setRowCellAccount(row, 'debit', '999999');
+    assert.equal(row.debitAccount, '6209355', 'o débito do fornecedor fica intacto');
+    assert.equal(row.counterpartAccount, '');
+  });
+
+  it('numa linha sem contato aceita as duas colunas e permite corrigir o que foi digitado', () => {
+    const row = {
+      direction: DIRECTION.PAYMENT,
+      debitAccount: '',
+      creditAccount: '',
+      counterpartAccount: '',
+      status: 'unmatched',
+      contact: null,
+    };
+
+    setRowCellAccount(row, 'debit', '6209355');
+    assert.equal(row.debitAccount, '6209355');
+    assert.equal(isManualAccountCell(row, 'debit'), true);
+    assert.equal(isManualAccountCell(row, 'credit'), false);
+    assert.equal(row.status, 'unmatched');
+    assert.equal(row.contact, null);
+
+    // A célula digitada pelo usuário continua editável.
+    setRowCellAccount(row, 'debit', '777');
+    assert.equal(row.debitAccount, '777');
+
+    // Limpar devolve a célula ao estado vazio.
+    setRowCellAccount(row, 'debit', '');
+    assert.equal(row.debitAccount, '');
+    assert.equal(isManualAccountCell(row, 'debit'), false);
+    assert.equal(row.counterpartAccount, '');
+  });
+
+  it('numa linha sem contato, o lado oposto também pode ser preenchido', () => {
+    const row = { direction: DIRECTION.RECEIPT, debitAccount: '', creditAccount: '', counterpartAccount: '' };
+    setRowCellAccount(row, 'debit', '12345');
+    setRowCellAccount(row, 'credit', '1000077');
+    assert.deepEqual([row.debitAccount, row.creditAccount], ['12345', '1000077']);
+    assert.equal(row.counterpartAccount, '12345', 'a contrapartida é o lado oposto ao do cliente');
+  });
+
+  it('recalcula a contrapartida a partir das colunas, pela direção', () => {
+    assert.equal(contactAccountSide({ direction: DIRECTION.PAYMENT }), 'debit');
+    assert.equal(contactAccountSide({ direction: DIRECTION.RECEIPT }), 'credit');
+
+    const row = { direction: DIRECTION.PAYMENT, debitAccount: '6209355', creditAccount: '' };
+    syncCounterpartAccount(row);
+    assert.equal(row.counterpartAccount, '');
+    row.creditAccount = '12345';
+    syncCounterpartAccount(row);
+    assert.equal(row.counterpartAccount, '12345');
   });
 });
 

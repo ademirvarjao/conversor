@@ -2002,6 +2002,44 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* Célula de débito/crédito editável (só quando está vazia) */
+.data-table td.col-account-editable {
+  padding: 4px 6px;
+}
+
+.cp-cell-account {
+  width: 100%;
+  max-width: 104px;
+  margin: 0 auto;
+  padding: 4px 6px;
+  display: block;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  color: var(--navy);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 7px;
+  cursor: text;
+}
+
+.cp-cell-account::placeholder {
+  color: var(--text-light);
+  opacity: 0.9;
+}
+
+.cp-cell-account:hover {
+  border-color: var(--primary);
+  background: #fff;
+}
+
+.cp-cell-account:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border: 1px solid var(--primary);
+  background: #fff;
+}
+
 /* Conta de contrapartida (lote e por lançamento) */
 .cp-account-bar {
   margin-top: 14px;

@@ -23,6 +23,8 @@ import {
   learnFromReconciliation,
   learnManualLink,
   applyRowAccount,
+  isManualAccountCell,
+  setRowCellAccount,
   linkHistory,
   mergeContacts,
   mergeTransactions,
@@ -549,6 +551,33 @@ function statusBadge(row) {
   return '<span class="cp-badge is-none">sem contato</span>';
 }
 
+/** Célula de débito/crédito: vazia vira campo para digitar a conta à mão. */
+function accountCell(row, side) {
+  const filled = side === 'credit' ? row.creditAccount : row.debitAccount;
+  const editable = !filled || isManualAccountCell(row, side);
+  const label = side === 'credit' ? 'crédito' : 'débito';
+
+  if (!editable) return `<td class="col-account">${escapeHtml(filled)}</td>`;
+
+  return `
+            <td class="col-account col-account-editable">
+              <input
+                class="cp-cell-account"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="24"
+                placeholder="—"
+                value="${escapeHtml(filled || '')}"
+                data-cp-cell="${side}"
+                data-cp-row="${row.id}"
+                aria-label="Conta do ${label} deste lançamento (célula vazia, digite para preencher)"
+                title="Digite a conta do ${label} — só preenche o que está vazio"
+              />
+            </td>`;
+}
+
 function renderRows() {
   const tbody = dom['cp-tbody'];
   if (!tbody) return;
@@ -560,7 +589,7 @@ function renderRows() {
   const pageRows = rows.slice(start, start + PAGE_SIZE);
 
   if (pageRows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">Nenhum lançamento para este filtro.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">Nenhum lançamento para este filtro.</td></tr>';
   } else {
     tbody.innerHTML = pageRows
       .map(
@@ -575,8 +604,8 @@ function renderRows() {
             />
           </td>
           <td class="col-date">${escapeHtml(row.date || '')}</td>
-          <td class="col-account">${escapeHtml(row.debitAccount || '—')}</td>
-          <td class="col-account">${escapeHtml(row.creditAccount || '—')}</td>
+          ${accountCell(row, 'debit')}
+          ${accountCell(row, 'credit')}
           <td class="col-money"><strong>${escapeHtml(formatValuePlainBr(row.valueCents / 100))}</strong></td>
           <td class="col-hist">
             <span class="cp-history">${escapeHtml(row.history)}</span><br />
@@ -770,6 +799,58 @@ function applyAccountBatch() {
     clearing
       ? `Contrapartida removida de ${targets.length} lançamento(s).`
       : `Contrapartida ${account} aplicada a ${targets.length} lançamento(s).`
+  );
+}
+
+/**
+ * Preenche a conta de uma célula (débito/crédito) direto na tabela.
+ *
+ * A célula só aceita valor quando está vazia (ou quando o próprio usuário
+ * digitou ali), então a conta vinda do cadastro do contato nunca é trocada
+ * por engano. Vale para completar o outro lado — a contrapartida — ou para
+ * preencher a conta do contato num lançamento que ficou "sem contato".
+ */
+function applyCellAccount(input) {
+  const row = state.rows.find((item) => item.id === Number(input.dataset.cpRow));
+  if (!row) return;
+
+  const side = input.dataset.cpCell === 'credit' ? 'credit' : 'debit';
+  const label = side === 'credit' ? 'crédito' : 'débito';
+  const account = contactCode(input.value);
+  const current = side === 'credit' ? row.creditAccount : row.debitAccount;
+
+  if (input.dataset.cpCancelled) {
+    delete input.dataset.cpCancelled;
+    input.value = current || '';
+    return;
+  }
+
+  // Célula vazia e nada digitado: não há o que fazer.
+  if (!account) {
+    input.value = current || '';
+    if (!current) return;
+  }
+
+  // Conta vinda do cadastro do contato não é substituída por aqui.
+  if (current && !isManualAccountCell(row, side)) {
+    input.value = current;
+    showToast(`A conta do ${label} veio do cadastro do contato e não é substituída por aqui.`, 'warn');
+    return;
+  }
+
+  setRowCellAccount(row, side, account);
+  state.stats = summarizeReconciliation(state.rows);
+  render();
+
+  if (!account) {
+    showToast(`Conta do ${label} limpa neste lançamento.`);
+    return;
+  }
+
+  showToast(
+    row.counterpartAccount === account
+      ? `Conta ${account} preenchida no ${label} — contrapartida deste lançamento.`
+      : `Conta ${account} preenchida no ${label} deste lançamento.`
   );
 }
 
@@ -974,6 +1055,19 @@ function bindEvents() {
     renderRows();
   });
 
+  dom['cp-tbody']?.addEventListener('keydown', (event) => {
+    const cell = event.target.closest('[data-cp-cell]');
+    if (!cell) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      cell.blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      cell.dataset.cpCancelled = '1';
+      cell.blur();
+    }
+  });
+
   dom['cp-tbody']?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-cp-link]');
     if (!button) return;
@@ -981,6 +1075,12 @@ function bindEvents() {
   });
 
   dom['cp-tbody']?.addEventListener('change', (event) => {
+    const cell = event.target.closest('[data-cp-cell]');
+    if (cell) {
+      applyCellAccount(cell);
+      return;
+    }
+
     const checkbox = event.target.closest('[data-cp-select]');
     if (!checkbox) return;
     const id = Number(checkbox.dataset.cpSelect);

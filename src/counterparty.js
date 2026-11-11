@@ -446,6 +446,51 @@ export function applyRowAccount(row, rawAccount) {
   return row;
 }
 
+/** A coluna (débito/crédito) que carrega a conta do contato, pela direção. */
+export function contactAccountSide(row) {
+  return row?.direction === DIRECTION.PAYMENT ? 'debit' : 'credit';
+}
+
+/**
+ * Recalcula a contrapartida da linha a partir das duas colunas: ela é sempre a
+ * conta do **lado oposto** ao do contato.
+ */
+export function syncCounterpartAccount(row) {
+  if (!row) return row;
+  row.counterpartAccount = row[contactAccountSide(row) === 'debit' ? 'creditAccount' : 'debitAccount'] || '';
+  return row;
+}
+
+/** Célula preenchida à mão pelo usuário (pode ser editada ou limpa de novo). */
+export function isManualAccountCell(row, side) {
+  return Boolean(row?.manualCells?.[side === 'credit' ? 'credit' : 'debit']);
+}
+
+/**
+ * Preenche **uma** coluna (débito ou crédito) direto na tabela, à mão.
+ *
+ * Só serve para completar o que está vazio: uma conta que veio do cadastro do
+ * contato (ou de um lote anterior) não é sobrescrita. O valor digitado passa a
+ * contar como contrapartida quando está no lado oposto ao do contato, e a
+ * célula fica reeditável para o usuário corrigir ou limpar o que digitou.
+ */
+export function setRowCellAccount(row, side, rawAccount) {
+  if (!row) return row;
+
+  const cell = side === 'credit' ? 'credit' : 'debit';
+  const key = cell === 'credit' ? 'creditAccount' : 'debitAccount';
+  const account = contactCode(rawAccount);
+
+  if (row[key] && row[key] !== account && !isManualAccountCell(row, cell)) return row;
+
+  row[key] = account;
+  row.manualCells = { ...(row.manualCells || {}) };
+  if (account) row.manualCells[cell] = true;
+  else delete row.manualCells[cell];
+
+  return syncCounterpartAccount(row);
+}
+
 /**
  * Converte a tabela do extrato (PDF ou .xlsx) em lançamentos prontos para a
  * conciliação. As colunas são achadas pelo cabeçalho e, quando ele não ajuda,

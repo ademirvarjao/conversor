@@ -90,6 +90,15 @@ describe('página do conciliador', () => {
     assert.match(module, /scope === 'empty'[\s\S]{0,120}counterpartAccount/);
   });
 
+  it('deixa as células vazias de débito e crédito editáveis na tabela', () => {
+    assert.match(module, /data-cp-cell/);
+    assert.match(module, /function accountCell/);
+    assert.match(module, /setRowCellAccount/);
+    assert.match(module, /isManualAccountCell/);
+    assert.ok(page.includes('células vazias aceitam digitação'));
+    assert.ok(page.includes('.cp-cell-account') === false, 'o estilo fica no CSS');
+  });
+
   it('mostra o estado dos modelos da nuvem no topo', () => {
     assert.ok(page.includes('id="cp-cloud-state"'));
     assert.ok(page.includes('id="btn-cp-cloud-push"'));
