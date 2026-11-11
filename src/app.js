@@ -19,6 +19,7 @@ import { exportToPdf, exportToXlsx } from './exporters.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
   applyVaultPayload,
+  clearCloudConfig,
   clearIdentity,
   loadCloudConfig,
   loadIdentity,
@@ -29,6 +30,8 @@ import {
   saveIdentity,
   touchIdentitySync,
 } from './sync-vault.js';
+import { normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
+import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { APP_VERSION, REQUIRED_ELEMENT_IDS } from './ui-contract.js';
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -78,7 +81,12 @@ const cloud = {
   identity: loadIdentity(),
   busy: false,
   statusTone: 'idle',
+  /** Resultado da checagem automática do banco: null | 'checking' | 'ok' | string (erro). */
+  ping: null,
 };
+
+/** Banco embutido no app (URL + chave anônima públicas): não há o que configurar. */
+const BUILT_IN_CLOUD = normalizeSupabaseConfig(DEFAULT_CLOUD_CONFIG);
 
 /* -------------------------------------------------------------------------- */
 /*                                    DOM                                     */
@@ -1575,12 +1583,90 @@ function describeLastSync(identity) {
   return `última sincronização em ${date.toLocaleString('pt-BR')}`;
 }
 
+/**
+ * `true` quando o app está usando o banco embutido (nem o usuário nem um
+ * administrador salvaram outra conexão neste navegador).
+ */
+function usingBuiltInCloud() {
+  return (
+    !!BUILT_IN_CLOUD &&
+    !!cloud.config &&
+    cloud.config.url === BUILT_IN_CLOUD.url &&
+    cloud.config.anonKey === BUILT_IN_CLOUD.anonKey
+  );
+}
+
+/** Nome curto do projeto para mostrar na tela (ex.: "abcdefgh.supabase.co"). */
+function cloudHostLabel(config = cloud.config) {
+  if (!config?.url) return '';
+  return config.url.replace(/^https?:\/\//i, '');
+}
+
+/**
+ * Checa o banco uma vez por sessão assim que a aba "Nuvem" abre, para o usuário
+ * ver na hora se a conexão embutida está respondendo.
+ */
+async function ensureCloudOnline() {
+  if (!cloud.config || cloud.ping !== null || cloud.busy) return;
+  cloud.ping = 'checking';
+  try {
+    await pingDatabase(cloud.config);
+    cloud.ping = 'ok';
+  } catch (error) {
+    cloud.ping = error?.message || 'falha ao falar com o banco';
+  }
+  if (dom['cloud-status']) renderCloudPanel();
+}
+
+function cloudStatusMessage(hasConfig, identity) {
+  if (!hasConfig) {
+    return {
+      tone: 'warn',
+      message:
+        'Banco compartilhado ainda não configurado. Cole a URL e a chave anônima em “Conexão com o banco”.',
+    };
+  }
+
+  const online = cloud.ping === 'ok' ? ' Banco online.' : cloud.ping === 'checking' ? ' Checando o banco…' : '';
+  const offline = typeof cloud.ping === 'string' && cloud.ping !== 'checking' && cloud.ping !== 'ok'
+    ? ` Banco indisponível: ${cloud.ping}`
+    : '';
+
+  if (!identity) {
+    return {
+      tone: 'warn',
+      message: `Banco conectado${cloudHostLabel() ? ` (${cloudHostLabel()})` : ''} e pronto — falta só criar a sua chave.${online}${offline}`,
+    };
+  }
+
+  return {
+    tone: offline ? 'warn' : 'ok',
+    message: `Conectado como ${formatAccessCode(identity.code)} — ${describeLastSync(identity)}.${online}${offline}`,
+  };
+}
+
 function renderCloudPanel() {
   const hasConfig = !!cloud.config;
   const identity = cloud.identity;
 
   if (dom['cloud-url']) dom['cloud-url'].value = cloud.config?.url || '';
   if (dom['cloud-anon-key']) dom['cloud-anon-key'].value = cloud.config?.anonKey || '';
+
+  // O app já vem com o banco oficial embutido: a configuração manual fica
+  // escondida em "avançado" e só aparece como opção de troca de projeto.
+  const builtIn = usingBuiltInCloud();
+  if (dom['cloud-config-block']) {
+    dom['cloud-config-block'].classList.toggle('is-built-in', builtIn);
+  }
+  if (dom['cloud-official-note']) {
+    dom['cloud-official-note'].textContent = builtIn
+      ? `Banco oficial do Conversor em uso (${cloudHostLabel(BUILT_IN_CLOUD)}) — já vem configurado no app, não é preciso colar nada.`
+      : `Conexão personalizada em uso${cloudHostLabel() ? ` (${cloudHostLabel()})` : ''}.`;
+    dom['cloud-official-note'].classList.toggle('hidden', !BUILT_IN_CLOUD);
+  }
+  if (dom['btn-cloud-reset-config']) {
+    dom['btn-cloud-reset-config'].classList.toggle('hidden', !BUILT_IN_CLOUD || builtIn);
+  }
 
   dom['cloud-identity-empty']?.classList.toggle('hidden', !!identity);
   dom['cloud-identity-active']?.classList.toggle('hidden', !identity);
@@ -1603,22 +1689,11 @@ function renderCloudPanel() {
   if (dom['btn-cloud-recover']) dom['btn-cloud-recover'].disabled = cloud.busy;
 
   if (cloud.busy) return;
-  if (!hasConfig) {
-    setCloudStatus(
-      'Banco compartilhado ainda não configurado. Peça a URL e a chave anônima ao administrador e cole em “Configuração do banco”.',
-      'warn'
-    );
-  } else if (!identity) {
-    setCloudStatus(
-      'Conectado ao banco, mas sem chave neste dispositivo. Crie uma chave nova ou informe a que você já usa.',
-      'warn'
-    );
-  } else {
-    setCloudStatus(
-      `Conectado como ${formatAccessCode(identity.code)} — ${describeLastSync(identity)}.`,
-      'ok'
-    );
-  }
+  const { tone, message } = cloudStatusMessage(hasConfig, identity);
+  setCloudStatus(message, tone);
+
+  // Primeira abertura da aba: confere se o banco embutido está respondendo.
+  if (hasConfig && cloud.ping === null) void ensureCloudOnline();
 }
 
 async function withCloudBusy(task) {
@@ -1862,8 +1937,18 @@ function bindCloudEvents() {
       return;
     }
     cloud.config = loadCloudConfig();
+    cloud.ping = null;
     renderCloudPanel();
     showToast('Conexão com o banco compartilhado salva.');
+  });
+
+  // Volta para o banco oficial embutido (descarta a conexão personalizada).
+  dom['btn-cloud-reset-config']?.addEventListener('click', () => {
+    clearCloudConfig();
+    cloud.config = loadCloudConfig();
+    cloud.ping = null;
+    renderCloudPanel();
+    showToast('Conectado ao banco oficial do Conversor.');
   });
 
   dom['btn-cloud-test']?.addEventListener('click', async () => {
@@ -1872,10 +1957,13 @@ function bindCloudEvents() {
       anonKey: dom['cloud-anon-key']?.value || '',
     };
     try {
-      const { pingDatabase } = await import('./sync-client.js');
       await pingDatabase(config);
+      cloud.ping = 'ok';
+      renderCloudPanel();
       showToast('Conexão com o banco funcionando.', 'success');
     } catch (error) {
+      cloud.ping = error?.message || 'falha ao falar com o banco';
+      renderCloudPanel();
       showToast(`Falha no teste: ${error.message}`, 'error');
     }
   });

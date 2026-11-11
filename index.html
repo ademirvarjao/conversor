@@ -332,7 +332,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.9.10</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.10.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -418,9 +418,10 @@
           <div class="settings-block">
             <h3>Modelos treinados no banco compartilhado</h3>
             <p>
-              Os modelos aprendidos (pesos semânticos, perfis de layout e log) ficam em um banco
-              compartilhado, <strong>cifrados neste navegador</strong> com a sua chave de acesso. Os
-              arquivos e os lançamentos financeiros <strong>nunca</strong> saem daqui.
+              Os modelos aprendidos (pesos semânticos, perfis de layout, log e as contas treinadas no
+              conciliador) ficam no banco compartilhado do Conversor, <strong>cifrados neste
+              navegador</strong> com a sua chave de acesso. Os arquivos e os lançamentos financeiros
+              <strong>nunca</strong> saem daqui.
             </p>
             <p id="cloud-status" class="cloud-status" role="status">Carregando…</p>
           </div>
@@ -478,17 +479,24 @@
               <button id="btn-cloud-pull" class="btn btn-sm btn-secondary" type="button">Baixar modelos</button>
             </div>
             <p class="cloud-hint">
-              O envio acontece automaticamente depois de cada treinamento. O download substitui os
-              modelos deste navegador pelos da nuvem (a chave do LLM continua só aqui).
+              O envio acontece automaticamente depois de cada treinamento e também ao criar a chave.
+              O download substitui os modelos deste navegador pelos da nuvem (a chave do LLM continua só aqui).
             </p>
           </div>
 
           <details class="settings-block cloud-config" id="cloud-config-block">
-            <summary>Configuração do banco (administrador)</summary>
-            <p>
-              Crie um projeto no <strong>Supabase</strong>, rode o SQL de
-              <code>supabase/schema.sql</code> e cole abaixo a <em>Project URL</em> e a chave
-              <em>anon public</em>.
+            <summary>Conexão com o banco (avançado)</summary>
+            <p id="cloud-official-note" class="cloud-hint hidden"></p>
+            <p class="cloud-hint">
+              O banco é criado e mantido pela integração <strong>Supabase + GitHub</strong>: a migração
+              <code>supabase/migrations/20261111120000_conversor_models.sql</code> é aplicada a cada push
+              na <code>main</code>. Só mexa aqui para apontar o app para um projeto Supabase próprio.
+            </p>
+            <p class="cloud-hint">
+              Onde estão os dois valores (painel do Supabase): <strong>Project Settings → API</strong> —
+              copie a <em>Project URL</em> e a chave <em>anon public</em>. Elas são públicas por natureza:
+              quem tiver a chave lê apenas texto cifrado. <strong>Nunca</strong> use a
+              <code>service_role</code>.
             </p>
             <div class="field-group">
               <label for="cloud-url">Project URL</label>
@@ -501,6 +509,7 @@
             <div class="btn-row">
               <button id="btn-cloud-save-config" class="btn btn-sm btn-primary" type="button">Salvar conexão</button>
               <button id="btn-cloud-test" class="btn btn-sm btn-ghost-dark" type="button">Testar conexão</button>
+              <button id="btn-cloud-reset-config" class="btn btn-sm btn-ghost-dark hidden" type="button">Usar o banco oficial</button>
             </div>
           </details>
         </div>

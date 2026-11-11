@@ -12,7 +12,12 @@
 --               "v1.<base64url>"; quem tem a chave anônima do projeto lê apenas
 --               texto cifrado.
 --
---  Como aplicar: Supabase -> SQL Editor -> New query -> cole tudo -> Run.
+--  Como aplicar (automático, preferido): este mesmo schema está em
+--  `supabase/migrations/20261111120000_conversor_models.sql` — a integração
+--  Supabase + GitHub aplica a migração sozinha a cada push no branch conectado.
+--
+--  Como aplicar à mão (só se a integração não estiver ativa): Supabase ->
+--  SQL Editor -> New query -> cole tudo -> Run.
 -- ============================================================================
 
 create table if not exists public.conversor_models (
