@@ -752,11 +752,17 @@ export function buildCoachReport(parsedFile, analysis, transform = null, options
     });
   }
 
+  // `skipped` é o que sobrou para o conversor avaliar; o parser já descartou
+  // cabeçalho, resumo, rodapé e linhas de saldo antes disso. Somamos os dois
+  // para o diagnóstico não dizer “0 linhas fora” num extrato cheio de resumo.
+  const parserSkipped = Number(parsedFile?.skippedRows) || 0;
+  const discardedTotal = skipped.length + parserSkipped;
+
   checks.push({
     id: 'descartes',
     label: 'Cabeçalho, total e rodapé descartados',
     status: CHECK_STATUS.OK,
-    detail: `${skipped.length.toLocaleString('pt-BR')} linha(s) fora do resultado${
+    detail: `${discardedTotal.toLocaleString('pt-BR')} linha(s) fora do resultado${
       balance.anchors.length > 0 ? ` • ${balance.anchors.length} âncora(s) de saldo usadas na conferência` : ''
     }${
       balance.otherSeries?.length
