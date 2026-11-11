@@ -1669,6 +1669,35 @@ export function transformRowsWithConfig(parsedFile, config) {
       continue;
     }
 
+    // 0.5) Linha de saldo (SALDO ANTERIOR, SALDO DO DIA, SALDO EM CONTA…):
+    // âncora de conferência, nunca lançamento. No Sicoob o saldo cai na MESMA
+    // coluna dos valores, então sem esta regra ele entrava como lançamento.
+    const textCells = row.filter(
+      (cell) => cleanWhitespace(cell) && parseMoneyValue(cell) === null && parseDateValue(cell) === null
+    );
+    if (textCells.length > 0 && /^saldo\b/.test(normalizeText(textCells.join(' ')))) {
+      skipped.push({
+        rowIdx: rowIndex + 1,
+        reason: 'Linha de saldo (âncora de conferência)',
+        raw: row,
+      });
+      continue;
+    }
+
+    // Total/subtotal no meio do relatório ("Parcial Cliente", "Total do dia"):
+    // é resumo, não lançamento sem data — e não deve contar como falha de data.
+    if (
+      textCells.length > 0 &&
+      /^(parcial|total|totais|subtotal|resumo)\b/.test(normalizeText(textCells.join(' ')))
+    ) {
+      skipped.push({
+        rowIdx: rowIndex + 1,
+        reason: 'Linha de total/resumo (descartada)',
+        raw: row,
+      });
+      continue;
+    }
+
     // 1) Data: usa a primeira coluna de data que trouxer valor válido.
     let dateIso = null;
     for (const mapping of dateMappings) {
