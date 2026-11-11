@@ -1985,6 +1985,14 @@ function bindCloudEvents() {
     );
   });
 
+  // Recheca o banco sem recarregar a página — útil logo depois de rodar o SQL
+  // de instalação ou de a integração aplicar a migração.
+  dom['btn-cloud-retry-ping']?.addEventListener('click', () => {
+    cloud.ping = null;
+    renderCloudPanel();
+    showToast('Verificando o banco novamente…');
+  });
+
   // Volta para o banco oficial embutido (descarta a conexão personalizada).
   dom['btn-cloud-reset-config']?.addEventListener('click', () => {
     clearCloudConfig();
