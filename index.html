@@ -16,16 +16,26 @@
   <header class="topbar">
     <div class="container topbar-inner">
       <div class="brand">
-        <div class="brand-icon" aria-hidden="true">
-          <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">
+        <button
+          id="btn-counterparty"
+          class="brand-icon brand-button"
+          type="button"
+          aria-haspopup="dialog"
+          aria-controls="cp-modal"
+          aria-label="Conciliar clientes/fornecedores"
+          title="Conciliar clientes/fornecedores (abre a barra lateral)"
+        >
+          <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <rect width="36" height="36" rx="9" fill="#0F2744" />
             <path d="M9 11.5H27M9 18H27M9 24.5H19" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" />
             <circle cx="25.5" cy="24.5" r="3.5" fill="#10B981" />
           </svg>
-        </div>
+          <span class="brand-plus" aria-hidden="true">+</span>
+        </button>
         <div>
           <h1 class="brand-title">Conversor</h1>
           <p class="brand-sub">Unificação de conciliações (.pdf e .xlsx) com IA Adaptativa de Layouts</p>
+          <p class="brand-hint">Clique no ícone para conciliar clientes/fornecedores</p>
         </div>
       </div>
 
@@ -99,29 +109,6 @@
       <span class="spinner" aria-hidden="true"></span>
       <span id="processing-text">Processando arquivos…</span>
     </div>
-
-    <!-- Atalho: conciliação de clientes e fornecedores (cadastro Questor) -->
-    <section class="card action-card" aria-labelledby="cp-entry-title">
-      <button id="btn-counterparty" class="action-tile" type="button" aria-haspopup="dialog" aria-controls="cp-modal">
-        <span class="action-icon" aria-hidden="true">
-          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 6h9v9H6zM17 17h9v9h-9z" />
-            <path d="M15 10.5h4a2 2 0 0 1 2 2v4" />
-            <path d="M12 12.5l3 3" />
-          </svg>
-        </span>
-        <span class="action-body">
-          <span class="action-tag">NOVO</span>
-          <span id="cp-entry-title" class="action-title">Conciliar clientes/fornecedores</span>
-          <span class="action-sub">
-            Cruza o cadastro do Questor (<code>contactb</code>, <code>nomepessoa</code>,
-            <code>natureza</code>) com o extrato e devolve o layout
-            <strong>data | débito | crédito | valor | histórico</strong>, sem sinais negativos.
-          </span>
-        </span>
-        <span class="action-cta">Abrir</span>
-      </button>
-    </section>
 
     <!-- Passo 1: Upload -->
     <section class="card upload-section" aria-labelledby="step-upload-title">
@@ -313,7 +300,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.8.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.8.1</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -489,21 +476,29 @@
     </div>
   </div>
 
-  <!-- Modal: Conciliação de clientes/fornecedores (Questor) -->
-  <div id="cp-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="cp-modal-title" aria-hidden="true">
-    <div class="modal-card modal-wide">
-      <div class="modal-header">
+  <!-- Barra lateral: Conciliação de clientes/fornecedores (Questor) -->
+  <div
+    id="cp-modal"
+    class="cp-drawer-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="cp-modal-title"
+    aria-hidden="true"
+  >
+    <aside class="cp-drawer" aria-describedby="cp-drawer-sub">
+      <div class="cp-drawer-head">
         <div>
+          <span class="cp-drawer-tag">CONCILIAÇÃO</span>
           <h2 id="cp-modal-title">Conciliar clientes/fornecedores</h2>
-          <p class="modal-sub">
+          <p id="cp-drawer-sub" class="cp-drawer-sub">
             Pagamento (saída) procura fornecedor de natureza <strong>credora</strong>; recebimento
             (entrada) procura cliente de natureza <strong>devedora</strong>.
           </p>
         </div>
-        <button id="btn-close-cp" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+        <button id="btn-close-cp" class="icon-btn" type="button" aria-label="Fechar a barra lateral">✕</button>
       </div>
 
-      <div class="modal-body">
+      <div class="cp-drawer-body">
         <div class="cp-files">
           <label class="cp-file" for="cp-contacts-input">
             <span class="cp-file-step">1</span>
@@ -617,7 +612,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </aside>
   </div>
 
   <!-- Toast notifications -->

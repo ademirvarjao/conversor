@@ -46,8 +46,9 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Conector LLM opcional** (OpenAI ou Gemini, com chave do próprio usuário) para layouts inéditos, com timeout, validação da resposta e fallback para a IA local.
 
 ### Conciliação de clientes/fornecedores (v1.8.0)
-Um cartão clicável no topo da página (**“Conciliar clientes/fornecedores”**) abre um fluxo próprio, separado da conciliação unificada, para cruzar o **cadastro de contatos do Questor** com o extrato bancário.
+O **ícone da marca** na barra superior é o atalho: um clique abre uma **barra lateral** (drawer) com um fluxo próprio, separado da conciliação unificada, para cruzar o **cadastro de contatos do Questor** com o extrato bancário.
 
+- **Barra lateral, não modal**: o painel desliza da direita, mantém a página ao fundo, fecha com `Esc`, clique no fundo ou no `✕`, prende o foco enquanto aberto e vira tela cheia no celular.
 - **Duas entradas, dois arquivos**: (1) o cadastro `Questor_Exportacao` (`.pdf` ou `.xlsx`) com as colunas `contactb`, `nomepessoa` e `natureza`; (2) o extrato/conciliação com data, valor assinado e histórico.
 - **Fornecedores × clientes pelo cadastro**: natureza **Credora** (contas `2.x`) são fornecedores; natureza **Devedora** (contas `1.x`) são clientes. Quando a coluna `natureza` vem vazia, o plano de contas decide. Grafias diferentes do mesmo `contactb` são unificadas.
 - **Regra de vínculo**: **pagamento** (saída de caixa) casa com fornecedor de natureza **credora** e vai para a coluna **débito**; **recebimento** (entrada) casa com cliente de natureza **devedora** e vai para **crédito**.
