@@ -84,6 +84,12 @@ describe('página do conciliador', () => {
     assert.match(module, /data-cp-link/);
   });
 
+  it('descreve o escopo do lote pela contrapartida, não pela conta do contato', () => {
+    assert.ok(page.includes('só os sem contrapartida'));
+    assert.ok(!page.includes('só os sem conta'));
+    assert.match(module, /scope === 'empty'[\s\S]{0,120}counterpartAccount/);
+  });
+
   it('mostra o estado dos modelos da nuvem no topo', () => {
     assert.ok(page.includes('id="cp-cloud-state"'));
     assert.ok(page.includes('id="btn-cp-cloud-push"'));
