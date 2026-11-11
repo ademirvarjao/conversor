@@ -35,10 +35,16 @@ export function isSupabaseConfigured(config) {
   return normalizeSupabaseConfig(config) !== null;
 }
 
-function buildHeaders(config, extra = {}) {
+/**
+ * Cabeçalhos da API REST.
+ * Com conta (`accessToken`), o `Authorization` leva o token do Supabase Auth e o
+ * Row Level Security entrega/aceita apenas os cofres daquele usuário; sem conta,
+ * vai a chave anônima (só alcança cofres que ainda não têm dono).
+ */
+function buildHeaders(config, extra = {}, accessToken = '') {
   return {
     apikey: config.anonKey,
-    Authorization: `Bearer ${config.anonKey}`,
+    Authorization: `Bearer ${accessToken || config.anonKey}`,
     'Content-Type': 'application/json',
     Accept: 'application/json',
     ...extra,
@@ -49,8 +55,8 @@ function endpoint(config, query = '') {
   return `${config.url}/rest/v1/${TABLE_NAME}${query}`;
 }
 
-async function request(config, url, init, fetchImpl) {
-  const doFetch = fetchImpl || globalThis.fetch;
+async function request(config, url, init, options = {}) {
+  const doFetch = options.fetchImpl || globalThis.fetch;
   if (typeof doFetch !== 'function') {
     throw new Error('Este ambiente não permite acesso à rede (fetch indisponível).');
   }
@@ -75,6 +81,14 @@ async function request(config, url, init, fetchImpl) {
   if (response.ok) return response;
 
   if (response.status === 401 || response.status === 403) {
+    if (options.accessToken) {
+      // Com conta, 403/401 quase sempre é o RLS: o cofre é de outro usuário (ou
+      // o token venceu no meio do caminho).
+      throw new Error(
+        'A conta na nuvem não tem acesso a este cofre (ele pertence a outra conta ou a sessão venceu). ' +
+          'Entre de novo na aba Nuvem; se o cofre foi criado sem conta, use a chave de acesso sem entrar.'
+      );
+    }
     throw new Error('Chave anônima recusada pelo Supabase. Confira a configuração.');
   }
   if (response.status === 404) {
@@ -118,8 +132,8 @@ export async function fetchRemoteVault(config, slot, options = {}) {
   const response = await request(
     normalized,
     endpoint(normalized, query),
-    { method: 'GET', headers: buildHeaders(normalized) },
-    options.fetchImpl
+    { method: 'GET', headers: buildHeaders(normalized, {}, options.accessToken) },
+    options
   );
 
   const rows = await response.json().catch(() => []);
@@ -144,10 +158,14 @@ export async function saveRemoteVault(config, slot, payload, options = {}) {
     endpoint(normalized),
     {
       method: 'POST',
-      headers: buildHeaders(normalized, { Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      headers: buildHeaders(
+        normalized,
+        { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        options.accessToken
+      ),
       body: JSON.stringify([{ slot, payload, updated_at: new Date().toISOString() }]),
     },
-    options.fetchImpl
+    options
   );
 
   return true;
@@ -161,8 +179,8 @@ export async function pingDatabase(config, options = {}) {
   const response = await request(
     normalized,
     endpoint(normalized, '?select=slot&limit=1'),
-    { method: 'GET', headers: buildHeaders(normalized) },
-    options.fetchImpl
+    { method: 'GET', headers: buildHeaders(normalized, {}, options.accessToken) },
+    options
   );
   await response.json().catch(() => []);
   return true;

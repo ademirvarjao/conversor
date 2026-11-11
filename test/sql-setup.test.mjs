@@ -4,17 +4,51 @@ import { readFile } from 'node:fs/promises';
 
 import { SETUP_SQL, projectRefFromUrl, sqlEditorUrl } from '../src/sql-setup.js';
 
-const MIGRATION = new URL('../supabase/migrations/20261111120000_conversor_models.sql', import.meta.url);
+const MIGRATIONS_DIR = new URL('../supabase/migrations/', import.meta.url);
 
 const normalize = (sql) => String(sql).replace(/\r\n/g, '\n').trim();
 
-test('o SQL embarcado no app é idêntico à migração do repositório', async () => {
-  const migration = await readFile(MIGRATION, 'utf8');
+/** Todas as migrações, na ordem em que o Supabase aplica (nome = timestamp). */
+async function readMigrations() {
+  const { readdir } = await import('node:fs/promises');
+  const names = (await readdir(MIGRATIONS_DIR)).filter((name) => name.endsWith('.sql')).sort();
+  const parts = [];
+  for (const name of names) {
+    parts.push(normalize(await readFile(new URL(name, MIGRATIONS_DIR), 'utf8')));
+  }
+  return parts;
+}
+
+test('o SQL embarcado no app é idêntico às migrações do repositório', async () => {
+  const parts = await readMigrations();
+  assert.ok(parts.length >= 1);
   assert.equal(
     normalize(SETUP_SQL),
-    normalize(migration),
+    parts.join('\n\n'),
     'src/sql-setup.js e supabase/migrations/ divergiram: atualize os dois'
   );
+});
+
+test('supabase/schema.sql é a união das migrações (sem drift)', async () => {
+  const parts = await readMigrations();
+  const schema = await readFile(new URL('../supabase/schema.sql', import.meta.url), 'utf8');
+  // Ignora o cabeçalho de comentário do schema.sql.
+  const start = schema.indexOf('alter table public.conversor_models');
+  assert.ok(start > 0, 'cabeçalho esperado no schema.sql');
+  assert.equal(
+    normalize(schema.slice(start)),
+    parts.join('\n\n').slice(parts[0].indexOf('alter table public.conversor_models')),
+    'supabase/schema.sql ficou para trás: refaça a união das migrações'
+  );
+});
+
+test('as migrações mantêm o cofre por dono (Auth + RLS)', async () => {
+  const parts = await readMigrations();
+  const all = parts.join('\n');
+  assert.match(all, /add column if not exists owner_id uuid/i);
+  assert.match(all, /references auth\.users\(id\)/i);
+  assert.match(all, /owner_id = auth\.uid\(\)/i);
+  assert.match(SETUP_SQL, /create index if not exists conversor_models_owner_idx/i);
 });
 
 test('o SQL é idempotente e cria tabela, gatilho e políticas de RLS', () => {
