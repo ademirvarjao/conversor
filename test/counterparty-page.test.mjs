@@ -66,8 +66,12 @@ describe('página do conciliador', () => {
   });
 
   it('permite informar a conta de contrapartida em lote e por lançamento', () => {
-    // em lote: campo + escopo + botão
-    assert.ok(page.includes('id="cp-account-input"'));
+    // em lote: um campo para os débitos vazios, outro para os créditos vazios
+    assert.ok(page.includes('id="cp-debit-account-input"'));
+    assert.ok(page.includes('id="cp-credit-account-input"'));
+    assert.ok(page.includes('Débitos vazios'));
+    assert.ok(page.includes('Créditos vazios'));
+    assert.equal(page.includes('id="cp-account-input"'), false, 'o campo único foi separado em dois');
     assert.ok(page.includes('id="btn-cp-account-apply"'));
     for (const scope of ['selected', 'filtered', 'empty']) {
       assert.ok(page.includes(`value="${scope}"`), `falta o escopo ${scope}`);
@@ -88,6 +92,13 @@ describe('página do conciliador', () => {
     assert.ok(page.includes('só os sem contrapartida'));
     assert.ok(!page.includes('só os sem conta'));
     assert.match(module, /scope === 'empty'[\s\S]{0,120}counterpartAccount/);
+  });
+
+  it('aplica cada campo do lote só na sua coluna, sem tocar na conta do contato', () => {
+    assert.match(module, /cp-debit-account-input/);
+    assert.match(module, /cp-credit-account-input/);
+    assert.match(module, /setRowCellAccount\(row, side, account\)/);
+    assert.equal(/applyRowAccount\(row, account\)/.test(module.split('function applyAccountBatch')[1].split('function applyCellAccount')[0]), false);
   });
 
   it('deixa as células vazias de débito e crédito editáveis na tabela', () => {
