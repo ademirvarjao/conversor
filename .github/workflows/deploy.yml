@@ -93,7 +93,9 @@ jobs:
           set -euo pipefail
           mkdir -p _site
           # Todas as páginas HTML da raiz entram no site (index + conciliador).
-          cp -R ./*.html src vendor _site/
+          # `layouts/` também: é a primeira fonte do catálogo de bancos — servida
+          # na MESMA origem do app, sem CORS e sem depender de terceiros.
+          cp -R ./*.html src vendor layouts _site/
           cp -f README.md LICENSE _site/ 2>/dev/null || true
           touch _site/.nojekyll
           echo "Arquivos publicados:"

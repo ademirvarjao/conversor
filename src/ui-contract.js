@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.17.0';
+export const APP_VERSION = '1.17.1';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',

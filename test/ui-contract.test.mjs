@@ -178,6 +178,15 @@ describe('arquivos referenciados', () => {
 });
 
 describe('publicação no GitHub Pages', () => {
+  it('publica o catálogo de layouts (mesma origem do app)', async () => {
+    const workflow = await readFile(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+    const copia = /cp[^\n]*\blayouts\b/.test(workflow);
+    assert.ok(copia, 'o deploy precisa copiar layouts/ para o site');
+
+    const catalogo = await readFile(path.join(ROOT, 'layouts/comunidade.json'), 'utf8');
+    assert.ok(JSON.parse(catalogo).layouts.length > 0, 'o catálogo publicado não pode ir vazio');
+  });
+
   it('copia todas as páginas HTML da raiz para o site', async () => {
     const workflow = await readFile(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
     const htmlFiles = (await readdir(ROOT)).filter((name) => name.endsWith('.html'));
