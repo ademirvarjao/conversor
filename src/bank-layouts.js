@@ -402,7 +402,12 @@ export function sanitizeLayout(raw, index = 0) {
     alias,
     columns,
     quirks: raw.quirks && typeof raw.quirks === 'object' ? { ...raw.quirks } : {},
-    source: raw.source === 'community' ? 'community' : 'builtin',
+    // `updatedAt` só serve para decidir qual versão de um layout vence no merge.
+    ...(typeof raw.updatedAt === 'string' && Number.isFinite(Date.parse(raw.updatedAt))
+      ? { updatedAt: new Date(raw.updatedAt).toISOString() }
+      : {}),
+    ...(raw.override === true ? { override: true } : {}),
+    source: ['community', 'imported'].includes(raw.source) ? raw.source : 'builtin',
     order: index,
   };
 }
@@ -420,7 +425,20 @@ export function mergeLayouts(...catalogs) {
   for (const catalog of catalogs) {
     for (const layout of catalog || []) {
       if (!layout || !layout.id) continue;
-      if (!byId.has(layout.id)) byId.set(layout.id, layout);
+
+      const current = byId.get(layout.id);
+      if (!current) {
+        byId.set(layout.id, layout);
+        continue;
+      }
+
+      // Layout publicado (comunidade/importado) só substitui um embutido
+      // quando pede isso de forma explícita (`"override": true`, revisado no
+      // PR). Assim o catálogo pode corrigir um banco sem publicar versão nova,
+      // mas um JSON qualquer não sequestra o layout embutido.
+      if (layout.override === true && current.source === 'builtin' && layout.source !== 'builtin') {
+        byId.set(layout.id, layout);
+      }
     }
   }
   return [...byId.values()];

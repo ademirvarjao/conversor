@@ -28,7 +28,17 @@ import {
 } from './training-coach.js';
 import { describeExportScope, resolveExportRows } from './export-scope.js';
 import { applyRecognition, recognizeLayout } from './bank-layouts.js';
-import { fetchCommunityLayouts, isCatalogFresh, loadCatalog } from './layout-registry.js';
+import {
+  CATALOG_SOURCES,
+  fetchCommunityLayouts,
+  fingerprintLayouts,
+  loadCatalog,
+  mergeCatalogLayouts,
+  parseCatalogFile,
+  saveCatalog,
+  serializeCatalog,
+  shouldRevalidate,
+} from './layout-registry.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
   applyVaultPayload,
@@ -99,6 +109,9 @@ const state = {
   /** Layouts baixados do catálogo público da comunidade (comparados no navegador). */
   catalogLayouts: [],
   catalogFetchedAt: 0,
+  catalogSourceId: null,
+  catalogSourceLabel: null,
+  catalogFingerprint: null,
   catalogBusy: false,
 };
 
@@ -726,75 +739,202 @@ function reanalyzeFileWithCoach(file) {
 /*                        Catálogo público de layouts                         */
 /* -------------------------------------------------------------------------- */
 
+/** "há 5 min", "hoje 14:32", "12/11 às 09:10" — idade legível do catálogo. */
+function describeCatalogAge(timestamp, now = Date.now()) {
+  if (!timestamp) return 'nunca atualizado';
+  const diff = Math.max(0, now - timestamp);
+  const minutes = Math.round(diff / 60000);
+
+  if (minutes < 2) return 'verificado agora';
+  if (minutes < 60) return `verificado há ${minutes} min`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `verificado há ${hours} h`;
+
+  const days = Math.round(hours / 24);
+  if (days <= 7) return `verificado há ${days} dia(s)`;
+  return `verificado em ${formatLocalDateTime(new Date(timestamp))}`;
+}
+
 /**
  * Atualiza o texto de status do catálogo no painel do treinador.
- * @param {'idle'|'ok'|'warn'|'busy'} tone
+ * @param {{message?:string, tone?:'idle'|'ok'|'warn'|'busy'}} [options]
  */
-function renderCatalogStatus(message, tone = 'idle') {
+function renderCatalogStatus({ message = '', tone = 'idle' } = {}) {
   const el = dom['coach-registry-status'];
   if (!el) return;
 
   const total = state.catalogLayouts.length;
+  const origem = state.catalogSourceLabel ? ` • fonte: ${state.catalogSourceLabel}` : '';
+  const idade = state.catalogFetchedAt ? ` • ${describeCatalogAge(state.catalogFetchedAt)}` : '';
+
   const text =
     message ||
     (total > 0
-      ? `${total} layout(s) da comunidade carregados${
-          state.catalogFetchedAt
-            ? ` • atualizado em ${formatLocalDateTime(new Date(state.catalogFetchedAt))}`
-            : ''
-        }. Só a lista é baixada: nada do seu arquivo sai do navegador.`
-      : 'Catálogo público ainda não baixado. Só a lista de layouts é baixada: nada do seu arquivo sai do navegador.');
+      ? `${total} layout(s) de banco no catálogo${origem}${idade}. Revalida sozinho ao abrir; nada do seu arquivo sai do navegador.`
+      : 'Catálogo da comunidade ainda não baixado — os 18 bancos embutidos já valem. Só a lista é baixada: nada do seu arquivo sai do navegador.');
 
   el.textContent = text;
   el.className = `coach-registry-status${tone === 'ok' ? ' status-ok' : tone === 'warn' ? ' status-warn' : ''}`;
 }
 
-/** Baixa (ou relê do cache) o catálogo público e reavalia os arquivos abertos. */
-async function refreshCommunityCatalog({ silent = false } = {}) {
+/** Nome amigável da fonte do catálogo (para o texto de status). */
+function catalogSourceLabel(sourceId) {
+  if (!sourceId) return null;
+  if (sourceId === 'imported') return 'arquivo importado';
+  const source = CATALOG_SOURCES.find((item) => item.id === sourceId);
+  return source?.label || sourceId;
+}
+
+function applyCatalogSnapshot(snapshot) {
+  state.catalogLayouts = snapshot.layouts || [];
+  state.catalogFetchedAt = Number(snapshot.fetchedAt) || 0;
+  state.catalogSourceId = snapshot.sourceId || null;
+  state.catalogSourceLabel = snapshot.sourceLabel || null;
+  state.catalogFingerprint = snapshot.fingerprint || fingerprintLayouts(state.catalogLayouts);
+}
+
+/**
+ * Baixa (ou relê do cache) o catálogo público e reavalia os arquivos abertos.
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.silent] não mostra toast de sucesso/erro
+ * @param {boolean} [options.manual] clique no botão (mostra o que aconteceu)
+ */
+async function refreshCommunityCatalog({ silent = false, manual = false } = {}) {
   if (state.catalogBusy) return state.catalogLayouts;
   state.catalogBusy = true;
 
   const button = dom['btn-coach-registry'];
   const originalLabel = button?.textContent;
-  if (button) {
+  if (button && manual) {
     button.disabled = true;
     button.textContent = 'Buscando…';
   }
-  renderCatalogStatus('Buscando o catálogo público de layouts…', 'busy');
+
+  const antes = state.catalogFingerprint;
+  if (manual) renderCatalogStatus({ message: 'Buscando o catálogo público de layouts…' });
 
   try {
     const result = await fetchCommunityLayouts();
-    state.catalogLayouts = result.layouts || [];
-    state.catalogFetchedAt = result.fetchedAt || 0;
 
     if (result.ok) {
-      renderCatalogStatus(
-        `${state.catalogLayouts.length} layout(s) da comunidade carregados. Só a lista foi baixada: nada do seu arquivo saiu do navegador.`,
-        'ok'
-      );
-      if (!silent) {
-        showToast(`Catálogo público atualizado: ${state.catalogLayouts.length} layout(s) de banco.`);
+      applyCatalogSnapshot(result);
+      const mudou = Boolean(antes) && antes !== state.catalogFingerprint;
+      const quantidade = state.catalogLayouts.length;
+
+      renderCatalogStatus({
+        message:
+          `${quantidade} layout(s) de banco no catálogo • fonte: ${state.catalogSourceLabel || 'cache'} • ` +
+          `${describeCatalogAge(state.catalogFetchedAt)}. Revalida sozinho ao abrir; nada do seu arquivo sai do navegador.`,
+        tone: 'ok',
+      });
+
+      if (mudou || result.changed) reapplyCatalogToFiles();
+
+      if (manual) {
+        showToast(
+          mudou || result.changed
+            ? `Catálogo atualizado: ${quantidade} layout(s) de banco.`
+            : `Catálogo já estava atualizado (${quantidade} layout(s)).`
+        );
+      } else if (!silent && mudou) {
+        showToast(`Catálogo de bancos atualizado: ${quantidade} layout(s).`, 'success');
       }
-      reapplyCatalogToFiles();
-    } else {
-      renderCatalogStatus(
-        `Não foi possível atualizar o catálogo (${result.error}). ${
-          state.catalogLayouts.length
-            ? 'Seguimos com os layouts já baixados e os embutidos no app.'
-            : 'Seguimos com os layouts embutidos no app.'
-        }`,
-        'warn'
-      );
-      if (!silent) showToast(`Catálogo público indisponível: ${result.error}`, 'warn');
+      return state.catalogLayouts;
     }
+
+    renderCatalogStatus({
+      message:
+        `Não foi possível atualizar o catálogo (${result.error}). ` +
+        (state.catalogLayouts.length || result.layouts?.length
+          ? 'Seguimos com os layouts já baixados e os embutidos no app.'
+          : 'Seguimos com os 18 bancos embutidos no app — nada para de funcionar.'),
+      tone: 'warn',
+    });
+    if (manual) showToast(`Catálogo público indisponível: ${result.error}`, 'warn');
     return state.catalogLayouts;
   } finally {
     state.catalogBusy = false;
-    if (button) {
+    if (button && manual) {
       button.disabled = false;
-      button.textContent = originalLabel || 'Buscar layouts na comunidade';
+      button.textContent = originalLabel || 'Atualizar catálogo';
     }
   }
+}
+
+/**
+ * Revalidação em segundo plano: na abertura do app, a cada hora de uso e
+ * quando a aba volta a ficar visível. Silenciosa por padrão.
+ */
+function scheduleCatalogSync() {
+  const offline = () =>
+    typeof navigator !== 'undefined' && navigator.onLine === false;
+
+  const maybeSync = (delayMs = 0) => {
+    if (offline()) return;
+    if (state.memory?.settings?.communityCatalog === false) return;
+    if (!shouldRevalidate(loadCatalog())) return;
+
+    setTimeout(() => {
+      if (document.visibilityState === 'hidden') return;
+      refreshCommunityCatalog({ silent: true });
+    }, delayMs);
+  };
+
+  // Depois do primeiro desenho: não atrasa a abertura do app.
+  maybeSync(1200);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') maybeSync(0);
+  });
+
+  window.addEventListener('online', () => maybeSync(0));
+}
+
+/** Aplica um catálogo trazido de arquivo (máquina sem internet, kit da equipe). */
+function importCatalogFromText(text, fileName = 'catálogo') {
+  const parsed = parseCatalogFile(text);
+  if (!parsed.ok) {
+    showToast(`"${fileName}" não é um catálogo válido: ${parsed.error}.`, 'error');
+    return false;
+  }
+
+  const layouts = mergeCatalogLayouts(state.catalogLayouts, parsed.layouts);
+  const snapshot = {
+    layouts,
+    fetchedAt: Date.now(),
+    sourceId: 'imported',
+    sourceLabel: `arquivo ${fileName}`,
+    generatedAt: parsed.generatedAt,
+    fingerprint: fingerprintLayouts(layouts),
+    url: 'import',
+  };
+
+  saveCatalog(snapshot);
+  applyCatalogSnapshot(snapshot);
+  renderCatalogStatus({ tone: 'ok' });
+  reapplyCatalogToFiles();
+  showToast(`${parsed.layouts.length} layout(s) importados de "${fileName}".`, 'success');
+  return true;
+}
+
+function exportCatalogToFile() {
+  const layouts = state.catalogLayouts.length > 0 ? state.catalogLayouts : [];
+  const json = serializeCatalog(layouts);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'conversor-catalogo-layouts.json';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  showToast(
+    layouts.length > 0
+      ? `Catálogo exportado (${layouts.length} layout(s)).`
+      : 'Catálogo exportado (só com os bancos embutidos ainda não baixados).',
+    layouts.length > 0 ? 'success' : 'warn'
+  );
 }
 
 /**
@@ -832,9 +972,13 @@ function maybeRefreshCatalog(unknownFileIds = []) {
   if (unknownFileIds.length === 0) return;
 
   const cached = loadCatalog();
-  if (isCatalogFresh(cached) && state.catalogLayouts.length > 0) return;
+  // Já checou faz pouco? Então o banco é novo mesmo: não insiste na rede.
+  if (state.catalogLayouts.length > 0 && !shouldRevalidate(cached, Date.now(), 10 * 60 * 1000)) return;
 
-  renderCatalogStatus('Banco não identificado — buscando o catálogo público de layouts…', 'warn');
+  renderCatalogStatus({
+    message: 'Banco não identificado — buscando o catálogo público de layouts…',
+    tone: 'warn',
+  });
   refreshCommunityCatalog({ silent: true });
 }
 
@@ -1576,7 +1720,29 @@ function bindTrainerEvents() {
   });
 
   dom['btn-coach-registry']?.addEventListener('click', () => {
-    refreshCommunityCatalog();
+    refreshCommunityCatalog({ manual: true });
+  });
+
+  dom['btn-catalog-export']?.addEventListener('click', () => {
+    exportCatalogToFile();
+  });
+
+  dom['btn-catalog-import']?.addEventListener('click', () => {
+    dom['catalog-file-input']?.click();
+  });
+
+  dom['catalog-file-input']?.addEventListener('change', async () => {
+    const input = dom['catalog-file-input'];
+    const file = input.files?.[0];
+    if (!file) return;
+
+    try {
+      importCatalogFromText(await file.text(), file.name);
+    } catch (error) {
+      showToast(`Não foi possível ler "${file.name}": ${error.message}`, 'error');
+    } finally {
+      input.value = '';
+    }
   });
 
   dom['coach-registry-auto']?.addEventListener('change', (event) => {
@@ -2788,16 +2954,20 @@ function init() {
 
   if (dom['app-version']) dom['app-version'].textContent = `v${APP_VERSION}`;
 
-  // Catálogo público: usa o que já está no navegador (sem rede na abertura).
+  // Catálogo público: abre com o que já está no navegador (zero rede na
+  // abertura) e revalida sozinho em segundo plano.
   const cachedCatalog = loadCatalog();
   if (cachedCatalog?.layouts?.length) {
-    state.catalogLayouts = cachedCatalog.layouts;
-    state.catalogFetchedAt = cachedCatalog.fetchedAt || 0;
+    applyCatalogSnapshot({
+      ...cachedCatalog,
+      sourceLabel: catalogSourceLabel(cachedCatalog.sourceId),
+    });
   }
   if (dom['coach-registry-auto']) {
     dom['coach-registry-auto'].checked = state.memory?.settings?.communityCatalog !== false;
   }
   renderCatalogStatus();
+  scheduleCatalogSync();
 
   bindUploadEvents();
   bindFilesListEvents();
