@@ -45,6 +45,23 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Memória persistente** em `localStorage`, com exportação/importação de `custodio-ia-memoria.json` para versionar no repositório ou compartilhar entre máquinas. Backups inválidos são normalizados/descartados sem quebrar a aplicação.
 - **Conector LLM opcional** (OpenAI ou Gemini, com chave do próprio usuário) para layouts inéditos, com timeout, validação da resposta e fallback para a IA local.
 
+### Nuvem dos modelos aprendidos (v1.5.0)
+Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**:
+
+- **Só os modelos sobem.** Vão para o banco apenas `tokenWeights`, `learnedProfiles`, `learningLog` e `stats`. Arquivos, lançamentos financeiros e a chave do conector LLM **nunca** saem do navegador.
+- **Chave de acesso de 8 caracteres** (`ABCD-EFGH`), em alfabeto de 32 símbolos sem `0`, `O`, `1` e `I` — fácil de ditar, copiar ou guardar num cartão. A chave é a identidade: em outra máquina, basta digitá-la para recuperar os modelos.
+- **Cifrado no navegador.** A chave passa por PBKDF2-SHA256 com 310.000 iterações e gera duas coisas: um `slot` opaco (HMAC) que identifica a linha no banco e uma chave AES-GCM-256 que cifra o conteúdo. Nem quem tem a chave anônima do projeto lê ou correlaciona usuários.
+- **Envio automático** depois de cada treinamento, mais botões de **Enviar modelos** e **Baixar modelos**.
+- **O LLM continua local:** ao baixar, a chave do conector já configurada nesta máquina é preservada.
+
+#### Configurar o banco (uma vez, administrador)
+1. Crie um projeto gratuito em [supabase.com](https://supabase.com).
+2. No **SQL Editor**, rode o conteúdo de [`supabase/schema.sql`](supabase/schema.sql) (cria a tabela `conversor_models`, o gatilho de `updated_at` e as políticas de RLS).
+3. Em **Project Settings → API**, copie a **Project URL** e a chave **anon public** (nunca a `service_role`).
+4. No app, abra **Memória da IA → Nuvem (Equipe) → Configuração do banco**, cole os dois valores e clique em **Salvar conexão** (e em **Testar conexão** para confirmar).
+
+Se esses dois valores forem fixos para a sua equipe, dá para deixá-los como padrão em [`src/sync-config.js`](src/sync-config.js) — continuam públicos, como qualquer chave anônima embarcada em app estático.
+
 ---
 
 ## Como executar localmente
@@ -104,7 +121,12 @@ conversor/
 │   ├── format.js                 # Formatação e aritmética em centavos
 │   ├── summary.js                # Totalizadores (KPIs)
 │   ├── ui-contract.js            # IDs exigidos pelo controlador + versão
+│   ├── sync-crypto.js            # Chave de acesso, PBKDF2, AES-GCM (puro)
+│   ├── sync-client.js            # Cliente REST do Supabase (só chave anônima)
+│   ├── sync-vault.js             # Identidade, pacote de modelos e sincronização
+│   ├── sync-config.js            # URL + chave anônima padrão (públicas)
 │   └── styles.css                # Estilos responsivos + acessibilidade
+├── supabase/schema.sql           # Tabela conversor_models + RLS (rodar no Supabase)
 ├── test/                         # Suíte node:test
 ├── vendor/                       # PDF.js, ExcelJS, jsPDF (offline, sem CDN)
 └── .github/workflows/            # deploy (Pages) + testes
