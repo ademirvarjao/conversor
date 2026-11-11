@@ -76,6 +76,25 @@ Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**
 - **Envio automático** depois de cada treinamento, mais botões de **Enviar modelos** e **Baixar modelos**.
 - **O LLM continua local:** ao baixar, a chave do conector já configurada nesta máquina é preservada.
 
+#### Trava de acesso à Nuvem (v1.11.0)
+A aba **Nuvem** — criar/entrar com a chave de acesso, enviar/baixar modelos e trocar o banco —
+fica atrás de **login e senha** ([`src/cloud-lock.js`](src/cloud-lock.js)):
+
+- a senha **não existe em texto puro no repositório**: ficam só o `salt` aleatório, 210.000
+  iterações de **PBKDF2-SHA256** e o hash; a conferência roda no navegador (WebCrypto);
+- a liberação vale para **aquela aba do navegador** e expira em **1 hora** (ou ao clicar em
+  *Bloquear acesso agora*); fechar o navegador volta a bloquear;
+- **5 tentativas erradas** → 30 segundos de espera; a mensagem de erro conta as tentativas;
+- com a aba bloqueada a **chave de acesso aparece mascarada** (`••••-••••`) na barra superior, e
+  os botões de enviar/baixar da **conciliação** (`conciliador.html`) ficam desativados — inclusive
+  o envio automático, para ninguém usar a nuvem por essa página.
+
+> **Alcance real:** o Conversor é um site estático, então a trava é um **deterrente local** (protege
+> contra quem usa o computador/navegador, não contra alguém que altere o JavaScript ou chame a API do
+> Supabase diretamente). O sigilo dos modelos continua garantido pela criptografia: o banco guarda
+> apenas texto cifrado com a chave de acesso. Para barreira de servidor de verdade, o caminho é
+> Supabase Auth + RLS por usuário.
+
 #### Banco de dados (sem passo manual)
 O banco é **do repositório**: o schema mora em
 [`supabase/migrations/20261111120000_conversor_models.sql`](supabase/migrations/20261111120000_conversor_models.sql)
