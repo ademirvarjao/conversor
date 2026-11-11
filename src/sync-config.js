@@ -14,8 +14,12 @@
  * projeto próprio (por exemplo, uma equipe com banco separado).
  */
 export const DEFAULT_CLOUD_CONFIG = {
-  /** Project URL do Supabase (ex.: https://abcdefgh.supabase.co). */
-  url: '',
-  /** Chave anônima (public) do projeto — JWT público, seguro em repositório. */
-  anonKey: '',
+  /** Project URL do Supabase (sem o sufixo /rest/v1/). */
+  url: 'https://byqhiewzkbqvvmldnwky.supabase.co',
+  /**
+   * Chave pública do projeto (publishable key `sb_publishable_...`, ou a
+   * `anon public` legada). É pública por design: quem a tiver lê apenas o
+   * conteúdo cifrado no navegador. Nunca use aqui a service_role/secret key.
+   */
+  anonKey: 'sb_publishable_FUMOIC2IPZZz2SweB_g6Ag_SMJfFvO3',
 };

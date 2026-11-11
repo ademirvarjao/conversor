@@ -332,7 +332,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.10.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.10.1</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -424,6 +424,29 @@
               <strong>nunca</strong> saem daqui.
             </p>
             <p id="cloud-status" class="cloud-status" role="status">Carregando…</p>
+            <div id="cloud-setup-hint" class="cloud-setup-hint hidden">
+              <p>
+                <strong>A tabela do banco ainda não existe neste projeto.</strong> Copie o SQL de
+                instalação, cole no SQL Editor do seu projeto Supabase e rode uma vez
+                (<em>Run</em>). É idempotente: pode rodar de novo sem quebrar nada.
+              </p>
+              <div class="btn-row">
+                <button id="btn-cloud-copy-sql" class="btn btn-sm btn-primary" type="button">Copiar SQL de instalação</button>
+                <a
+                  id="cloud-sql-editor-link"
+                  class="btn btn-sm btn-secondary"
+                  href="https://supabase.com/dashboard"
+                  target="_blank"
+                  rel="noopener"
+                  >Abrir SQL Editor</a
+                >
+              </div>
+              <p class="cloud-hint">
+                Com a integração <strong>Supabase + GitHub</strong> ativa (Production branch
+                <code>main</code> e <code>supabase/config.toml</code> no repositório), a próxima
+                migração entra sozinha e este aviso nunca mais aparece.
+              </p>
+            </div>
           </div>
 
           <div class="settings-block">
