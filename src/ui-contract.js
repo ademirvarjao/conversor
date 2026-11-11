@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.16.0';
+export const APP_VERSION = '1.17.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -36,6 +36,9 @@ export const REQUIRED_ELEMENT_IDS = [
   'btn-coach-analyze',
   'btn-coach-copy',
   'btn-coach-registry',
+  'btn-catalog-import',
+  'btn-catalog-export',
+  'catalog-file-input',
   'coach-registry-auto',
   'coach-registry-status',
   'btn-train-apply',

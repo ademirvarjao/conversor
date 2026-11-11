@@ -269,3 +269,36 @@ describe('assinatura do layout treinado', () => {
     assert.equal(buildLayoutSignature({ headers: ['Data'] }, { mappings: [] }), null);
   });
 });
+
+describe('catálogo publicado × embutido', () => {
+  it('embutido vence por padrão; override explícito atualiza sem publicar versão', () => {
+    const [embutido] = builtInLayouts().filter((layout) => layout.id === 'itau');
+    assert.ok(embutido, 'Itaú está no catálogo embutido');
+
+    const semOverride = sanitizeLayout(
+      {
+        id: 'itau',
+        name: 'Itaú (catálogo)',
+        source: 'community',
+        columns: [{ match: '^data', role: 'date' }],
+      },
+      0
+    );
+    assert.equal(mergeLayouts([embutido], [semOverride]).find((l) => l.id === 'itau').name, embutido.name);
+
+    const comOverride = sanitizeLayout(
+      {
+        id: 'itau',
+        name: 'Itaú (catálogo corrigido)',
+        source: 'community',
+        override: true,
+        columns: [{ match: '^data', role: 'date' }],
+      },
+      0
+    );
+    assert.equal(
+      mergeLayouts([embutido], [comOverride]).find((l) => l.id === 'itau').name,
+      'Itaú (catálogo corrigido)'
+    );
+  });
+});
