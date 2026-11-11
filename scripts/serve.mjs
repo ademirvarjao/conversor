@@ -121,7 +121,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Conversor Custódio disponível em http://localhost:${PORT}`);
+  console.log(`Conversor disponível em http://localhost:${PORT}`);
   console.log(`Raiz: ${ROOT}`);
 });
 

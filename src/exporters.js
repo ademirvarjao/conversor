@@ -1,5 +1,5 @@
 /**
- * Conversor Custódio — Exportadores (.xlsx e .pdf)
+ * Conversor — Exportadores (.xlsx e .pdf)
  *
  * Layout padronizado: data (dd/mm/aaaa) | valor (0000,00 / -0000,00) | historico (texto)
  * Ambos os exportadores são funções puras de geração de arquivo: recebem os
@@ -59,7 +59,7 @@ export async function exportToXlsx(rows, outputName = 'Conciliacao_Custodio.xlsx
   }
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Conversor Custódio';
+  workbook.creator = 'Conversor';
   workbook.created = new Date();
 
   const worksheet = workbook.addWorksheet(options.sheetName || 'Conciliacao', {
@@ -171,7 +171,7 @@ export function exportToPdf(rows, summary, outputName = 'Conciliacao_Custodio.pd
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 12;
-  const title = options.title || 'CONVERSOR CUSTÓDIO — Conciliação Unificada';
+  const title = options.title || 'CONVERSOR — Conciliação Unificada';
   const generatedAt = new Date().toLocaleString('pt-BR');
 
   const drawHeader = () => {
@@ -202,7 +202,7 @@ export function exportToPdf(rows, summary, outputName = 'Conciliacao_Custodio.pd
     const pageCount = doc.internal.getNumberOfPages();
     doc.setFontSize(7.5);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Conversor Custódio • Gerado em ${generatedAt}`, marginX, pageHeight - 6);
+    doc.text(`Conversor • Gerado em ${generatedAt}`, marginX, pageHeight - 6);
     doc.text(`Página ${pageNumber} de ${pageCount}`, pageWidth - marginX, pageHeight - 6, {
       align: 'right',
     });

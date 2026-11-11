@@ -55,7 +55,7 @@ function cacheDom() {
   for (const id of REQUIRED_ELEMENT_IDS) {
     const element = document.getElementById(id);
     if (!element) {
-      console.warn(`[Conversor Custódio] Elemento #${id} não encontrado no HTML.`);
+      console.warn(`[Conversor] Elemento #${id} não encontrado no HTML.`);
     }
     dom[id] = element;
   }
@@ -1208,7 +1208,7 @@ function bindModalEvents() {
     try {
       const payload = JSON.parse(await file.text());
       if (!payload || !Array.isArray(payload.learnedProfiles) || !payload.tokenWeights) {
-        throw new Error('O arquivo não parece ser uma memória do Conversor Custódio.');
+        throw new Error('O arquivo não parece ser uma memória do Conversor.');
       }
 
       state.memory = normalizeMemory(payload);
@@ -1426,7 +1426,7 @@ function init() {
 try {
   init();
 } catch (error) {
-  console.error('[Conversor Custódio] Falha na inicialização:', error);
+  console.error('[Conversor] Falha na inicialização:', error);
   const container = document.getElementById('toast-container');
   if (container) {
     const toast = document.createElement('div');
