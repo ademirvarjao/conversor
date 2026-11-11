@@ -1,9 +1,9 @@
 # Conversor
 
-[![Testes](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml)
-[![Deploy](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml)
+[![Testes](https://github.com/ademirvarjao/conversor/actions/workflows/tests.yml/badge.svg)](https://github.com/ademirvarjao/conversor/actions/workflows/tests.yml)
+[![Deploy](https://github.com/ademirvarjao/conversor/actions/workflows/deploy.yml/badge.svg)](https://github.com/ademirvarjao/conversor/actions/workflows/deploy.yml)
 
-**▶ Abrir o app: <https://ademirvarjao.github.io/conversor-custodio/>**
+**▶ Abrir o app: <https://ademirvarjao.github.io/conversor/>**
 
 Aplicação web **100% client-side** (pronta para GitHub Pages) para importar, padronizar, unificar cronologicamente e exportar relatórios financeiros de pagamentos e recebimentos nos formatos **`.xlsx`** e **`.pdf`**.
 
@@ -77,13 +77,13 @@ A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitur
    git add .
    git commit -m "feat: Conversor"
    git branch -M main
-   git remote add origin https://github.com/SEU-USUARIO/conversor-custodio.git
+   git remote add origin https://github.com/SEU-USUARIO/conversor.git
    git push -u origin main
    ```
 2. **Habilite o GitHub Pages** em **Settings → Pages → Build and deployment → Source** e escolha **GitHub Actions**.
    > Esse passo é obrigatório e só pode ser feito por quem administra o repositório. Sem ele, o workflow de deploy não encontra o site do Pages e para (o log mostra exatamente esse aviso).
    > Alternativa automatizada: crie um secret `PAGES_TOKEN` com um PAT que tenha permissão de Pages — o workflow então habilita o site sozinho.
-3. Em ~30 segundos o app estará em `https://SEU-USUARIO.github.io/conversor-custodio/`.
+3. Em ~30 segundos o app estará em `https://SEU-USUARIO.github.io/conversor/`.
 
 O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e pull request.
 
@@ -92,7 +92,7 @@ O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e
 ## Estrutura
 
 ```text
-conversor-custodio/
+conversor/
 ├── index.html                    # Interface (HTML semântico + ARIA)
 ├── package.json                  # Scripts de dev/teste (sem dependências)
 ├── scripts/serve.mjs             # Servidor estático de desenvolvimento
