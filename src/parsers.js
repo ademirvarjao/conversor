@@ -722,6 +722,7 @@ function lineText(line) {
 
 function isBannerOrSummary(text) {
   const norm = normalizeText(text);
+  if (/\bpagina\s+\d+\s+de\s+\d+\b/.test(norm)) return true;
   return /^(total|totais|subtotal|saldo\s+(anterior|atual|final|inicial|do\s+dia)|resumo|pagina\s+\d+|emitido\s+em|gerado\s+em)\b/.test(
     norm
   );
@@ -996,15 +997,6 @@ export function buildTableFromTextLines(allPageLines) {
     const norm = normalizeText(lineText(line));
     if (!norm) continue;
 
-    // Linhas acima da primeira linha de dados da página são cabeçalho/banner.
-    const pageTopDataY = firstDataYByPage.get(line.page);
-    if (pageTopDataY !== undefined && line.y > pageTopDataY + LINE_TOLERANCE) continue;
-
-    if (headerSignatures.has(norm)) {
-      skipped.push(norm);
-      continue;
-    }
-
     const cells = Array.from({ length: colBounds.length }, () => []);
     for (const item of line.items) cells[assignItemToColumn(item)].push(item.str);
     const rowStrings = cells.map((parts) => cleanWhitespace(parts.join(' ')));
@@ -1012,6 +1004,33 @@ export function buildTableFromTextLines(allPageLines) {
     const hasDate = rowStrings.some((value) => parseDateValue(value) !== null);
     const nonEmptyCount = rowStrings.filter(Boolean).length;
     const text = lineText(line);
+
+    // Cabeçalho de grupo de um relatório agrupado por cliente/fornecedor:
+    // texto único, encostado na margem esquerda (à esquerda da 1ª coluna de
+    // dados) e colado nas linhas de dados. Vira uma linha própria, usada pelo
+    // conversor como prefixo do histórico dos lançamentos seguintes.
+    const pageTopDataY = firstDataYByPage.get(line.page);
+    // Positivo = a linha está acima da primeira linha de dados da página.
+    const distanceAboveData = pageTopDataY === undefined ? 0 : line.y - pageTopDataY;
+    const isSectionHeader =
+      nonEmptyCount === 1 &&
+      !hasDate &&
+      text.length >= 3 &&
+      text.length <= 120 &&
+      !isBannerOrSummary(text) &&
+      // No topo da página só aceitamos a seção colada na tabela; mais acima é
+      // cabeçalho/razão social repetido pelo sistema emissor.
+      (distanceAboveData <= 0 || distanceAboveData <= 40) &&
+      line.items.every((item) => item.x <= colClusters[0].anchor + 6);
+
+    // Linhas acima da primeira linha de dados da página são cabeçalho/banner.
+    if (!isSectionHeader) {
+      if (pageTopDataY !== undefined && line.y > pageTopDataY + LINE_TOLERANCE) continue;
+      if (headerSignatures.has(norm)) {
+        skipped.push(norm);
+        continue;
+      }
+    }
 
     // Linhas de total/resumo só são descartadas quando não têm data própria:
     // um lançamento cujo histórico começa por "TOTAL ..." continua válido.
@@ -1021,6 +1040,13 @@ export function buildTableFromTextLines(allPageLines) {
     }
 
     if (hasDate) {
+      rows.push(rowStrings);
+      lastRowPage = line.page;
+      lastRowY = line.y;
+      continue;
+    }
+
+    if (isSectionHeader) {
       rows.push(rowStrings);
       lastRowPage = line.page;
       lastRowY = line.y;

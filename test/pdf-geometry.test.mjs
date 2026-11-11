@@ -223,6 +223,78 @@ describe('buildTableFromTextLines — extrato paginado com Pagto./Recbto.', () =
   });
 });
 
+describe('buildTableFromTextLines — relatório agrupado por cliente', () => {
+  // "Contas Recebidas por Cliente": título e razão social no topo da página,
+  // nome do cliente na margem esquerda antes de cada bloco, rodapé com data.
+  const pages = [
+    line(1, 812, [['Contas Recebidas por Cliente - Agrupadas', 185, 218]]),
+    line(1, 789, [['Período: 01/07/2026 A 31/07/2026', 220, 151]]),
+    line(1, 767, [
+      ['Nota Fiscal', 49, 49],
+      ['Duplicata', 133, 41],
+      ['Data Venc', 205, 44],
+      ['Valor Venc', 301, 49],
+      ['Data Rec', 369, 39],
+      ['Valor Recebido', 445, 66],
+    ]),
+    line(1, 749, [['Usimaster Peças de Precisão Ltda', 13, 143]]),
+    line(1, 735, [
+      ['1', 30, 4],
+      ['123349', 61, 25],
+      ['123349/1', 138, 31],
+      ['03/07/2026', 208, 37],
+      ['1.540,82', 321, 28],
+      ['03/07/2026', 370, 37],
+      ['1.540,82', 482, 29],
+    ]),
+    line(1, 723, [
+      ['2', 30, 4],
+      ['123336', 61, 25],
+      ['123336/2', 138, 31],
+      ['06/07/2026', 208, 37],
+      ['14.566,50', 317, 32],
+      ['07/07/2026', 370, 37],
+      ['14.566,50', 478, 33],
+    ]),
+    line(1, 711, [['Coldmix Ind. Com. e Representações Ltda.', 13, 190]]),
+    line(1, 697, [
+      ['1', 30, 4],
+      ['123350', 61, 25],
+      ['123350/1', 138, 31],
+      ['10/07/2026', 208, 37],
+      ['3.221,57', 321, 28],
+      ['10/07/2026', 370, 37],
+      ['3.221,57', 482, 29],
+    ]),
+    line(1, 48, [['quarta-feira, 5 de agosto de 2026', 13, 160], ['Página 1 de 3', 525, 40]]),
+  ];
+
+  const table = buildTableFromTextLines(pages);
+
+  it('mantém o nome do cliente como linha própria (sem data e sem valor)', () => {
+    const secoes = table.rows.filter((row) => row.filter(Boolean).length === 1);
+    assert.deepEqual(
+      secoes.map((row) => row.find(Boolean)),
+      ['Usimaster Peças de Precisão Ltda', 'Coldmix Ind. Com. e Representações Ltda.']
+    );
+  });
+
+  it('não confunde título/razão social do topo nem o rodapé com seção', () => {
+    const tudo = table.rows.flat().join(' | ');
+    assert.ok(!/Contas Recebidas por Cliente|Período:|Página 1 de 3/i.test(tudo), `contaminado: ${tudo}`);
+  });
+
+  it('separa as colunas de vencimento e de recebimento', () => {
+    const venc = table.headers.indexOf('Valor Venc');
+    const recebido = table.headers.indexOf('Valor Recebido');
+    const dataRec = table.headers.indexOf('Data Rec');
+    assert.ok(venc >= 0 && recebido >= 0 && dataRec >= 0, `headers: ${table.headers.join(' | ')}`);
+    assert.equal(table.rows[1][venc], '1.540,82');
+    assert.equal(table.rows[1][recebido], '1.540,82');
+    assert.equal(table.rows[2][dataRec], '07/07/2026');
+  });
+});
+
 describe('buildTableFromTextLines — casos especiais', () => {
   it('junta descrição quebrada em duas linhas visuais', () => {
     const table = buildTableFromTextLines([

@@ -326,6 +326,82 @@ describe('colunas de entradas e saídas (débito × crédito)', () => {
   });
 });
 
+describe('relatório de contas recebidas (agrupado por cliente)', () => {
+  // Layout "Contas Recebidas por Cliente": o valor previsto (vencimento) e o
+  // realizado (recebido) convivem, e cada grupo começa com o nome do cliente.
+  const contasRecebidas = {
+    fileName: 'CONTAS RECEBIDAS JUL26.pdf',
+    fileType: 'pdf',
+    headers: ['Coluna 1', 'Nota Fiscal', 'Duplicata', 'Data Venc', 'Valor Venc', 'Data Rec', 'Valor Recebido'],
+    rows: [
+      ['Usimaster Peças de Precisão Ltda', '', '', '', '', '', ''],
+      ['1', '123349', '123349/1', '03/07/2026', '1.540,82', '03/07/2026', '1.540,82'],
+      ['2', '123336', '123336/2', '06/07/2026', '14.566,50', '07/07/2026', '14.566,50'],
+      ['3', '123337', '123337/2', '06/07/2026', '825,50', '07/07/2026', '825,50'],
+      ['Coldmix Ind. Com. e Representações Ltda.', '', '', '', '', '', ''],
+      ['1', '123350', '123350/1', '10/07/2026', '3.221,57', '10/07/2026', '3.221,57'],
+      ['2', '123375', '123375/1', '12/07/2026', '2.575,80', '12/07/2026', '2.575,80'],
+    ],
+    bannerLines: ['Contas Recebidas por Cliente - Agrupadas'],
+    skippedRows: 0,
+  };
+
+  it('usa a data de recebimento, não a de vencimento', () => {
+    const analysis = analyzeFileLayout(contasRecebidas, loadAiMemory());
+    assert.equal(rolesOf(analysis)['Data Rec'], ROLES.DATE);
+    assert.equal(rolesOf(analysis)['Data Venc'], ROLES.IGNORE);
+  });
+
+  it('usa o valor recebido, não o valor de vencimento', () => {
+    const analysis = analyzeFileLayout(contasRecebidas, loadAiMemory());
+    assert.equal(rolesOf(analysis)['Valor Recebido'], ROLES.VALUE_AUTO);
+    assert.equal(rolesOf(analysis)['Valor Venc'], ROLES.IGNORE);
+  });
+
+  it('ignora a numeração sequencial da linha', () => {
+    const analysis = analyzeFileLayout(contasRecebidas, loadAiMemory());
+    assert.equal(rolesOf(analysis)['Coluna 1'], ROLES.IGNORE);
+  });
+
+  it('usa o nome do cliente como prefixo do histórico do grupo', () => {
+    const analysis = analyzeFileLayout(contasRecebidas, loadAiMemory());
+    const { records, skipped } = transformRowsWithConfig(contasRecebidas, {
+      mappings: analysis.mappings,
+      rules: analysis.rules,
+    });
+
+    assert.equal(records.length, 5);
+    assert.deepEqual(
+      records.map((record) => [record.dateBr, record.value, record.history]),
+      [
+        ['03/07/2026', 1540.82, 'Usimaster Peças de Precisão Ltda 123349 123349/1'],
+        ['07/07/2026', 14566.5, 'Usimaster Peças de Precisão Ltda 123336 123336/2'],
+        ['07/07/2026', 825.5, 'Usimaster Peças de Precisão Ltda 123337 123337/2'],
+        ['10/07/2026', 3221.57, 'Coldmix Ind. Com. e Representações Ltda. 123350 123350/1'],
+        ['12/07/2026', 2575.8, 'Coldmix Ind. Com. e Representações Ltda. 123375 123375/1'],
+      ]
+    );
+    assert.ok(
+      skipped.some((entry) => /cabeçalho de grupo/i.test(entry.reason)),
+      'os cabeçalhos de grupo são registrados como ignorados'
+    );
+  });
+
+  it('mantém o formato data | valor | historico igual ao extrato de recebimentos', () => {
+    const analysis = analyzeFileLayout(contasRecebidas, loadAiMemory());
+    const { records } = transformRowsWithConfig(contasRecebidas, {
+      mappings: analysis.mappings,
+      rules: analysis.rules,
+    });
+    for (const record of records) {
+      assert.match(record.dateBr, /^\d{2}\/\d{2}\/\d{4}$/);
+      assert.equal(typeof record.value, 'number');
+      assert.ok(record.value > 0, 'recebimentos entram positivos');
+      assert.ok(record.history.length > 0);
+    }
+  });
+});
+
 describe('transformRowsWithConfig', () => {
   it('converte entrada/saída separadas em valores assinados', () => {
     const analysis = analyzeFileLayout(statementFile, loadAiMemory());

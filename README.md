@@ -1,9 +1,9 @@
 # Conversor
 
-[![Testes](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml)
-[![Deploy](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml)
+[![Testes](https://github.com/ademirvarjao/conversor/actions/workflows/tests.yml/badge.svg)](https://github.com/ademirvarjao/conversor/actions/workflows/tests.yml)
+[![Deploy](https://github.com/ademirvarjao/conversor/actions/workflows/deploy.yml/badge.svg)](https://github.com/ademirvarjao/conversor/actions/workflows/deploy.yml)
 
-**▶ Abrir o app: <https://ademirvarjao.github.io/conversor-custodio/>**
+**▶ Abrir o app: <https://ademirvarjao.github.io/conversor/>**
 
 Aplicação web **100% client-side** (pronta para GitHub Pages) para importar, padronizar, unificar cronologicamente e exportar relatórios financeiros de pagamentos e recebimentos nos formatos **`.xlsx`** e **`.pdf`**.
 
@@ -18,6 +18,7 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 ### Importação (`.pdf` e `.xlsx`)
 - **PDF (PDF.js)**: extração geométrica adaptativa — descobre colunas pelo alinhamento das coordenadas X, combina cabeçalhos em múltiplas linhas, recompõe descrições quebradas em duas linhas e descarta banners, CNPJ, totais e cabeçalhos repetidos de página.
 - **XLSX (ExcelJS)**: múltiplas abas (com seletor manual), datas nativas ali preservadas, fórmulas resolvidas, células mescladas sem duplicação, banners e linhas de resumo removidos automaticamente.
+- **Relatórios de contas recebidas/pagas**: validação cruzada em julho/2026 — o arquivo "Contas Recebidas por Cliente" e o extrato de recebimentos do mesmo período geram **99 lançamentos, R$ 1.180.552,88 e as mesmas 99 combinações data+valor** (diferença zero).
 - **Extratos paginados**: o cabeçalho/rodapé repetido em cada página é descartado (inclusive a linha `Conta Corrente :`), sem contaminar a última linha da página anterior — validado em extrato real de 6 páginas com reconciliação total contra o saldo (293 lançamentos, diferença zero).
 - Vários arquivos ao mesmo tempo (ex.: Pagamentos + Recebimentos), com detecção de duplicados, limite de tamanho e progresso de leitura por página.
 
@@ -36,6 +37,8 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 ### IA Adaptativa de Layouts
 - **Inferência semântica multi-sinal**: pesos léxicos PT-BR + análise estatística dos dados (datas reais, valores, colunas separadas de Entrada/Crédito e Saída/Débito, indicadores `D/C`, colunas esparsas) e exclusão automática de colunas de `Saldo`/`Total`/vazias.
 - **Entradas e saídas em colunas separadas**: reconhece layouts em que o valor de cada linha aparece em **uma de duas colunas** (`Pagto.`/`Recbto.`, `Débito`/`Crédito`, `Saídas`/`Entradas`) — inclusive abreviações. O par é identificado pela exclusividade mútua dos dados e o sentido de cada coluna é confirmado pela **variação do saldo** linha a linha; na falta do saldo, vale o cabeçalho e, por último, a posição. O resultado é um único lançamento assinado por linha, em vez de duas colunas somadas.
+- **Relatórios agrupados por cliente/fornecedor**: o nome do grupo (uma linha só com texto, alinhada à margem esquerda) é reconhecido e usado como **prefixo do histórico** dos lançamentos seguintes — típico de "Contas Recebidas por Cliente".
+- **Previsto × realizado**: quando o arquivo traz `Data Venc`/`Valor Venc` e `Data Rec`/`Valor Recebido`, a conciliação usa **a data e o valor do fato** (recebimento/pagamento) e ignora o previsto, com aviso no Painel da IA.
 - **Colunas de identificação não viram valor**: `Lancto`, `Documento`, `Nº`, `Código` e sequências numéricas (inteiros, únicos e crescentes) são ignorados automaticamente — antes o número do lançamento entraria na soma.
 - **Detecção de evolução de layout**: aponta exatamente o que mudou (`NOVA`, `RENOMEADA`, `AUSENTE`) e aplica o melhor mapeamento.
 - **Aprendizado supervisionado**: ao confirmar/corrigir o mapeamento, o motor reforça ou penaliza os pesos dos tokens (com limites para evitar "explosão" de pesos), atualiza o perfil do layout e registra o evento.
@@ -74,13 +77,13 @@ A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitur
    git add .
    git commit -m "feat: Conversor"
    git branch -M main
-   git remote add origin https://github.com/SEU-USUARIO/conversor-custodio.git
+   git remote add origin https://github.com/SEU-USUARIO/conversor.git
    git push -u origin main
    ```
 2. **Habilite o GitHub Pages** em **Settings → Pages → Build and deployment → Source** e escolha **GitHub Actions**.
    > Esse passo é obrigatório e só pode ser feito por quem administra o repositório. Sem ele, o workflow de deploy não encontra o site do Pages e para (o log mostra exatamente esse aviso).
    > Alternativa automatizada: crie um secret `PAGES_TOKEN` com um PAT que tenha permissão de Pages — o workflow então habilita o site sozinho.
-3. Em ~30 segundos o app estará em `https://SEU-USUARIO.github.io/conversor-custodio/`.
+3. Em ~30 segundos o app estará em `https://SEU-USUARIO.github.io/conversor/`.
 
 O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e pull request.
 
@@ -89,7 +92,7 @@ O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e
 ## Estrutura
 
 ```text
-conversor-custodio/
+conversor/
 ├── index.html                    # Interface (HTML semântico + ARIA)
 ├── package.json                  # Scripts de dev/teste (sem dependências)
 ├── scripts/serve.mjs             # Servidor estático de desenvolvimento
