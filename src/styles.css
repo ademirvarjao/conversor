@@ -596,6 +596,79 @@ body {
   background: var(--surface-alt);
 }
 
+.cloud-status {
+  margin: 6px 0 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--surface-alt);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.cloud-status.is-ok {
+  background: #ecfdf5;
+  border-left-color: var(--emerald);
+  color: #065f46;
+}
+
+.cloud-status.is-warn {
+  background: #fffbeb;
+  border-left-color: var(--amber);
+  color: #92400e;
+}
+
+.cloud-status.is-error {
+  background: #fef2f2;
+  border-left-color: var(--crimson);
+  color: #991b1b;
+}
+
+.cloud-code {
+  margin: 8px 0;
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--navy);
+  background: #eff6ff;
+  border: 1px dashed var(--primary);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: inline-block;
+}
+
+.cloud-hint {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-light);
+  line-height: 1.5;
+}
+
+.cloud-recover {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.cloud-recover .field-group {
+  flex: 1 1 220px;
+}
+
+.cloud-config summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--navy);
+  font-size: 0.92rem;
+}
+
+.cloud-config[open] summary {
+  margin-bottom: 8px;
+}
+
 .trainer-hint {
   margin: 12px 0 0;
   font-size: 0.82rem;
