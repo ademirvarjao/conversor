@@ -14,6 +14,7 @@
 
 import { emptyCounterparties, sanitizeCounterparties } from './counterparty.js';
 import { SEED_PROFILES } from './seed-profiles.js';
+import { buildLayoutSignature } from './bank-layouts.js';
 import {
   cleanWhitespace,
   normalizeText,
@@ -45,6 +46,9 @@ const MIN_TOKEN_WEIGHT = 0;
 const MAX_TOKENS = 3000;
 const MAX_LOG_ENTRIES = 60;
 const MAX_PROFILES = 60;
+
+/** Assinaturas de layout aprendidas (reconhecem variações de nome de coluna). */
+const MAX_SIGNATURES = 120;
 
 export const ROLES = {
   DATE: 'date',
@@ -255,6 +259,14 @@ function createDefaultMemory() {
       apiKey: '',
       model: '',
     },
+    // Assinaturas dos layouts já treinados: reconhecem variações (coluna
+    // renomeada, banco que mudou o formato) mesmo sem perfil idêntico.
+    layoutSignatures: [],
+    // Preferências locais da IA.
+    settings: {
+      // Baixar o catálogo público de layouts (só download: nada do arquivo sai).
+      communityCatalog: true,
+    },
     // Conciliação de clientes/fornecedores (PDF Questor): apelidos de histórico
     // já ligados a um contato, pesos por contato e a última vez que foi usada.
     counterparties: emptyCounterparties(),
@@ -373,6 +385,52 @@ function withSeedProfiles(profiles) {
   return [...missing, ...profiles].slice(0, MAX_PROFILES);
 }
 
+/**
+ * Assinaturas de layout: cabeçalhos normalizados + papel de cada coluna.
+ * Servem para reconhecer variações do mesmo extrato (coluna renomeada).
+ */
+function sanitizeSignatures(rawSignatures) {
+  if (!Array.isArray(rawSignatures)) return [];
+  const seen = new Set();
+  const out = [];
+
+  for (const raw of rawSignatures) {
+    if (!isPlainObject(raw)) continue;
+    const headers = Array.isArray(raw.headers)
+      ? raw.headers.map((header) => normalizeText(header)).filter(Boolean)
+      : [];
+    const roles = Array.isArray(raw.roles)
+      ? raw.roles
+          .filter((role) => isPlainObject(role) && ALL_ROLES.includes(role.role))
+          .map((role) => ({
+            header: cleanWhitespace(role.header),
+            role: role.role,
+            historyOrder: Number(role.historyOrder) || 0,
+          }))
+      : [];
+
+    if (headers.length === 0 || roles.length === 0) continue;
+    const signature = headers.join('|');
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+
+    out.push({
+      id: cleanWhitespace(raw.id) || `sig-${out.length + 1}`,
+      signature,
+      headers,
+      roles,
+      name: cleanWhitespace(raw.name) || `Layout ${headers.slice(0, 2).join(' / ')}`,
+      bank: isPlainObject(raw.bank) && raw.bank.id ? { id: String(raw.bank.id), name: cleanWhitespace(raw.bank.name) || String(raw.bank.id) } : null,
+      fileType: raw.fileType === 'xlsx' ? 'xlsx' : 'pdf',
+      usageCount: Math.max(1, Number(raw.usageCount) || 1),
+      createdAt: raw.createdAt || new Date().toISOString(),
+      lastUsedAt: raw.lastUsedAt || raw.createdAt || new Date().toISOString(),
+    });
+  }
+
+  return out.slice(0, MAX_SIGNATURES);
+}
+
 function defaultRules(defaultSign = 'auto') {
   return {
     defaultSign,
@@ -485,6 +543,10 @@ export function normalizeMemory(rawMemory) {
       provider: ['none', 'openai', 'gemini'].includes(llm.provider) ? llm.provider : 'none',
       apiKey: typeof llm.apiKey === 'string' ? llm.apiKey : '',
       model: typeof llm.model === 'string' ? llm.model : '',
+    },
+    layoutSignatures: sanitizeSignatures(rawMemory.layoutSignatures),
+    settings: {
+      communityCatalog: rawMemory?.settings?.communityCatalog !== false,
     },
     counterparties: sanitizeCounterparties(rawMemory.counterparties),
   };
@@ -1491,6 +1553,34 @@ export function trainAiWithLayout(parsedFile, currentAnalysis, layoutName, memor
 
     currentAnalysis.matchedProfileId = newProfile.id;
     currentAnalysis.matchedProfileName = cleanName;
+  }
+
+  // Assinatura do layout: fica na memória mesmo que o perfil seja excluído e é
+  // o que permite reconhecer uma variação (coluna renomeada, banco que mudou o
+  // formato) sem depender do catálogo de bancos.
+  const signature = buildLayoutSignature(parsedFile, currentAnalysis, {
+    name: cleanName,
+    bank: currentAnalysis.detectedBank || null,
+  });
+  if (signature) {
+    updated.layoutSignatures = sanitizeSignatures(updated.layoutSignatures);
+    const key = signature.headers.join('|');
+    const existing = updated.layoutSignatures.findIndex((item) => item.signature === key);
+    const entry = {
+      id: existing >= 0 ? updated.layoutSignatures[existing].id : `sig-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      signature: key,
+      headers: signature.headers,
+      roles: signature.roles,
+      name: cleanName || signature.name,
+      bank: signature.bank,
+      fileType: signature.fileType,
+      usageCount: existing >= 0 ? (Number(updated.layoutSignatures[existing].usageCount) || 1) + 1 : 1,
+      createdAt: existing >= 0 ? updated.layoutSignatures[existing].createdAt : now,
+      lastUsedAt: now,
+    };
+    if (existing >= 0) updated.layoutSignatures[existing] = entry;
+    else updated.layoutSignatures.unshift(entry);
+    updated.layoutSignatures = updated.layoutSignatures.slice(0, MAX_SIGNATURES);
   }
 
   updated.learningLog = updated.learningLog.slice(0, MAX_LOG_ENTRIES);
