@@ -4,15 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Conversor Custódio — Conciliação Financeira Inteligente (.xlsx &amp; .pdf)</title>
+  <meta name="description" content="Importe extratos e relatórios .pdf e .xlsx, padronize em data | valor | histórico e exporte a conciliação em planilha ou PDF. IA adaptativa de layouts, 100% no navegador." />
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#0f2744" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
   <header class="topbar">
     <div class="container topbar-inner">
       <div class="brand">
         <div class="brand-icon" aria-hidden="true">
-          <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" role="img">
             <rect width="36" height="36" rx="9" fill="#0F2744" />
             <path d="M9 11.5H27M9 18H27M9 24.5H19" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" />
             <circle cx="25.5" cy="24.5" r="3.5" fill="#10B981" />
@@ -28,8 +33,8 @@
         <button id="btn-demo" class="btn btn-ghost" type="button" title="Testar com arquivos simulados de layout variável">
           Testar Exemplo IA
         </button>
-        <button id="btn-ai-memory" class="btn btn-outline-light" type="button">
-          <span class="ai-dot"></span>
+        <button id="btn-ai-memory" class="btn btn-outline-light" type="button" aria-haspopup="dialog">
+          <span class="ai-dot" aria-hidden="true"></span>
           <span>Memória da IA</span>
           <span id="ai-profiles-badge" class="badge-pill">0 perfis</span>
         </button>
@@ -37,21 +42,32 @@
     </div>
   </header>
 
-  <main class="container main-content">
+  <main id="conteudo" class="container main-content">
+    <noscript>
+      <div class="notice notice-error">
+        Esta ferramenta precisa de JavaScript habilitado para processar os arquivos localmente no seu navegador.
+      </div>
+    </noscript>
+
+    <div id="processing-banner" class="processing-banner hidden" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="processing-text">Processando arquivos…</span>
+    </div>
+
     <!-- Passo 1: Upload -->
-    <section class="card upload-section">
+    <section class="card upload-section" aria-labelledby="step-upload-title">
       <div class="section-header">
         <div>
           <span class="step-tag">PASSO 1</span>
-          <h2>Importar Arquivos (.pdf e .xlsx)</h2>
+          <h2 id="step-upload-title">Importar Arquivos (.pdf e .xlsx)</h2>
         </div>
         <div class="section-actions">
           <button id="btn-clear-files" class="btn btn-sm btn-ghost-dark hidden" type="button">Limpar Tudo</button>
         </div>
       </div>
 
-      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Selecionar ou arrastar arquivos PDF ou XLSX">
-        <input id="file-input" type="file" accept=".pdf,.xlsx" multiple class="sr-only" />
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Selecionar ou arrastar arquivos PDF ou XLSX" aria-describedby="dropzone-hint">
+        <input id="file-input" type="file" accept=".pdf,.xlsx" multiple class="sr-only" tabindex="-1" />
         <div class="dropzone-icon" aria-hidden="true">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -60,14 +76,14 @@
           </svg>
         </div>
         <p class="dropzone-title">Arraste seus arquivos <strong>.pdf</strong> e <strong>.xlsx</strong> aqui ou <span class="link-like">clique para selecionar</span></p>
-        <p class="dropzone-hint">Você pode enviar vários arquivos juntos (ex: Pagamentos + Recebimentos). Tudo é processado localmente no navegador.</p>
+        <p id="dropzone-hint" class="dropzone-hint">Você pode enviar vários arquivos juntos (ex.: Pagamentos + Recebimentos). Tudo é processado localmente no navegador; nada é enviado a servidores.</p>
       </div>
 
-      <div id="files-list" class="files-grid hidden"></div>
+      <div id="files-list" class="files-grid hidden" aria-live="polite"></div>
     </section>
 
     <!-- Passo 2: Painel da IA Adaptativa -->
-    <section id="ai-trainer-section" class="card hidden">
+    <section id="ai-trainer-section" class="card hidden" aria-labelledby="trainer-title">
       <div class="section-header">
         <div>
           <span class="step-tag step-ai">PASSO 2 • IA ADAPTATIVA</span>
@@ -79,12 +95,13 @@
         </div>
       </div>
 
-      <div id="trainer-alert" class="ai-alert hidden"></div>
+      <div id="trainer-alert" class="ai-alert hidden" role="status"></div>
+      <ul id="trainer-warnings" class="trainer-warnings hidden" aria-live="polite"></ul>
 
       <div class="trainer-meta-row">
         <div class="field-group">
           <label for="layout-name-input">Nome do Perfil de Layout (para a IA memorizar)</label>
-          <input id="layout-name-input" type="text" placeholder="Ex: Banco Itaú - Pagamentos" />
+          <input id="layout-name-input" type="text" placeholder="Ex: Banco Itaú - Pagamentos" maxlength="80" />
         </div>
         <div class="field-group">
           <label for="rule-default-sign">Sinal padrão (para valores sem sinal explícito)</label>
@@ -98,13 +115,14 @@
 
       <div class="table-wrap">
         <table class="mapping-table">
+          <caption class="sr-only">Mapeamento das colunas detectadas no arquivo para as funções do conversor</caption>
           <thead>
             <tr>
-              <th>Coluna Detectada</th>
-              <th>Amostra dos Dados</th>
-              <th>Diagnóstico da IA</th>
-              <th>Função no Conversor</th>
-              <th>Ordem Histórico</th>
+              <th scope="col">Coluna Detectada</th>
+              <th scope="col">Amostra dos Dados</th>
+              <th scope="col">Diagnóstico da IA</th>
+              <th scope="col">Função no Conversor</th>
+              <th scope="col">Ordem Histórico</th>
             </tr>
           </thead>
           <tbody id="mapping-tbody"></tbody>
@@ -114,17 +132,17 @@
       <div class="rules-bar">
         <label class="checkbox-label">
           <input id="rule-remove-pipes" type="checkbox" checked />
-          <span>Substituir pipes (<code>|</code>) por espaço vazio</span>
+          <span>Substituir pipes (<code>|</code>) por espaço</span>
         </label>
         <label class="checkbox-label">
           <input id="rule-collapse-spaces" type="checkbox" checked />
           <span>Normalizar espaços extras</span>
         </label>
         <div class="inline-replace">
-          <span>Substituição extra:</span>
-          <input id="rule-replace-from" type="text" placeholder="Texto/símbolo" />
-          <span>→</span>
-          <input id="rule-replace-to" type="text" placeholder="Novo texto" />
+          <label for="rule-replace-from" class="inline-label">Substituição extra:</label>
+          <input id="rule-replace-from" type="text" placeholder="Texto/símbolo" maxlength="60" />
+          <span aria-hidden="true">→</span>
+          <input id="rule-replace-to" type="text" placeholder="Novo texto" maxlength="60" aria-label="Novo texto da substituição" />
         </div>
       </div>
 
@@ -137,11 +155,11 @@
     </section>
 
     <!-- Passo 3: Pré-visualização e Exportação -->
-    <section id="output-section" class="card hidden">
+    <section id="output-section" class="card hidden" aria-labelledby="output-title">
       <div class="section-header">
         <div>
           <span class="step-tag step-out">PASSO 3 • RESULTADO UNIFICADO</span>
-          <h2>Planilha Consolidada (data | valor | historico)</h2>
+          <h2 id="output-title">Planilha Consolidada (data | valor | historico)</h2>
         </div>
         <div class="export-actions">
           <button id="btn-export-xlsx" class="btn btn-emerald" type="button">
@@ -178,22 +196,28 @@
 
       <div class="toolbar">
         <div class="search-box">
-          <input id="search-input" type="search" placeholder="Filtrar por histórico, data (dd/mm/aaaa) ou arquivo..." />
+          <label for="search-input" class="sr-only">Filtrar lançamentos</label>
+          <input id="search-input" type="search" placeholder="Filtrar por histórico, data (dd/mm/aaaa) ou arquivo…" />
         </div>
         <div class="filter-pills" role="group" aria-label="Filtrar por tipo de lançamento">
-          <button class="pill active" data-filter="all" type="button">Todos</button>
-          <button class="pill" data-filter="in" type="button">Positivos (+)</button>
-          <button class="pill" data-filter="out" type="button">Negativos (-)</button>
+          <button class="pill active" data-filter="all" type="button" aria-pressed="true">Todos</button>
+          <button class="pill" data-filter="in" type="button" aria-pressed="false">Positivos (+)</button>
+          <button class="pill" data-filter="out" type="button" aria-pressed="false">Negativos (-)</button>
         </div>
+        <label class="checkbox-label export-filter">
+          <input id="export-only-filtered" type="checkbox" />
+          <span>Exportar apenas o resultado filtrado</span>
+        </label>
       </div>
 
       <div class="table-wrap output-table-wrap">
         <table class="data-table">
+          <caption class="sr-only">Pré-visualização dos lançamentos consolidados</caption>
           <thead>
             <tr>
-              <th class="col-date">data</th>
-              <th class="col-val">valor</th>
-              <th class="col-hist">historico</th>
+              <th scope="col" class="col-date">data</th>
+              <th scope="col" class="col-val">valor</th>
+              <th scope="col" class="col-hist">historico</th>
             </tr>
           </thead>
           <tbody id="preview-tbody"></tbody>
@@ -201,7 +225,7 @@
       </div>
 
       <div class="pagination-bar">
-        <span id="pagination-info" class="pagination-info">Exibindo 0 de 0</span>
+        <span id="pagination-info" class="pagination-info" aria-live="polite">Exibindo 0 de 0</span>
         <div class="pagination-btns">
           <button id="btn-prev-page" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
           <button id="btn-next-page" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
@@ -210,8 +234,15 @@
     </section>
   </main>
 
+  <footer class="site-footer">
+    <div class="container site-footer-inner">
+      <p>Conversor Custódio <span id="app-version" class="footer-version">v1.1.0</span> — processamento 100% local no navegador.</p>
+      <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
+    </div>
+  </footer>
+
   <!-- Modal: Memória da IA & Configurações -->
-  <div id="ai-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title">
+  <div id="ai-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title" aria-hidden="true">
     <div class="modal-card">
       <div class="modal-header">
         <div>
@@ -241,23 +272,23 @@
           </div>
         </div>
 
-        <div class="modal-tabs">
-          <button class="mtab active" data-mtab="profiles" type="button">Layouts Memorizados</button>
-          <button class="mtab" data-mtab="logs" type="button">Log de Aprendizado</button>
-          <button class="mtab" data-mtab="settings" type="button">Backup / LLM Opcional</button>
+        <div class="modal-tabs" role="tablist" aria-label="Seções da memória da IA">
+          <button class="mtab active" data-mtab="profiles" type="button" role="tab" aria-selected="true" aria-controls="mtab-profiles" id="tab-profiles">Layouts Memorizados</button>
+          <button class="mtab" data-mtab="logs" type="button" role="tab" aria-selected="false" aria-controls="mtab-logs" id="tab-logs" tabindex="-1">Log de Aprendizado</button>
+          <button class="mtab" data-mtab="settings" type="button" role="tab" aria-selected="false" aria-controls="mtab-settings" id="tab-settings" tabindex="-1">Backup / LLM Opcional</button>
         </div>
 
-        <div id="mtab-profiles" class="mtab-panel"></div>
-        <div id="mtab-logs" class="mtab-panel hidden"></div>
-        <div id="mtab-settings" class="mtab-panel hidden">
+        <div id="mtab-profiles" class="mtab-panel" role="tabpanel" aria-labelledby="tab-profiles"></div>
+        <div id="mtab-logs" class="mtab-panel hidden" role="tabpanel" aria-labelledby="tab-logs"></div>
+        <div id="mtab-settings" class="mtab-panel hidden" role="tabpanel" aria-labelledby="tab-settings">
           <div class="settings-block">
             <h3>Portabilidade da Memória (GitHub / Equipe)</h3>
             <p>Exporte a memória aprendida em JSON para versionar no seu repositório GitHub ou compartilhar entre máquinas.</p>
             <div class="btn-row">
               <button id="btn-export-memory" class="btn btn-sm btn-secondary" type="button">Exportar Memória (.json)</button>
-              <label class="btn btn-sm btn-ghost-dark" style="cursor:pointer;">
+              <label class="btn btn-sm btn-ghost-dark file-label">
                 Importar Memória (.json)
-                <input id="import-memory-input" type="file" accept=".json" class="sr-only" />
+                <input id="import-memory-input" type="file" accept="application/json,.json" class="sr-only" />
               </label>
               <button id="btn-reset-memory" class="btn btn-sm btn-danger-outline" type="button">Resetar Memória</button>
             </div>
@@ -265,7 +296,7 @@
 
           <div class="settings-block">
             <h3>Conector LLM Opcional (OpenAI / Gemini)</h3>
-            <p>O Conversor Custódio funciona 100% offline com IA local. Opcionalmente, informe uma chave própria para analisar layouts inéditos via nuvem (salva apenas no seu navegador).</p>
+            <p>O Conversor Custódio funciona 100% offline com IA local. Opcionalmente, informe uma chave própria para analisar layouts inéditos via nuvem. A chave fica salva apenas neste navegador.</p>
             <div class="llm-grid">
               <div class="field-group">
                 <label for="llm-provider">Provedor</label>
@@ -277,10 +308,10 @@
               </div>
               <div class="field-group">
                 <label for="llm-apikey">API Key</label>
-                <input id="llm-apikey" type="password" placeholder="sk-... ou AIza..." autocomplete="off" />
+                <input id="llm-apikey" type="password" placeholder="sk-... ou AIza..." autocomplete="off" spellcheck="false" />
               </div>
             </div>
-            <div class="btn-row" style="margin-top:10px;">
+            <div class="btn-row modal-row-spaced">
               <button id="btn-save-llm" class="btn btn-sm btn-primary" type="button">Salvar Configuração</button>
             </div>
           </div>
@@ -290,9 +321,9 @@
   </div>
 
   <!-- Toast notifications -->
-  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- Vendored Browser Libraries (Zero CDN dependency, works 100% on GitHub Pages) -->
+  <!-- Bibliotecas empacotadas offline (zero dependência de CDN, funciona no GitHub Pages) -->
   <script src="./vendor/exceljs/exceljs.min.js"></script>
   <script src="./vendor/jspdf/jspdf.umd.min.js"></script>
   <script src="./vendor/jspdf/jspdf.plugin.autotable.min.js"></script>

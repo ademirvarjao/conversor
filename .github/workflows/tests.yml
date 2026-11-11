@@ -1,0 +1,34 @@
+name: Testes automatizados
+
+on:
+  push:
+    branches: ["main", "master", "arena/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} — unit tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # O projeto não possui dependências de runtime: as bibliotecas são
+      # vendorizadas e os testes usam apenas o test runner nativo do Node.
+      - name: Executar testes
+        run: npm test
