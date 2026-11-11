@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.9.7';
+export const APP_VERSION = '1.9.8';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -44,6 +44,11 @@ export const REQUIRED_ELEMENT_IDS = [
   'search-input',
   'preview-tbody',
   'pagination-info',
+  'preview-select-all',
+  'preview-page-size',
+  'btn-delete-selected',
+  'btn-restore-deleted',
+  'btn-clear-preview-selection',
   'btn-prev-page',
   'btn-next-page',
   'ai-modal',
