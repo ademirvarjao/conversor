@@ -1,6 +1,9 @@
 # Conversor Custódio
 
 [![Testes](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml)
+[![Deploy](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml)
+
+**▶ Abrir o app: <https://ademirvarjao.github.io/conversor-custodio/>**
 
 Aplicação web **100% client-side** (pronta para GitHub Pages) para importar, padronizar, unificar cronologicamente e exportar relatórios financeiros de pagamentos e recebimentos nos formatos **`.xlsx`** e **`.pdf`**.
 
