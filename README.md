@@ -65,6 +65,19 @@ Todo extrato novo passa pelo mesmo roteiro de análise que um especialista faria
 
 Nos dois extratos usados como referência — **Itaú (567 lançamentos)** e **Bradesco (71 lançamentos)** — o treinador fecha o saldo em **todas** as conferências (20 checkpoints diários no Itaú; 71 linhas no Bradesco).
 
+### Banco reconhecido na hora: catálogo + comunidade (v1.16.0)
+O treinador passou a **reconhecer de quem é o extrato** antes de pedir qualquer coisa ao usuário. Três camadas, nesta ordem:
+
+1. **Catálogo embutido — 18 bancos brasileiros** (`src/bank-layouts.js`): Itaú, Bradesco, Banco do Brasil, Caixa, Santander, Sicoob, Sicredi, Nubank, Inter, C6, BTG, Safra, Banrisul, Mercado Pago, PagBank, Stone, Original e Agibank. Cada um traz o apelido usado no cabeçalho (`Itaú Unibanco`, `CAIXA ECONÔMICA FEDERAL`…) e as regras de coluna do seu extrato. Se o banco e a estrutura de colunas batem, o layout **entra mapeado na primeira importação** — sem treino, sem LLM.
+2. **Assinaturas aprendidas**: todo perfil memorizado guarda também a assinatura dos cabeçalhos (`layoutSignatures`, até 120, sem nenhum valor do extrato). Um extrato com o mesmo formato de um banco que você já treinou é reconhecido por semelhança de cabeçalhos (≥ 70%) e ganha o selo *Layout reaproveitado de um treino anterior*.
+3. **Sinônimos genéricos**: quando não é banco conhecido, vale a heurística de sempre (`Dt. Mov.` → data, `Histórico` → histórico, `Nº Doc`/`Dcto.` → documento, `Valor` → valor, `Saldo` → conferência).
+
+O reconhecimento vira a **primeira conferência do painel** (abaixo, *Banco e layout*), com a evidência: nome do banco encontrado no arquivo, quantas colunas batem com o padrão e a confiança. As divergências entre o padrão do banco e a leitura da IA aparecem como **correções de um clique** — o caso clássico é o `Dcto.` da Caixa entrando como valor.
+
+**Catálogo da comunidade, opcional e anônimo**: o botão *Buscar layouts na comunidade* faz **um GET** em `layouts/comunidade.json` (no próprio repositório) e guarda a lista por 7 dias no navegador. Só a lista de bancos desce — **nada do seu arquivo sobe**: a comparação é local, o pedido não tem query string nem corpo (`credentials: 'omit'`). A busca automática, quando o banco não é identificado, pode ser desligada no painel. Para contribuir com um banco novo, basta um PR acrescentando a entrada em `layouts/comunidade.json` — `id`, `name` e as colunas (`match` + `role`), sem nenhum dado de cliente; o app valida o arquivo antes de usar (`test/layout-registry.test.mjs` confere que ele não tem datas nem valores).
+
+**Quirks por banco** que o reconhecimento já carrega: valor com sufixo `D`/`C` grudado no número (Banco do Brasil, Caixa), extrato do Itaú em **blocos de 3 linhas** com saldo só no fechamento do dia, seções de saldo que não entram na conferência (`SALDO INVEST FÁCIL`, `SALDO TOTAL DISPONÍVEL DIA`) e o Nubank sem coluna de saldo.
+
 ### Conciliação de clientes/fornecedores (v1.8.0)
 O **ícone da marca** na barra superior leva para uma **página própria** (`conciliador.html`), com fluxo separado da conciliação unificada para cruzar o **cadastro de contatos do Questor** com o extrato bancário. O ícone de volta (e o botão *Conversor*) retornam à página principal — as duas telas compartilham a mesma memória da IA.
 
@@ -227,6 +240,8 @@ conversor/
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
 │   ├── seed-profiles.js          # Perfis de fábrica (extratos Itaú e Bradesco)
 │   ├── training-coach.js         # Treinador automático (diagnóstico + conferência de saldo)
+│   ├── bank-layouts.js           # Catálogo de 18 bancos, reconhecimento e assinaturas
+│   ├── layout-registry.js        # Catálogo público da comunidade (download + cache)
 │   ├── export-scope.js           # Regra de exportação (seleção → tudo)
 │   ├── counterparty.js           # Conciliação clientes/fornecedores (cadastro Questor)
 │   ├── counterparty-page.js      # Controlador da página conciliador.html
@@ -239,6 +254,8 @@ conversor/
 │   ├── sync-vault.js             # Identidade, pacote de modelos e sincronização
 │   ├── sync-config.js            # URL + chave anônima padrão (públicas)
 │   └── styles.css                # Estilos responsivos + acessibilidade
+├── layouts/
+│   └── comunidade.json           # Catálogo público de bancos (contribuição por PR)
 ├── supabase/
 │   ├── migrations/               # Migração aplicada sozinha pela integração Supabase + GitHub
 │   └── schema.sql                # Mesmo schema, para aplicação manual de emergência
