@@ -295,6 +295,139 @@ describe('buildTableFromTextLines — relatório agrupado por cliente', () => {
   });
 });
 
+describe('buildTableFromTextLines — extrato Itaú com bloco de 3 linhas', () => {
+  // Geometria real do extrato ICS (Itaú): cada lançamento ocupa três linhas
+  // visuais com passo de ~5,3 pt e a data/valor/CNPJ ficam na linha do MEIO.
+  // A coluna de histórico só aparece em parte das linhas que têm data — se o
+  // suporte fosse contado apenas nas linhas com data ela seria descartada e
+  // seus textos cairiam dentro da coluna de data ("Data Lançamentos").
+  const pages = [
+    line(1, 712.1, [['Saldo total', 35, 60], ['Limite da conta', 167, 70]]),
+    line(1, 691.8, [['R$ 2.520,90', 35, 60], ['R$ 0,00', 167, 40]]),
+    line(1, 654.5, [['Lançamentos do período:', 34, 120], ['01/10/2026 até 31/10/2026', 131, 120]]),
+    line(1, 628.1, [
+      ['Data', 35, 22],
+      ['Lançamentos', 90, 52],
+      ['Razão Social', 226, 60],
+      ['CNPJ/CPF', 363, 48],
+      ['Valor (R$)', 470, 40],
+      ['Saldo (R$)', 521, 42],
+    ]),
+    line(1, 615.3, [
+      ['30/09/2026', 35, 42],
+      ['SALDO ANTERIOR', 90, 62],
+      ['244.600,52', 518, 41],
+    ]),
+    line(1, 602.5, [
+      ['01/10/2026', 35, 42],
+      ['PIX RECEBIDO ALELO S01/10', 90, 100],
+      ['ALELO SA', 226, 40],
+      ['04.740.876/0001-25', 363, 76],
+      ['216,64', 483, 24],
+    ]),
+    line(1, 589.7, [
+      ['RECEBIMENTO REDE ELO', 90, 84],
+      ['REDECARD INSTITUICAO DE', 226, 92],
+    ]),
+    line(1, 584.4, [
+      ['01/10/2026', 35, 42],
+      ['01.425.787/0001-04', 363, 76],
+      ['90,21', 487, 20],
+    ]),
+    line(1, 579.1, [
+      ['DB0094977224', 90, 52],
+      ['PAGAMENTO S.A.', 226, 50],
+    ]),
+    line(1, 566.3, [
+      ['RECEBIMENTO REDE VISA', 90, 88],
+      ['REDECARD INSTITUICAO DE', 226, 92],
+    ]),
+    line(1, 561.0, [
+      ['01/10/2026', 35, 42],
+      ['01.425.787/0001-04', 363, 76],
+      ['1.230,90', 476, 28],
+    ]),
+    line(1, 555.7, [
+      ['DB0094977224', 90, 52],
+      ['PAGAMENTO S.A.', 226, 50],
+    ]),
+  ];
+
+  const table = buildTableFromTextLines(pages);
+
+  it('não funde a coluna de data com a de lançamentos', () => {
+    assert.deepEqual(table.headers, [
+      'Data',
+      'Lançamentos',
+      'Razão Social',
+      'CNPJ/CPF',
+      'Valor (R$)',
+      'Saldo (R$)',
+    ]);
+  });
+
+  it('mantém data e histórico em colunas separadas em cada linha', () => {
+    assert.equal(table.rows.length, 4);
+    assert.equal(table.rows[0][0], '30/09/2026');
+    assert.equal(table.rows[0][1], 'SALDO ANTERIOR');
+    assert.equal(table.rows[1][0], '01/10/2026');
+    assert.equal(table.rows[1][1], 'PIX RECEBIDO ALELO S01/10');
+  });
+
+  it('liga a descrição acima da data ao bloco a que ela pertence', () => {
+    // "RECEBIMENTO REDE ELO" está ACIMA da data, mas pertence a este bloco.
+    assert.equal(table.rows[2][0], '01/10/2026');
+    assert.equal(table.rows[2][1], 'RECEBIMENTO REDE ELO DB0094977224');
+    assert.equal(table.rows[2][2], 'REDECARD INSTITUICAO DE PAGAMENTO S.A.');
+    assert.equal(table.rows[2][3], '01.425.787/0001-04');
+    assert.equal(table.rows[2][4], '90,21');
+    assert.equal(table.rows[3][1], 'RECEBIMENTO REDE VISA DB0094977224');
+    assert.equal(table.rows[3][4], '1.230,90');
+  });
+
+  it('não perde o saldo da linha de abertura nem o rotulo do cabecalho', () => {
+    assert.equal(table.rows[0][5], '244.600,52');
+    assert.ok(!table.rows.flat().join(' ').includes('Data Lançamentos'));
+  });
+});
+
+describe('buildTableFromTextLines — rótulo de coluna numérica alinhada à direita', () => {
+  // Exportações com números alinhados à direita deixam o rótulo bem à esquerda
+  // do valor; o rótulo precisa ir para a coluna do valor (e não se juntar ao
+  // rótulo anterior, virando "data valor").
+  const pages = [
+    line(1, 520, [
+      ['data', 40, 17],
+      ['valor', 105, 20],
+      ['historico', 190, 36],
+    ]),
+    line(1, 500, [
+      ['01/10/2026', 47, 39],
+      ['-851,98', 152, 26],
+      ['Alef Ferramentas Para Usinagem Ltda 1152 1152/1', 190, 179],
+    ]),
+    line(1, 480, [
+      ['01/10/2026', 47, 39],
+      ['-142,80', 152, 26],
+      ['Arcelormittal Brasil S/a 1679708 1679708/1', 190, 170],
+    ]),
+  ];
+
+  const table = buildTableFromTextLines(pages);
+
+  it('não cola o rótulo do valor no rótulo da data', () => {
+    assert.deepEqual(table.headers, ['data', 'valor', 'historico']);
+  });
+
+  it('mantém os dados em três colunas', () => {
+    assert.deepEqual(table.rows[0], [
+      '01/10/2026',
+      '-851,98',
+      'Alef Ferramentas Para Usinagem Ltda 1152 1152/1',
+    ]);
+  });
+});
+
 describe('buildTableFromTextLines — casos especiais', () => {
   it('junta descrição quebrada em duas linhas visuais', () => {
     const table = buildTableFromTextLines([

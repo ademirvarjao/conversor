@@ -23,6 +23,12 @@ const MAX_DATA_ROWS = 200000;
 /** Tolerância vertical (pt) para considerar fragmentos na mesma linha visual. */
 const LINE_TOLERANCE = 2.5;
 
+/**
+ * Distância vertical máxima (pt) entre a linha de um lançamento e uma linha de
+ * continuação do mesmo bloco (histórico/razão social quebrados em 2-3 linhas).
+ */
+const CONTINUATION_RANGE = 24;
+
 export function cleanWhitespace(str) {
   return String(str ?? '')
     .replace(/[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
@@ -766,8 +772,28 @@ export function buildTableFromTextLines(allPageLines) {
   );
   const minSupport = Math.max(2, Math.floor(candidateDataLines.length * 0.3));
 
+  // Suporte real de cada coluna: contamos as ocorrências em TODAS as linhas do
+  // documento, não apenas nas que trazem data. Em layouts com bloco de histórico
+  // de duas ou três linhas (extrato Itaú, por exemplo) a data aparece só na
+  // linha do meio do bloco; a coluna de histórico teria então suporte
+  // artificialmente baixo e seria descartada — e os textos dela caíam dentro da
+  // coluna de data, virando "Data Lançamentos".
+  const documentItems = [];
+  for (const line of allPageLines) {
+    for (const item of line.items) documentItems.push(item);
+  }
+  const supportOf = (cluster) => {
+    let total = 0;
+    for (const item of documentItems) {
+      if (item.x >= cluster.min - 2 && item.x <= cluster.max + 2) total += 1;
+    }
+    return total;
+  };
+
   let colClusters = rawClusters.filter((cluster) => {
     if (cluster.count >= minSupport) return true;
+    // Coluna legítima, mas com poucas linhas contendo data própria.
+    if (supportOf(cluster) >= minSupport) return true;
     // Preserva colunas raras que contenham valores monetários (ex.: "Crédito"
     // preenchido em poucas linhas).
     return allItems.some(
@@ -953,22 +979,41 @@ export function buildTableFromTextLines(allPageLines) {
   }
 
   for (const headerLine of headerLines) {
+    // Uma coluna costuma ter um rótulo por linha de cabeçalho; quando o rótulo
+    // flutua entre duas colunas (caso de coluna numérica alinhada à direita) ele
+    // não deve repetir a coluna do rótulo anterior da mesma linha.
+    const columnsUsedOnLine = new Set();
     for (const item of headerLine.items) {
       const center = item.x + (item.w || 0) / 2;
-      let bestCol = 0;
-      let bestScore = -Infinity;
+      // Intervalo horizontal ocupado pelo rótulo do cabeçalho.
+      const labelStart = item.x;
+      const labelEnd = item.x + (item.w || 0);
+      const candidates = [];
       for (let col = 0; col < colBounds.length; col++) {
         const extent = colDataExtents[col];
         const bounds = colBounds[col];
-        const inExtent = center >= extent.minX - 10 && center <= extent.maxX + 10;
+        // Distância entre o rótulo e os dados da coluna. Em colunas numéricas
+        // alinhadas à direita o rótulo costuma ficar bem à esquerda dos
+        // números (ou vice-versa), então o vão entre os dois intervalos diz
+        // mais do que o centro do rótulo — era o que colava "data valor".
+        const gap =
+          labelEnd < extent.minX
+            ? extent.minX - labelEnd
+            : labelStart > extent.maxX
+              ? labelStart - extent.maxX
+              : 0;
         const inBounds = center >= bounds.start && center < bounds.end;
         const distance = Math.abs(center - (extent.minX + extent.maxX) / 2);
-        const score = (inExtent ? 1000 : 0) + (inBounds ? 500 : 0) - distance;
-        if (score > bestScore) {
-          bestScore = score;
-          bestCol = col;
-        }
+        const score = -gap * 1000 + (inBounds ? 500 : 0) - distance;
+        candidates.push({ col, gap, score });
       }
+      candidates.sort((a, b) => b.score - a.score);
+      const bestCol = (
+        candidates.find((candidate) => candidate.gap === 0) ||
+        candidates.find((candidate) => !columnsUsedOnLine.has(candidate.col)) ||
+        candidates[0]
+      ).col;
+      columnsUsedOnLine.add(bestCol);
       headerParts[bestCol].push(item.str);
     }
   }
@@ -990,8 +1035,7 @@ export function buildTableFromTextLines(allPageLines) {
 
   const rows = [];
   const skipped = [];
-  let lastRowPage = null;
-  let lastRowY = null;
+  const entries = [];
 
   for (const line of allPageLines) {
     const norm = normalizeText(lineText(line));
@@ -1039,40 +1083,99 @@ export function buildTableFromTextLines(allPageLines) {
       continue;
     }
 
-    if (hasDate) {
-      rows.push(rowStrings);
-      lastRowPage = line.page;
-      lastRowY = line.y;
+    entries.push({
+      page: line.page,
+      y: line.y,
+      cells: rowStrings,
+      norm,
+      hasDate,
+      isSectionHeader,
+      nonEmptyCount,
+      hasMoney: rowStrings.some((value) => parseMoneyValue(value) !== null),
+    });
+  }
+
+  // 7. Montar as linhas de dados juntando as continuações ao bloco correto.
+  //
+  // Em vários extratos a data não fica na mesma linha visual do histórico: no
+  // bloco do Itaú (três linhas) a data aparece junto com CNPJ e valor na linha
+  // do MEIO, com uma linha de descrição acima e outra abaixo:
+  //     RECEBIMENTO REDE VISA   | REDECARD INSTITUICAO DE
+  //     01/10/2026              | 01.425.787/0001-04 | 1.230,90
+  //     DB0094977224            | PAGAMENTO S.A.
+  // Por isso a continuação se liga ao bloco mais próximo — inclusive quando ela
+  // está ACIMA da linha que traz a data — e o texto de cada coluna é remontado
+  // na ordem vertical original.
+  const blocks = [];
+  for (const entry of entries) {
+    if (entry.hasDate || entry.isSectionHeader) blocks.push({ ...entry, extra: [] });
+  }
+
+  // Índice por página (topo → base) para achar o bloco vizinho em O(log n).
+  const blocksByPage = new Map();
+  for (const block of blocks) {
+    const list = blocksByPage.get(block.page);
+    if (list) list.push(block);
+    else blocksByPage.set(block.page, [block]);
+  }
+  for (const list of blocksByPage.values()) list.sort((a, b) => b.y - a.y);
+
+  for (const entry of entries) {
+    if (entry.hasDate || entry.isSectionHeader) continue;
+    if (entry.nonEmptyCount === 0 || entry.nonEmptyCount > 2 || entry.hasMoney) {
+      skipped.push(entry.norm);
       continue;
     }
 
-    if (isSectionHeader) {
-      rows.push(rowStrings);
-      lastRowPage = line.page;
-      lastRowY = line.y;
+    const pageBlocks = blocksByPage.get(entry.page) || [];
+    let lo = 0;
+    let hi = pageBlocks.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pageBlocks[mid].y >= entry.y) lo = mid + 1;
+      else hi = mid;
+    }
+    const above = lo > 0 ? pageBlocks[lo - 1] : null;
+    const below = lo < pageBlocks.length ? pageBlocks[lo] : null;
+
+    const aboveDistance = above ? above.y - entry.y : Infinity;
+    const belowDistance = below ? entry.y - below.y : Infinity;
+    // O padrão do mercado é a continuação logo ABAIXO da linha do lançamento.
+    // Só escolhemos o bloco de baixo quando ele está claramente mais perto —
+    // é o caso do bloco com a data na linha do meio (extrato do Itaú).
+    const preferBelow =
+      below !== null && belowDistance <= CONTINUATION_RANGE && belowDistance * 4 <= aboveDistance * 3;
+    let target = null;
+    if (preferBelow) target = below;
+    else if (above && aboveDistance <= CONTINUATION_RANGE) target = above;
+    else if (below && belowDistance <= CONTINUATION_RANGE) target = below;
+
+    // Cabeçalho de seção é um rótulo isolado: só recebe texto que esteja
+    // abaixo dele (texto acima é rodapé/observação da tabela anterior).
+    if (target && target.isSectionHeader && entry.y > target.y) target = null;
+
+    // Nunca no cabeçalho da página seguinte (era o que colava "Página : 2 / 6"
+    // na última linha): o bloco precisa estar na mesma página.
+    if (!target) {
+      skipped.push(entry.norm);
       continue;
     }
+    target.extra.push(entry);
+  }
 
-    // Continuação de uma descrição quebrada em duas linhas no PDF: precisa
-    // estar na mesma página e imediatamente abaixo — nunca no cabeçalho da
-    // página seguinte (era o que colava "Página : 2 / 6" na última linha).
-    const nearPreviousRow =
-      lastRowPage === line.page && lastRowY !== null && lastRowY - line.y <= 24;
-    if (rows.length > 0 && nonEmptyCount > 0 && nonEmptyCount <= 2 && nearPreviousRow) {
-      const hasMoney = rowStrings.some((value) => parseMoneyValue(value) !== null);
-      if (!hasMoney) {
-        const previous = rows[rows.length - 1];
-        for (let col = 0; col < rowStrings.length; col++) {
-          if (rowStrings[col]) {
-            previous[col] = cleanWhitespace(`${previous[col]} ${rowStrings[col]}`);
-          }
-        }
-        lastRowY = line.y;
-        continue;
+  for (const block of blocks) {
+    const parts = [
+      { y: block.y, cells: block.cells },
+      ...block.extra.map((entry) => ({ y: entry.y, cells: entry.cells })),
+    ].sort((a, b) => b.y - a.y);
+    const assembled = Array.from({ length: colBounds.length }, () => '');
+    for (const part of parts) {
+      for (let col = 0; col < assembled.length; col++) {
+        const value = part.cells[col];
+        if (value) assembled[col] = cleanWhitespace(`${assembled[col]} ${value}`);
       }
     }
-
-    skipped.push(norm);
+    if (assembled.some(Boolean)) rows.push(assembled);
   }
 
   return {
