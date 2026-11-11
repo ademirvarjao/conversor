@@ -94,6 +94,19 @@ describe('página do conciliador', () => {
     assert.match(module, /scope === 'empty'[\s\S]{0,120}counterpartAccount/);
   });
 
+  it('treina a IA com as contas preenchidas e mostra as sugestões', () => {
+    for (const id of ['btn-cp-apply-suggestions', 'cp-memory-state', 'cp-link-memory']) {
+      assert.ok(pageIds.includes(id), `falta #${id}`);
+    }
+    assert.match(page, /Memória:/);
+    assert.match(module, /learnRowAccount/);
+    assert.match(module, /data-cp-suggest/);
+    assert.match(module, /function applySuggestion/);
+    assert.match(module, /function applySuggestionsBatch/);
+    // Toda conta aplicada precisa reforçar a memória.
+    assert.match(module, /rememberAccount\(row, side, account/);
+  });
+
   it('aplica cada campo do lote só na sua coluna, sem tocar na conta do contato', () => {
     assert.match(module, /cp-debit-account-input/);
     assert.match(module, /cp-credit-account-input/);

@@ -192,6 +192,28 @@ test('aplicar o pacote preserva a chave do LLM que já existe na máquina', () =
   assert.equal(merged.optionalLlm.provider, 'openai');
 });
 
+test('as contas memorizadas viajam no pacote da nuvem', () => {
+  const memory = memoryWithProfile('Layout da equipe');
+  memory.counterparties = {
+    aliases: {},
+    tokenWeights: {},
+    contacts: {},
+    accounts: {
+      byHistory: { 'plasttotal industrial': { debit: '', credit: '12345', hits: 2, updatedAt: '2026-11-11T10:00:00.000Z' } },
+      byContact: { '5086959': { debit: '500046', credit: '', hits: 1, updatedAt: '2026-11-11T10:00:00.000Z' } },
+    },
+    uses: 1,
+    updatedAt: '2026-11-11T10:00:00.000Z',
+  };
+
+  const payload = buildVaultPayload(memory);
+  assert.equal(payload.counterparties.accounts.byHistory['plasttotal industrial'].credit, '12345');
+
+  const restored = applyVaultPayload(memoryWithProfile('outro'), payload);
+  assert.equal(restored.counterparties.accounts.byHistory['plasttotal industrial'].credit, '12345');
+  assert.equal(restored.counterparties.accounts.byContact['5086959'].debit, '500046');
+});
+
 test('pacote inválido é recusado', () => {
   assert.throws(() => applyVaultPayload(memoryWithProfile(), null), /inválido/i);
   assert.throws(() => applyVaultPayload(memoryWithProfile(), 'texto'), /inválido/i);
