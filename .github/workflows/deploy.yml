@@ -92,7 +92,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p _site
-          cp -R index.html src vendor _site/
+          # Todas as páginas HTML da raiz entram no site (index + conciliador).
+          cp -R ./*.html src vendor _site/
           cp -f README.md LICENSE _site/ 2>/dev/null || true
           touch _site/.nojekyll
           echo "Arquivos publicados:"
