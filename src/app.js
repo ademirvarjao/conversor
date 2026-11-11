@@ -1808,8 +1808,13 @@ function openCounterpartyModal() {
   lastFocusedElement = document.activeElement;
   modal.classList.remove('hidden');
   modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('cp-drawer-open');
   renderCounterparty();
-  dom['btn-cp-run']?.focus();
+  if (counterparty.contacts.length === 0) {
+    dom['cp-contacts-input']?.focus();
+  } else {
+    dom['btn-cp-run']?.focus();
+  }
 }
 
 function closeCounterpartyModal() {
@@ -1817,6 +1822,7 @@ function closeCounterpartyModal() {
   if (!modal || modal.classList.contains('hidden')) return;
   modal.classList.add('hidden');
   modal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('cp-drawer-open');
   counterparty.linkingId = null;
   dom['cp-link-panel']?.classList.add('hidden');
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
@@ -2353,8 +2359,14 @@ function bindGlobalEvents() {
     }
   });
 
-  // Mantém o foco dentro do modal enquanto ele estiver aberto.
+  // Mantém o foco dentro do painel aberto (barra lateral ou modal).
   document.addEventListener('focusin', (event) => {
+    const drawer = dom['cp-modal'];
+    if (drawer && !drawer.classList.contains('hidden')) {
+      if (!drawer.contains(event.target)) dom['btn-close-cp']?.focus();
+      return;
+    }
+
     const modal = dom['ai-modal'];
     if (!modal || modal.classList.contains('hidden')) return;
     if (!modal.contains(event.target)) {
