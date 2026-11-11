@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeMemory } from '../src/ai-engine.js';
+import { DEFAULT_CLOUD_CONFIG } from '../src/sync-config.js';
+import { normalizeSupabaseConfig } from '../src/sync-client.js';
 import {
   CONFIG_KEY,
   IDENTITY_KEY,
@@ -9,6 +11,7 @@ import {
   buildVaultPayload,
   clearCloudConfig,
   clearIdentity,
+  hasBuiltInCloudConfig,
   isPayloadNewer,
   loadCloudConfig,
   loadIdentity,
@@ -148,18 +151,49 @@ test('identidade só é aceita com chave e slot (nada de meio registro)', () => 
 
 test('configuração do banco é validada antes de ser salva', () => {
   const storage = fakeStorage();
+  // `{}` isola o teste do banco embutido no app (que é usado como padrão).
   assert.equal(saveCloudConfig({ url: '', anonKey: '' }, storage), false);
   assert.equal(saveCloudConfig({ url: 'nao-e-url', anonKey: 'b'.repeat(40) }, storage), false);
   assert.equal(saveCloudConfig({ url: CONFIG.url, anonKey: 'curta' }, storage), false);
-  assert.equal(loadCloudConfig(storage), null);
+  assert.equal(loadCloudConfig(storage, {}), null);
 
   assert.equal(saveCloudConfig({ url: `${CONFIG.url}/`, anonKey: CONFIG.anonKey }, storage), true);
-  const loaded = loadCloudConfig(storage);
+  const loaded = loadCloudConfig(storage, {});
   assert.equal(loaded.url, CONFIG.url, 'barra final é removida');
   assert.ok(storage.data.has(CONFIG_KEY));
 
   clearCloudConfig(storage);
-  assert.equal(loadCloudConfig(storage), null);
+  assert.equal(loadCloudConfig(storage, {}), null);
+});
+
+test('o banco embutido no app, quando preenchido, é válido', () => {
+  const builtIn = normalizeSupabaseConfig(DEFAULT_CLOUD_CONFIG);
+
+  if (!builtIn) {
+    // Modo manual: sem banco embutido, o app pede URL + chave anônima na tela.
+    assert.equal(hasBuiltInCloudConfig(), false);
+    assert.equal(loadCloudConfig(fakeStorage()), null);
+    return;
+  }
+
+  assert.equal(hasBuiltInCloudConfig(), true);
+  assert.match(builtIn.url, /^https:\/\/[a-z0-9-]+\.supabase\.co$/i);
+  assert.ok(builtIn.anonKey.length >= 100, 'a chave anônima é um JWT longo');
+  // Sem conexão salva neste navegador, o app usa o banco embutido.
+  assert.deepEqual(loadCloudConfig(fakeStorage()), builtIn);
+});
+
+test('sem conexão salva, vale o banco embutido; a conexão salva tem prioridade', () => {
+  const storage = fakeStorage();
+  const builtIn = { url: 'https://oficial.supabase.co', anonKey: 'c'.repeat(120) };
+
+  assert.deepEqual(loadCloudConfig(storage, builtIn), builtIn);
+
+  assert.equal(saveCloudConfig(CONFIG, storage), true);
+  assert.equal(loadCloudConfig(storage, builtIn).url, CONFIG.url);
+
+  clearCloudConfig(storage);
+  assert.equal(loadCloudConfig(storage, builtIn).url, builtIn.url);
 });
 
 /* -------------------------------------------------------------------------- */
