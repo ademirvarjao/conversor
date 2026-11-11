@@ -18,6 +18,7 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 ### Importação (`.pdf` e `.xlsx`)
 - **PDF (PDF.js)**: extração geométrica adaptativa — descobre colunas pelo alinhamento das coordenadas X, combina cabeçalhos em múltiplas linhas, recompõe descrições quebradas em duas linhas e descarta banners, CNPJ, totais e cabeçalhos repetidos de página.
 - **XLSX (ExcelJS)**: múltiplas abas (com seletor manual), datas nativas ali preservadas, fórmulas resolvidas, células mescladas sem duplicação, banners e linhas de resumo removidos automaticamente.
+- **Extratos paginados**: o cabeçalho/rodapé repetido em cada página é descartado (inclusive a linha `Conta Corrente :`), sem contaminar a última linha da página anterior — validado em extrato real de 6 páginas com reconciliação total contra o saldo (293 lançamentos, diferença zero).
 - Vários arquivos ao mesmo tempo (ex.: Pagamentos + Recebimentos), com detecção de duplicados, limite de tamanho e progresso de leitura por página.
 
 ### Padronização em 3 colunas
@@ -34,6 +35,8 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 
 ### IA Adaptativa de Layouts
 - **Inferência semântica multi-sinal**: pesos léxicos PT-BR + análise estatística dos dados (datas reais, valores, colunas separadas de Entrada/Crédito e Saída/Débito, indicadores `D/C`, colunas esparsas) e exclusão automática de colunas de `Saldo`/`Total`/vazias.
+- **Entradas e saídas em colunas separadas**: reconhece layouts em que o valor de cada linha aparece em **uma de duas colunas** (`Pagto.`/`Recbto.`, `Débito`/`Crédito`, `Saídas`/`Entradas`) — inclusive abreviações. O par é identificado pela exclusividade mútua dos dados e o sentido de cada coluna é confirmado pela **variação do saldo** linha a linha; na falta do saldo, vale o cabeçalho e, por último, a posição. O resultado é um único lançamento assinado por linha, em vez de duas colunas somadas.
+- **Colunas de identificação não viram valor**: `Lancto`, `Documento`, `Nº`, `Código` e sequências numéricas (inteiros, únicos e crescentes) são ignorados automaticamente — antes o número do lançamento entraria na soma.
 - **Detecção de evolução de layout**: aponta exatamente o que mudou (`NOVA`, `RENOMEADA`, `AUSENTE`) e aplica o melhor mapeamento.
 - **Aprendizado supervisionado**: ao confirmar/corrigir o mapeamento, o motor reforça ou penaliza os pesos dos tokens (com limites para evitar "explosão" de pesos), atualiza o perfil do layout e registra o evento.
 - **Memória persistente** em `localStorage`, com exportação/importação de `custodio-ia-memoria.json` para versionar no repositório ou compartilhar entre máquinas. Backups inválidos são normalizados/descartados sem quebrar a aplicação.
@@ -122,6 +125,7 @@ conversor-custodio/
 | O workflow de deploy falha em **“Configurar GitHub Pages”** com `Get Pages site failed ... Not Found` | O site do Pages nunca foi habilitado no repositório | **Settings → Pages → Source: GitHub Actions** e rode o workflow novamente |
 | A página do Pages abre sem estilo / sem funcionar | O deploy publicou apenas parte dos arquivos | Rode o workflow novamente; ele publica `index.html`, `src/` e `vendor/` (incluindo `src/parsers.js`) |
 | “Nenhum texto extraível encontrado” ao importar PDF | PDF escaneado (sem camada de texto) | Use um PDF exportado do sistema de origem ou aplique OCR antes |
+| Valores de entrada e saída aparecem com o mesmo sinal | As duas colunas foram marcadas com a mesma função | Marque uma como *Valor Recebido / Crédito (+)* e a outra como *Valor Pago / Débito (-)* no Passo 2 |
 | Planilha importa muitas linhas ignoradas | Linhas sem data ou sem valor na coluna mapeada | Ajuste o mapeamento no **Passo 2** — a IA aprende com a correção |
 
 ## Limitações conhecidas

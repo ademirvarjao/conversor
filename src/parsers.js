@@ -910,8 +910,12 @@ export function buildTableFromTextLines(allPageLines) {
       itemCount === 1 &&
       (text.length > 25 ||
         /\b(cnpj|cpf|agencia|conta|periodo|emitido|extrato|relatorio|banco)\b/.test(norm));
+    // Linhas de contexto/identificação ("Conta Corrente : 43812-5 TRELAR SUL...")
+    // ficam coladas no cabeçalho, mas não são nomes de coluna: se entrassem,
+    // virariam "Data Conta Corrente :" e atrapalhariam a classificação.
+    const isContextLine = /[:=]/.test(text) && itemCount <= 4;
 
-    if (isSummary || isFarTitle || isSingleCellBanner) {
+    if (isSummary || isFarTitle || isSingleCellBanner || isContextLine) {
       bannerLines.push(text);
       continue;
     }
@@ -974,15 +978,27 @@ export function buildTableFromTextLines(allPageLines) {
   const headerSignatures = new Set(headerLines.map((line) => normalizeText(lineText(line))));
   headerSignatures.add(normalizeText(headers.join(' ')));
 
+  // Cada página repete o cabeçalho/rodapé ("Página : 2 / 6", nome da empresa,
+  // filtros...). Tudo o que está acima da primeira linha de dados da página é
+  // cabeçalho, não lançamento.
+  const firstDataYByPage = new Map();
+  for (const line of candidateDataLines) {
+    const current = firstDataYByPage.get(line.page);
+    if (current === undefined || line.y > current) firstDataYByPage.set(line.page, line.y);
+  }
+
   const rows = [];
   const skipped = [];
+  let lastRowPage = null;
+  let lastRowY = null;
 
   for (const line of allPageLines) {
     const norm = normalizeText(lineText(line));
     if (!norm) continue;
 
-    // Linhas acima da primeira linha de dados (na página 1) são cabeçalho/banner.
-    if (line.page === firstDataLine.page && line.y > firstDataLine.y + LINE_TOLERANCE) continue;
+    // Linhas acima da primeira linha de dados da página são cabeçalho/banner.
+    const pageTopDataY = firstDataYByPage.get(line.page);
+    if (pageTopDataY !== undefined && line.y > pageTopDataY + LINE_TOLERANCE) continue;
 
     if (headerSignatures.has(norm)) {
       skipped.push(norm);
@@ -1006,11 +1022,17 @@ export function buildTableFromTextLines(allPageLines) {
 
     if (hasDate) {
       rows.push(rowStrings);
+      lastRowPage = line.page;
+      lastRowY = line.y;
       continue;
     }
 
-    // Continuação de uma descrição quebrada em duas linhas no PDF.
-    if (rows.length > 0 && nonEmptyCount > 0 && nonEmptyCount <= 2) {
+    // Continuação de uma descrição quebrada em duas linhas no PDF: precisa
+    // estar na mesma página e imediatamente abaixo — nunca no cabeçalho da
+    // página seguinte (era o que colava "Página : 2 / 6" na última linha).
+    const nearPreviousRow =
+      lastRowPage === line.page && lastRowY !== null && lastRowY - line.y <= 24;
+    if (rows.length > 0 && nonEmptyCount > 0 && nonEmptyCount <= 2 && nearPreviousRow) {
       const hasMoney = rowStrings.some((value) => parseMoneyValue(value) !== null);
       if (!hasMoney) {
         const previous = rows[rows.length - 1];
@@ -1019,6 +1041,7 @@ export function buildTableFromTextLines(allPageLines) {
             previous[col] = cleanWhitespace(`${previous[col]} ${rowStrings[col]}`);
           }
         }
+        lastRowY = line.y;
         continue;
       }
     }

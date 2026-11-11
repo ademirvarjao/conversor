@@ -596,6 +596,25 @@ body {
   background: var(--surface-alt);
 }
 
+.trainer-hint {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--surface-alt);
+  border-left: 3px solid var(--primary);
+  border-radius: 0 8px 8px 0;
+  padding: 10px 14px;
+}
+
+.trainer-hint code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
 .rules-bar {
   display: flex;
   flex-wrap: wrap;
