@@ -389,7 +389,7 @@ async function pullModels() {
 }
 
 function describeIdentity() {
-  if (!cloudUnlocked()) return 'Modelos: nuvem bloqueada';
+  if (!cloudUnlocked()) return 'Modelos: nuvem bloqueada — desbloqueie na página inicial';
   if (!cloud.identity) return 'Modelos: só neste navegador';
   const code = formatAccessCode(cloud.identity.code || '');
   return `Modelos: chave ${code || '—'}`;
