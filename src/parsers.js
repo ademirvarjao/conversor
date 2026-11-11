@@ -29,6 +29,13 @@ const LINE_TOLERANCE = 2.5;
  */
 const CONTINUATION_RANGE = 24;
 
+/**
+ * Folga (pt) aceita ACIMA do primeiro lançamento da página. Serve para a
+ * descrição que quebra em duas linhas bem na virada de página, sem deixar
+ * passar o cabeçalho/banner do topo.
+ */
+const PAGE_TOP_SLACK = 8;
+
 export function cleanWhitespace(str) {
   return String(str ?? '')
     .replace(/[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
@@ -726,6 +733,42 @@ function lineText(line) {
   return cleanWhitespace(line.items.map((item) => item.str).join(' '));
 }
 
+/**
+ * Linha de identificação do período ("Extrato de: Ag: 2805 | CC: 0022793-5 ...
+ * 01/10/2026 e 31/10/2026"). Ela tem datas, mas não é lançamento: se entrasse
+ * como linha de dados, o cabeçalho da tabela seria procurado acima dela e o
+ * cabeçalho verdadeiro (Data / Lançamento / Dcto. / Crédito / Débito / Saldo)
+ * ficaria de fora — era o que acontecia com o extrato do Bradesco.
+ */
+function isPeriodBanner(text) {
+  const norm = normalizeText(text);
+  if (!norm) return false;
+  if (/\b(extrato|relatorio|demonstrativo)\b/.test(norm) && /\b(de|do|da|mensal|periodo)\b/.test(norm)) {
+    return true;
+  }
+  if (/\b(periodo|folha\s+\d|pagina\s+\d|data\s+da\s+operacao|nome\s+do\s+usuario)\b/.test(norm)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Rodapé/hyperlink do próprio extrato: "novos lançamentos", "atualizado em
+ * 06/11/2026 16:05", SAC 0800, ouvidoria, site do banco. Aparece depois do
+ * último saldo, não tem data nem valor e não pode virar lançamento — era o que
+ * acontecia no extrato do Itaú (2 linhas de lixo no fim de 590).
+ */
+function isStatementNoise(text) {
+  const norm = normalizeText(text);
+  if (!norm) return true;
+  if (/^(novos lancamentos|atualizado em|em caso de duvidas)\b/.test(norm)) return true;
+  if (/\b(sac|central de atendimento|ouvidoria|fale conosco)\b/.test(norm) && /\b0800\b/.test(norm)) {
+    return true;
+  }
+  if (/^(www\.|https?:)/.test(norm)) return true;
+  return false;
+}
+
 function isBannerOrSummary(text) {
   const norm = normalizeText(text);
   if (/\bpagina\s+\d+\s+de\s+\d+\b/.test(norm)) return true;
@@ -750,6 +793,9 @@ export function buildTableFromTextLines(allPageLines) {
   const candidateDataLines = allPageLines.filter((line) => {
     const hasDate = line.items.some((item) => parseDateValue(item.str) !== null);
     const hasMoney = line.items.some((item) => parseMoneyValue(item.str) !== null);
+    if (!hasDate && !hasMoney) return false;
+    // "Extrato de: ... 01/10/2026 e 31/10/2026" tem data mas é cabeçalho.
+    if (isPeriodBanner(lineText(line))) return false;
     return (hasDate && hasMoney) || (hasDate && line.items.length >= 3);
   });
 
@@ -897,7 +943,36 @@ export function buildTableFromTextLines(allPageLines) {
     colBounds[i + 1].start = boundary;
   }
 
+  // Âncora da borda DIREITA de cada coluna monetária. Valores de dinheiro são
+  // alinhados à direita: "-4.100,00" começa bem antes do "36,55" da coluna ao
+  // lado e, olhando só o x inicial, cairia na coluna errada (era o que jogava
+  // o PIX enviado do extrato do Bradesco na coluna de crédito).
+  const moneyRightAnchors = colClusters.map((cluster) => {
+    const rights = allItems
+      .filter((entry) => entry.isMoney && entry.x >= cluster.min - 2 && entry.x <= cluster.max + 2)
+      .map((entry) => entry.right)
+      .sort((a, b) => a - b);
+    return rights.length > 0 ? rights[Math.floor(rights.length / 2)] : null;
+  });
+
   const assignItemToColumn = (item) => {
+    if (parseMoneyValue(item.str) !== null) {
+      const right = item.numRight ?? item.x + (item.w || 0);
+      let bestIdx = -1;
+      let bestGap = Infinity;
+      moneyRightAnchors.forEach((anchor, idx) => {
+        if (anchor === null) return;
+        const gap = Math.abs(right - anchor);
+        if (gap < bestGap) {
+          bestGap = gap;
+          bestIdx = idx;
+        }
+      });
+      // Só troca quando a borda direita casa quase exatamente (colunas
+      // alinhadas à direita); caso contrário fica a regra por posição.
+      if (bestIdx >= 0 && bestGap <= 10) return bestIdx;
+    }
+
     for (const bounds of colBounds) {
       if (item.x >= bounds.start && item.x < bounds.end) return bounds.idx;
     }
@@ -914,7 +989,11 @@ export function buildTableFromTextLines(allPageLines) {
   };
 
   // 4. Localizar a zona de cabeçalho acima da primeira linha de dados.
-  const firstDataLine = candidateDataLines[0];
+  // Preferimos uma linha com VALOR: linhas que só têm data (faixa de período,
+  // "extrato de...") ficam acima do cabeçalho de verdade.
+  const firstDataLine =
+    candidateDataLines.find((line) => line.items.some((item) => parseMoneyValue(item.str) !== null)) ||
+    candidateDataLines[0];
   const linesAbove = allPageLines
     .filter((line) => line.page === firstDataLine.page && line.y > firstDataLine.y)
     .sort((a, b) => a.y - b.y); // mais próximas do dado primeiro
@@ -1028,9 +1107,35 @@ export function buildTableFromTextLines(allPageLines) {
   // filtros...). Tudo o que está acima da primeira linha de dados da página é
   // cabeçalho, não lançamento.
   const firstDataYByPage = new Map();
-  for (const line of candidateDataLines) {
+  const considerTopLine = (line) => {
     const current = firstDataYByPage.get(line.page);
     if (current === undefined || line.y > current) firstDataYByPage.set(line.page, line.y);
+  };
+  for (const line of candidateDataLines) considerTopLine(line);
+
+  // Lançamento na virada de página costuma vir SEM data (documento + valor +
+  // saldo). Ele também marca onde os dados começam — senão a regra de "tudo
+  // acima do primeiro lançamento é cabeçalho" descartaria essa linha.
+  //
+  // Só entram aqui as linhas puramente numéricas: as faixas de resumo do topo
+  // ("R$ 2.520,90 R$ 0,00…") trazem texto junto e continuam sendo banner.
+  const datedByPage = new Map();
+  for (const line of candidateDataLines) {
+    const list = datedByPage.get(line.page);
+    if (list) list.push(line.y);
+    else datedByPage.set(line.page, [line.y]);
+  }
+  for (const list of datedByPage.values()) list.sort((a, b) => b.y - a.y);
+
+  for (const line of allPageLines) {
+    if (line.items.length < 2) continue;
+    if (!line.items.every((item) => parseMoneyValue(item.str) !== null)) continue;
+    if (isPeriodBanner(lineText(line))) continue;
+    // Precisa estar colado na tabela: logo ACIMA de um lançamento com data
+    // (virada de página). Faixas de resumo do topo ficam longe dos dados.
+    const below = (datedByPage.get(line.page) || []).find((y) => y < line.y);
+    if (below === undefined || line.y - below > 30) continue;
+    considerTopLine(line);
   }
 
   const rows = [];
@@ -1040,6 +1145,17 @@ export function buildTableFromTextLines(allPageLines) {
   for (const line of allPageLines) {
     const norm = normalizeText(lineText(line));
     if (!norm) continue;
+
+    // Rodapé/hyperlink: só é descartado quando a linha não tem data nem valor
+    // (um lançamento de verdade com "0800" no histórico continua valendo).
+    if (
+      isStatementNoise(lineText(line)) &&
+      !line.items.some((item) => parseDateValue(item.str) !== null) &&
+      !line.items.some((item) => parseMoneyValue(item.str) !== null)
+    ) {
+      skipped.push(norm);
+      continue;
+    }
 
     const cells = Array.from({ length: colBounds.length }, () => []);
     for (const item of line.items) cells[assignItemToColumn(item)].push(item.str);
@@ -1069,7 +1185,7 @@ export function buildTableFromTextLines(allPageLines) {
 
     // Linhas acima da primeira linha de dados da página são cabeçalho/banner.
     if (!isSectionHeader) {
-      if (pageTopDataY !== undefined && line.y > pageTopDataY + LINE_TOLERANCE) continue;
+      if (pageTopDataY !== undefined && line.y > pageTopDataY + PAGE_TOP_SLACK) continue;
       if (headerSignatures.has(norm)) {
         skipped.push(norm);
         continue;
@@ -1083,15 +1199,22 @@ export function buildTableFromTextLines(allPageLines) {
       continue;
     }
 
+    const moneyCols = [];
+    rowStrings.forEach((value, idx) => {
+      if (value && parseMoneyValue(value) !== null) moneyCols.push(idx);
+    });
+
     entries.push({
       page: line.page,
       y: line.y,
       cells: rowStrings,
       norm,
+      text,
       hasDate,
       isSectionHeader,
       nonEmptyCount,
-      hasMoney: rowStrings.some((value) => parseMoneyValue(value) !== null),
+      hasMoney: moneyCols.length > 0,
+      moneyCols,
     });
   }
 
@@ -1106,9 +1229,22 @@ export function buildTableFromTextLines(allPageLines) {
   // Por isso a continuação se liga ao bloco mais próximo — inclusive quando ela
   // está ACIMA da linha que traz a data — e o texto de cada coluna é remontado
   // na ordem vertical original.
+  // Lançamento sem data própria: no extrato do Bradesco o dia aparece só na
+  // PRIMEIRA linha de cada data e as seguintes herdam a data de cima. Essas
+  // linhas continuam sendo lançamentos (têm valor fora da coluna de saldo) e
+  // precisam virar bloco — antes eram descartadas e a descrição delas ia parar
+  // no lançamento vizinho.
+  const lastColumnIdx = colBounds.length - 1;
+  const isCarryCandidate = (entry) =>
+    !entry.hasDate &&
+    !entry.isSectionHeader &&
+    entry.moneyCols.some((idx) => idx < lastColumnIdx) &&
+    !isBannerOrSummary(entry.text);
+
   const blocks = [];
   for (const entry of entries) {
-    if (entry.hasDate || entry.isSectionHeader) blocks.push({ ...entry, extra: [] });
+    if (entry.hasDate || entry.isSectionHeader) blocks.push({ ...entry, extra: [], inheritsDate: false });
+    else if (isCarryCandidate(entry)) blocks.push({ ...entry, extra: [], inheritsDate: true });
   }
 
   // Índice por página (topo → base) para achar o bloco vizinho em O(log n).
@@ -1121,7 +1257,7 @@ export function buildTableFromTextLines(allPageLines) {
   for (const list of blocksByPage.values()) list.sort((a, b) => b.y - a.y);
 
   for (const entry of entries) {
-    if (entry.hasDate || entry.isSectionHeader) continue;
+    if (entry.hasDate || entry.isSectionHeader || isCarryCandidate(entry)) continue;
     if (entry.nonEmptyCount === 0 || entry.nonEmptyCount > 2 || entry.hasMoney) {
       skipped.push(entry.norm);
       continue;
@@ -1163,6 +1299,7 @@ export function buildTableFromTextLines(allPageLines) {
     target.extra.push(entry);
   }
 
+  const assembledRows = [];
   for (const block of blocks) {
     const parts = [
       { y: block.y, cells: block.cells },
@@ -1175,8 +1312,35 @@ export function buildTableFromTextLines(allPageLines) {
         if (value) assembled[col] = cleanWhitespace(`${assembled[col]} ${value}`);
       }
     }
-    if (assembled.some(Boolean)) rows.push(assembled);
+    if (!assembled.some(Boolean)) continue;
+    assembledRows.push({ cells: assembled, inheritsDate: Boolean(block.inheritsDate) });
   }
+
+  // Data herdada: descobrimos qual coluna é a de data (a que tem mais datas
+  // nas linhas que trazem data) e repetimos a última data vista para as linhas
+  // marcadas como continuação do mesmo dia.
+  const dateVotes = new Array(colBounds.length).fill(0);
+  for (const entry of entries) {
+    if (!entry.hasDate) continue;
+    entry.cells.forEach((value, idx) => {
+      if (value && parseDateValue(value) !== null) dateVotes[idx] += 1;
+    });
+  }
+  const dateColIdx = dateVotes.some((votes) => votes > 0)
+    ? dateVotes.indexOf(Math.max(...dateVotes))
+    : -1;
+
+  let lastDate = '';
+  for (const row of assembledRows) {
+    const ownDate = row.cells.some((value) => parseDateValue(value) !== null);
+    if (ownDate) {
+      lastDate = row.cells.find((value) => parseDateValue(value) !== null) || lastDate;
+    } else if (row.inheritsDate && lastDate && dateColIdx >= 0 && !row.cells[dateColIdx]) {
+      row.cells[dateColIdx] = lastDate;
+    }
+  }
+
+  for (const row of assembledRows) rows.push(row.cells);
 
   return {
     headers,
