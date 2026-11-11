@@ -831,8 +831,16 @@ function render() {
 /*                                  Exportação                                */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Mesma regra do conversor: **exporta o que estiver marcado; sem seleção,
+ * exporta tudo** (independente do filtro na tela).
+ */
 function exportRows() {
-  return visibleRows();
+  if (state.selected.size > 0) {
+    const selected = state.rows.filter((row) => state.selected.has(row.id));
+    if (selected.length > 0) return selected;
+  }
+  return state.rows;
 }
 
 function exportName(extension) {
@@ -846,7 +854,7 @@ function guardExport() {
     return false;
   }
   if (exportRows().length === 0) {
-    showToast('O filtro atual não tem lançamentos para exportar.', 'warn');
+    showToast('Nenhum lançamento para exportar.', 'warn');
     return false;
   }
   return true;
@@ -855,8 +863,13 @@ function guardExport() {
 async function exportXlsx() {
   if (!guardExport()) return;
   try {
-    await exportCounterpartiesXlsx(exportRows(), exportName('xlsx'), window.ExcelJS);
-    showToast('Planilha .xlsx gerada com o layout data | débito | crédito | valor | histórico.');
+    const rows = exportRows();
+    await exportCounterpartiesXlsx(rows, exportName('xlsx'), window.ExcelJS);
+    showToast(
+      `Planilha .xlsx gerada com ${rows.length} lançamento(s)${
+        state.selected.size > 0 ? ' selecionado(s)' : ' (todos)'
+      } — layout data | débito | crédito | valor | histórico.`
+    );
   } catch (error) {
     showToast(`Falha ao gerar .xlsx: ${error.message}`, 'error');
   }
@@ -867,7 +880,11 @@ function exportPdf() {
   try {
     const rows = exportRows();
     exportCounterpartiesPdf(rows, summarizeReconciliation(rows), exportName('pdf'));
-    showToast('PDF gerado com o layout data | débito | crédito | valor | histórico.');
+    showToast(
+      `PDF gerado com ${rows.length} lançamento(s)${
+        state.selected.size > 0 ? ' selecionado(s)' : ' (todos)'
+      } — layout data | débito | crédito | valor | histórico.`
+    );
   } catch (error) {
     showToast(`Falha ao gerar .pdf: ${error.message}`, 'error');
   }
@@ -876,8 +893,13 @@ function exportPdf() {
 function exportCsv() {
   if (!guardExport()) return;
   try {
-    exportCounterpartiesCsv(exportRows(), exportName('csv'));
-    showToast('CSV gerado (separador ";" e vírgula decimal) para abrir no Excel.');
+    const rows = exportRows();
+    exportCounterpartiesCsv(rows, exportName('csv'));
+    showToast(
+      `CSV gerado com ${rows.length} lançamento(s)${
+        state.selected.size > 0 ? ' selecionado(s)' : ' (todos)'
+      } (separador ";" e vírgula decimal) para abrir no Excel.`
+    );
   } catch (error) {
     showToast(`Falha ao gerar .csv: ${error.message}`, 'error');
   }

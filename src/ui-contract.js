@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.14.0';
+export const APP_VERSION = '1.15.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -26,6 +26,15 @@ export const REQUIRED_ELEMENT_IDS = [
   'rule-replace-from',
   'rule-replace-to',
   'mapping-tbody',
+  'coach-panel',
+  'coach-score',
+  'coach-summary',
+  'coach-checks',
+  'coach-fixes',
+  'coach-divergences',
+  'btn-coach-apply',
+  'btn-coach-analyze',
+  'btn-coach-copy',
   'btn-train-apply',
   'btn-close-trainer',
   'btn-llm-analyze',
@@ -33,6 +42,7 @@ export const REQUIRED_ELEMENT_IDS = [
   'btn-export-xlsx',
   'btn-export-pdf',
   'export-only-filtered',
+  'export-scope-hint',
   'kpi-count',
   'kpi-period',
   'kpi-in',

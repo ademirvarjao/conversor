@@ -991,6 +991,249 @@ body {
   color: var(--text-light);
 }
 
+/* Treinador automático (diagnóstico do arquivo) */
+.coach-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.coach-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.coach-head h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  color: var(--navy);
+}
+
+.coach-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-light);
+  max-width: 62ch;
+}
+
+.coach-score {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.coach-score.score-ok {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.coach-score.score-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.coach-score.score-fail {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.coach-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.coach-stat {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.coach-stat span {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-light);
+}
+
+.coach-stat strong {
+  font-size: 1rem;
+  color: var(--navy);
+}
+
+.coach-checks {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.coach-check {
+  display: flex;
+  gap: 10px;
+  padding: 9px 11px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.coach-check.status-ok {
+  border-left-color: var(--emerald);
+}
+
+.coach-check.status-warn {
+  border-left-color: var(--amber);
+}
+
+.coach-check.status-fail {
+  border-left-color: var(--crimson);
+}
+
+.coach-check.status-skip {
+  border-left-color: #94a3b8;
+}
+
+.coach-icon {
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--navy);
+}
+
+.coach-check.status-ok .coach-icon {
+  color: var(--emerald);
+}
+
+.coach-check.status-warn .coach-icon {
+  color: var(--amber);
+}
+
+.coach-check.status-fail .coach-icon {
+  color: var(--crimson);
+}
+
+.coach-check-body strong {
+  display: block;
+  font-size: 0.84rem;
+  color: var(--navy);
+}
+
+.coach-check-body p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-light);
+}
+
+.coach-fixes,
+.coach-divergences {
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.coach-fixes h4,
+.coach-divergences h4 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--navy);
+}
+
+.coach-fixes ul,
+.coach-divergences ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.coach-fixes li,
+.coach-divergences li {
+  margin-bottom: 6px;
+}
+
+.coach-fixes li span,
+.coach-divergences li span {
+  color: var(--text-light);
+}
+
+.coach-divergence-row {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.74rem;
+  color: var(--navy);
+}
+
+.coach-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.export-scope-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-light);
+  text-align: right;
+}
+
+.coach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--navy);
+}
+
+.coach-chip-ok {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.coach-chip-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.coach-chip-fail {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+@media (max-width: 720px) {
+  .export-scope-hint {
+    text-align: left;
+  }
+}
+
 /* KPIs & Output */
 .export-actions {
   display: flex;

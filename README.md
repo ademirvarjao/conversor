@@ -33,7 +33,7 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 ### Exportação
 - **`.xlsx`**: aba única `Conciliacao`, cabeçalho congelado, filtro automático, data tipada (`dd/mm/yyyy`), valor numérico (`#,##0.00`) e histórico como texto — pronto para Excel/importação contábil. Valida o limite de linhas do Excel.
 - **`.pdf`**: relatório A4 paisagem paginado, com cabeçalho institucional em todas as páginas, totalizadores, linhas negativas destacadas e rodapé com data/hora e numeração.
-- Opção de **exportar apenas o resultado filtrado** (busca + filtro de sinal).
+- **Exporta o que estiver marcado** na planilha; **sem seleção, exporta tudo** (a opção “somente o resultado filtrado” vale como escolha para o caso sem seleção). A dica ao lado dos botões diz exatamente o que vai sair: `Exportando os 12 selecionados (de 567).` Vale para `.xlsx` e `.pdf`, e também para os três formatos do conciliador de clientes/fornecedores.
 
 ### IA Adaptativa de Layouts
 - **Inferência semântica multi-sinal**: pesos léxicos PT-BR + análise estatística dos dados (datas reais, valores, colunas separadas de Entrada/Crédito e Saída/Débito, indicadores `D/C`, colunas esparsas) e exclusão automática de colunas de `Saldo`/`Total`/vazias.
@@ -49,6 +49,21 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Aprendizado supervisionado**: ao confirmar/corrigir o mapeamento, o motor reforça ou penaliza os pesos dos tokens (com limites para evitar "explosão" de pesos), atualiza o perfil do layout e registra o evento.
 - **Memória persistente** em `localStorage`, com exportação/importação de `conversor-ia-memoria.json` para versionar no repositório ou compartilhar entre máquinas. Backups inválidos são normalizados/descartados sem quebrar a aplicação.
 - **Conector LLM opcional** (OpenAI ou Gemini, com chave do próprio usuário) para layouts inéditos, com timeout, validação da resposta e fallback para a IA local.
+
+### Treinador automático de extratos (v1.15.0)
+Todo extrato novo passa pelo mesmo roteiro de análise que um especialista faria à mão — e agora isso roda **dentro do app**, no painel de treino, sem mandar arquivo para ninguém:
+
+- **Colunas entendidas**: data, valor (único ou crédito/débito), histórico, documento e saldo — com a amostra de cada coluna e a confiança da classificação.
+- **Datas**: quantos lançamentos saíram com data válida e quantas linhas ficaram de fora (cabeçalho, total, rodapé, resumo).
+- **Sinal**: negativo só em débito e positivo só em crédito; se houver valor do lado errado, o app propõe a troca das colunas.
+- **Descartes**: quantas linhas foram ignoradas e quantas âncoras de saldo foram usadas.
+- **Saldo conferido linha a linha** — o coração da análise: `saldo anterior + lançamentos = saldo`, em dois formatos: **corrente** (extrato com saldo em cada linha, como o Bradesco) e **checkpoint** (saldo só no fechamento do dia, como o Itaú). `SALDO ANTERIOR` no meio do arquivo é tratado como reinício de seção (não como erro) e saldos de outra série (`SALDO INVEST FÁCIL`, aplicação, bloqueado) ficam fora da conferência. As linhas que não fecham aparecem com valor, saldo, valor esperado e diferença.
+- **Duplicados**: mesma data + valor + histórico, com a contagem (pode ser legítimo ou arquivo repetido).
+- **Correções com um clique**: saldo ou nº de documento entrando como valor, crédito/débito trocados, coluna D/C ignorada, e sinal padrão quando os valores vêm todos positivos mas o saldo do período caiu exatamente a soma (extrato de pagamentos). O botão **Aplicar correções e treinar** aplica as correções no mapeamento, memoriza o perfil e reconfere o saldo.
+- **Copiar diagnóstico**: o relatório em texto, para colar num e-mail ou no chat.
+- Selo no cartão do arquivo com o resultado (`✓ saldo conferido 71/71`), para saber em qual arquivo vale a pena olhar antes de exportar.
+
+Nos dois extratos usados como referência — **Itaú (567 lançamentos)** e **Bradesco (71 lançamentos)** — o treinador fecha o saldo em **todas** as conferências (20 checkpoints diários no Itaú; 71 linhas no Bradesco).
 
 ### Conciliação de clientes/fornecedores (v1.8.0)
 O **ícone da marca** na barra superior leva para uma **página própria** (`conciliador.html`), com fluxo separado da conciliação unificada para cruzar o **cadastro de contatos do Questor** com o extrato bancário. O ícone de volta (e o botão *Conversor*) retornam à página principal — as duas telas compartilham a mesma memória da IA.
@@ -211,6 +226,8 @@ conversor/
 │   ├── parsers.js                # PDF (extração + geometria) e XLSX
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
 │   ├── seed-profiles.js          # Perfis de fábrica (extratos Itaú e Bradesco)
+│   ├── training-coach.js         # Treinador automático (diagnóstico + conferência de saldo)
+│   ├── export-scope.js           # Regra de exportação (seleção → tudo)
 │   ├── counterparty.js           # Conciliação clientes/fornecedores (cadastro Questor)
 │   ├── counterparty-page.js      # Controlador da página conciliador.html
 │   ├── exporters.js              # Exportação .xlsx, .pdf e .csv
