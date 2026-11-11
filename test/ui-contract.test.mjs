@@ -49,6 +49,26 @@ describe('index.html x controlador', () => {
     assert.match(header, /Colar chave/i);
   });
 
+  it('abre a conciliação de clientes/fornecedores pelo ícone da marca, numa barra lateral', () => {
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    assert.match(
+      header,
+      /<button[^>]+id="btn-counterparty"/,
+      'o ícone da marca precisa ser um botão com id="btn-counterparty"'
+    );
+    assert.ok(header.includes('aria-controls="cp-modal"'), 'o ícone precisa apontar para o painel');
+    assert.ok(header.includes('brand-button'), 'o ícone precisa da classe de botão');
+
+    assert.equal(html.includes('action-tile'), false, 'o cartão antigo saiu do topo da página');
+
+    const panel = html.slice(html.indexOf('id="cp-modal"'), html.indexOf('<!-- Toast notifications -->'));
+    assert.ok(panel.includes('cp-drawer-backdrop'), 'o painel precisa ser a barra lateral');
+    assert.ok(panel.includes('<aside class="cp-drawer"'), 'falta o <aside> da barra lateral');
+    for (const id of ['btn-close-cp', 'cp-contacts-input', 'cp-ledger-input', 'cp-tbody', 'btn-cp-export-csv']) {
+      assert.ok(panel.includes(`id="${id}"`), `faltou #${id} na barra lateral`);
+    }
+  });
+
   it('não expõe mais o botão de exemplo simulado', async () => {
     const app = await readFile(path.join(ROOT, 'src/app.js'), 'utf8');
     assert.equal(html.includes('btn-demo'), false, 'o botão de demonstração saiu do HTML');
