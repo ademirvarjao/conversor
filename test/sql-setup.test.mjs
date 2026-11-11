@@ -25,6 +25,8 @@ test('o SQL é idempotente e cria tabela, gatilho e políticas de RLS', () => {
   assert.match(SETUP_SQL, /drop policy if exists "conversor_models_select"/i);
   assert.match(SETUP_SQL, /for insert/i);
   assert.match(SETUP_SQL, /for update/i);
+  // Sem isso, a tabela recém-criada pode demorar a aparecer no PostgREST.
+  assert.match(SETUP_SQL, /notify pgrst, 'reload schema';/i);
 });
 
 test('o SQL embarcado não carrega a chave anônima nem segredos', () => {

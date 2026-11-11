@@ -79,3 +79,10 @@ create policy "conversor_models_update"
 -- O upsert (POST com Prefer: resolution=merge-duplicates) precisa de INSERT e
 -- UPDATE; nenhuma das duas permite leitura em texto claro, pois o payload é
 -- cifrado no navegador antes de sair.
+
+-- ----------------------------------------------------------------------------
+--  Recarrega o schema cache do PostgREST.
+--  Sem isso, logo depois de criar a tabela o app pode receber
+--  "PGRST205 — Could not find the table ... in the schema cache".
+-- ----------------------------------------------------------------------------
+notify pgrst, 'reload schema';
