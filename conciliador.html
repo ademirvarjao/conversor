@@ -169,6 +169,9 @@
             <input id="cp-scope-empty" type="radio" name="cp-account-scope" value="empty" />
             <span>só os sem contrapartida</span>
           </label>
+          <button id="btn-cp-clear-selection" class="btn btn-sm btn-ghost-dark cp-clear-selection" type="button" disabled>
+            Limpar seleção
+          </button>
         </div>
 
         <p id="cp-account-hint" class="cp-account-hint" role="status">
@@ -203,7 +206,12 @@
           <thead>
             <tr>
               <th scope="col" class="col-select">
-                <input id="cp-select-all" type="checkbox" aria-label="Selecionar todos os lançamentos desta página" />
+                <input
+                  id="cp-select-all"
+                  type="checkbox"
+                  aria-label="Selecionar todos os lançamentos do filtro atual"
+                  title="Selecionar todos os lançamentos do filtro atual"
+                />
               </th>
               <th scope="col" class="col-date">data</th>
               <th scope="col" class="col-account" title="Conta do contato (contactb), sem pontos — célula vazia aceita digitação">debito</th>
@@ -219,9 +227,21 @@
 
       <div class="pagination-bar">
         <span id="cp-pagination-info" class="pagination-info" aria-live="polite">Exibindo 0 de 0</span>
-        <div class="pagination-btns">
-          <button id="cp-btn-prev" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
-          <button id="cp-btn-next" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
+        <div class="pagination-controls">
+          <label class="cp-page-size" for="cp-page-size">
+            <span>Linhas por página</span>
+            <select id="cp-page-size">
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="300">300</option>
+              <option value="1000">1000</option>
+              <option value="all">todas</option>
+            </select>
+          </label>
+          <div class="pagination-btns">
+            <button id="cp-btn-prev" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
+            <button id="cp-btn-next" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
+          </div>
         </div>
       </div>
 
@@ -271,7 +291,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.9.6</span> — os arquivos nunca saem do navegador;
+        Conversor <span id="app-version" class="footer-version">v1.9.7</span> — os arquivos nunca saem do navegador;
         só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.
       </p>
       <p>Layout da conciliação: <code>data</code> | <code>debito</code> | <code>credito</code> | <code>valor</code> | <code>historico</code>.</p>

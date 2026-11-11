@@ -101,6 +101,28 @@ describe('página do conciliador', () => {
     assert.equal(/applyRowAccount\(row, account\)/.test(module.split('function applyAccountBatch')[1].split('function applyCellAccount')[0]), false);
   });
 
+  it('seleciona todos os lançamentos do filtro, não só os da página', () => {
+    assert.ok(page.includes('id="cp-select-all"'));
+    assert.match(page, /aria-label="Selecionar todos os lançamentos do filtro atual"/);
+    assert.ok(page.includes('id="btn-cp-clear-selection"'));
+
+    // O handler do cabeçalho percorre visibleRows(), sem recortar por página.
+    const handler = module.slice(module.indexOf("dom['cp-select-all']?.addEventListener"));
+    const body = handler.slice(0, handler.indexOf('});') + 3);
+    assert.match(body, /visibleRows\(\)/);
+    assert.equal(/slice\(/.test(body), false, 'selecionar tudo não pode ficar preso à página');
+    assert.match(module, /btn-cp-clear-selection/);
+  });
+
+  it('oferece escolha de linhas por página (50, 100, 300, 1000 e todas)', () => {
+    assert.ok(page.includes('id="cp-page-size"'));
+    for (const value of ['50', '100', '300', '1000', 'all']) {
+      assert.match(page, new RegExp(`<option value="${value}"`), `falta a opção ${value}`);
+    }
+    assert.match(module, /PAGE_SIZE_OPTIONS = \[50, 100, 300, 1000, 'all'\]/);
+    assert.match(module, /cp-page-size/);
+  });
+
   it('deixa as células vazias de débito e crédito editáveis na tabela', () => {
     assert.match(module, /data-cp-cell/);
     assert.match(module, /function accountCell/);
