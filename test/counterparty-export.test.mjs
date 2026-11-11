@@ -15,6 +15,8 @@ const rows = [
     direction: 'payment',
     debitCents: 105000,
     creditCents: 0,
+    debitAccount: '5086959',
+    creditAccount: '',
     valueCents: 105000,
     history: 'PLASTTOTAL PLASTICOS INDUSTRIAIS LTDA — NF 232617',
     status: 'matched',
@@ -26,6 +28,8 @@ const rows = [
     direction: 'receipt',
     debitCents: 0,
     creditCents: 320000,
+    debitAccount: '',
+    creditAccount: '1000077',
     valueCents: 320000,
     history: 'CEREAIS BRAMIL; PV09',
     status: 'matched',
@@ -38,11 +42,13 @@ describe('exportação da conciliação de clientes/fornecedores', () => {
     const lines = csv.replace(/^\uFEFF/, '').trim().split('\r\n');
 
     assert.equal(lines[0], 'data;debito;credito;valor;historico');
-    assert.equal(lines[1], '01/10/2026;1050,00;0,00;1050,00;PLASTTOTAL PLASTICOS INDUSTRIAIS LTDA — NF 232617');
+    // Débito/crédito = conta do contato (contactb) sem pontuação.
+    assert.equal(lines[1], '01/10/2026;5086959;;1050,00;PLASTTOTAL PLASTICOS INDUSTRIAIS LTDA — NF 232617');
     // Ponto e vírgula dentro do histórico não pode quebrar as colunas.
     assert.equal(lines[2].split(';').length, 5);
+    assert.equal(lines[2].startsWith('02/10/2026;;1000077;3200,00;'), true);
     assert.equal(lines[2].includes('CEREAIS BRAMIL PV09'), true);
-    assert.equal(lines[3], 'TOTAIS;1050,00;3200,00;4250,00;2 lançamento(s)');
+    assert.equal(lines[3], 'TOTAIS;;;4250,00;2 lançamento(s) • 1 débito(s) • 1 crédito(s)');
   });
 
   it('nunca escreve valores negativos', () => {
@@ -51,6 +57,18 @@ describe('exportação da conciliação de clientes/fornecedores', () => {
       { dateIso: '2026-10-02', debitCents: 0, creditCents: -6789, history: 'sinal invertido 2' },
     ]);
     assert.equal(csv.includes('-'), false);
+  });
+
+  it('leva a conta do contato para débito ou crédito conforme a direção', () => {
+    const csv = buildCounterpartiesCsv([
+      { dateIso: '2026-10-01', debitCents: 1000, creditCents: 0, debitAccount: '5086959', history: 'pagamento' },
+      { dateIso: '2026-10-02', debitCents: 0, creditCents: 2000, creditAccount: '1000077', history: 'recebimento' },
+      { dateIso: '2026-10-03', debitCents: 500, creditCents: 0, history: 'sem contato' },
+    ]);
+    const lines = csv.replace(/^\uFEFF/, '').trim().split('\r\n');
+    assert.equal(lines[1], '01/10/2026;5086959;;10,00;pagamento');
+    assert.equal(lines[2], '02/10/2026;;1000077;20,00;recebimento');
+    assert.equal(lines[3], '03/10/2026;;;5,00;sem contato');
   });
 
   it('recusa exportar quando não há lançamentos', () => {

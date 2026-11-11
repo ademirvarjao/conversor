@@ -284,13 +284,16 @@ function counterpartyTableRows(rows) {
   return rows
     .filter((row) => row && (row.debitCents > 0 || row.creditCents > 0))
     .map((row) => {
+      // Débito/crédito trazem a conta do contato (coluna `contactb`), sem pontos.
+      const debitAccount = String(row.debitAccount ?? '').replace(/[^0-9]/g, '');
+      const creditAccount = String(row.creditAccount ?? '').replace(/[^0-9]/g, '');
       const debit = Math.abs(Math.round(Number(row.debitCents) || 0)) / 100;
       const credit = Math.abs(Math.round(Number(row.creditCents) || 0)) / 100;
       return {
         dateIso: row.dateIso || '',
         dateBr: row.date || (row.dateIso ? row.dateIso.split('-').reverse().join('/') : ''),
-        debit,
-        credit,
+        debit: debitAccount,
+        credit: creditAccount,
         value: Math.abs(debit + credit),
         history: String(row.history ?? ''),
       };
@@ -300,11 +303,11 @@ function counterpartyTableRows(rows) {
 function counterpartiesTotals(records) {
   return records.reduce(
     (totals, record) => ({
-      debit: totals.debit + record.debit,
-      credit: totals.credit + record.credit,
+      debitLines: totals.debitLines + (record.debit ? 1 : 0),
+      creditLines: totals.creditLines + (record.credit ? 1 : 0),
       value: totals.value + record.value,
     }),
-    { debit: 0, credit: 0, value: 0 }
+    { debitLines: 0, creditLines: 0, value: 0 }
   );
 }
 
@@ -382,13 +385,20 @@ export async function exportCounterpartiesXlsx(
     dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
     dateCell.border = thinBorder;
 
-    for (const column of [2, 3, 4]) {
+    for (const column of [2, 3]) {
       const cell = row.getCell(column);
-      cell.numFmt = '0.00';
+      // Conta do contato: texto, para o Excel não comer zeros à esquerda.
+      cell.numFmt = '@';
       cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
-      cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
       cell.border = thinBorder;
     }
+
+    const valueCell = row.getCell(4);
+    valueCell.numFmt = '0.00';
+    valueCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
+    valueCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    valueCell.border = thinBorder;
 
     const historyCell = row.getCell(5);
     historyCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
@@ -398,10 +408,10 @@ export async function exportCounterpartiesXlsx(
 
   const totalsRow = worksheet.addRow({
     data: 'TOTAIS',
-    debito: totals.debit,
-    credito: totals.credit,
+    debito: '',
+    credito: '',
     valor: totals.value,
-    historico: `${records.length} lançamento(s)`,
+    historico: `${records.length} lançamento(s) • ${totals.debitLines} débito(s) • ${totals.creditLines} crédito(s)`,
   });
   totalsRow.height = 20;
   totalsRow.eachCell((cell, colNumber) => {
@@ -411,7 +421,7 @@ export async function exportCounterpartiesXlsx(
       horizontal: colNumber === 5 ? 'left' : colNumber === 1 ? 'center' : 'right',
       vertical: 'middle',
     };
-    if (colNumber >= 2 && colNumber <= 4) cell.numFmt = '0.00';
+    if (colNumber === 4) cell.numFmt = '0.00';
   });
 
   worksheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 5 } };
@@ -467,8 +477,8 @@ export function exportCounterpartiesPdf(
         `Lançamentos: ${records.length}`,
         `Fornecedores: ${suppliers}`,
         `Clientes: ${customers}`,
-        `Débito: ${formatValuePlainBr(totals.debit)}`,
-        `Crédito: ${formatValuePlainBr(totals.credit)}`,
+        `Pagamentos: ${formatValuePlainBr(totals.debitLines ? stats.debitCents / 100 : 0)}`,
+        `Recebimentos: ${formatValuePlainBr(totals.creditLines ? stats.creditCents / 100 : 0)}`,
         `Valor: ${formatValuePlainBr(totals.value)}`,
       ].join('   •   '),
       marginX,
@@ -488,8 +498,8 @@ export function exportCounterpartiesPdf(
 
   const body = records.map((record) => [
     record.dateBr,
-    formatValuePlainBr(record.debit),
-    formatValuePlainBr(record.credit),
+    record.debit || '—',
+    record.credit || '—',
     formatValuePlainBr(record.value),
     record.history,
   ]);
@@ -502,10 +512,10 @@ export function exportCounterpartiesPdf(
     foot: [
       [
         'TOTAIS',
-        formatValuePlainBr(totals.debit),
-        formatValuePlainBr(totals.credit),
+        '',
+        '',
         formatValuePlainBr(totals.value),
-        `${records.length} lançamento(s)`,
+        `${records.length} lançamento(s) • ${totals.debitLines} débito(s) • ${totals.creditLines} crédito(s)`,
       ],
     ],
     styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 1.6, overflow: 'linebreak' },
@@ -540,13 +550,19 @@ export function buildCounterpartiesCsv(rows) {
   for (const record of records) {
     const history = record.history.replace(/[\r\n;]+/g, ' ').replace(/\s+/g, ' ').trim();
     lines.push(
-      [record.dateBr, formatValuePlainBr(record.debit), formatValuePlainBr(record.credit), formatValuePlainBr(record.value), history].join(';')
+      [record.dateBr, record.debit, record.credit, formatValuePlainBr(record.value), history].join(';')
     );
   }
 
   const totals = counterpartiesTotals(records);
   lines.push(
-    ['TOTAIS', formatValuePlainBr(totals.debit), formatValuePlainBr(totals.credit), formatValuePlainBr(totals.value), `${records.length} lançamento(s)`].join(';')
+    [
+      'TOTAIS',
+      '',
+      '',
+      formatValuePlainBr(totals.value),
+      `${records.length} lançamento(s) • ${totals.debitLines} débito(s) • ${totals.creditLines} crédito(s)`,
+    ].join(';')
   );
 
   return `\uFEFF${lines.join('\r\n')}\r\n`;
