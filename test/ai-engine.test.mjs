@@ -451,6 +451,41 @@ describe('memória da IA', () => {
     assert.ok(memory.learningLog.length >= 3);
   });
 
+  it('preserva a ordem do histórico aprendida no perfil', () => {
+    installFakeLocalStorage();
+    let memory = loadAiMemory();
+
+    const file = {
+      fileName: 'ordem.xlsx',
+      fileType: 'xlsx',
+      headers: ['Data', 'Fornecedor', 'Centro de Custo', 'Valor'],
+      rows: [
+        ['01/01/2026', 'ACME', 'OBRA A', '10,00'],
+        ['02/01/2026', 'BETA', 'OBRA B', '20,00'],
+      ],
+      bannerLines: [],
+    };
+
+    const analysis = analyzeFileLayout(file, memory);
+    const centro = analysis.mappings.find((mapping) => mapping.header === 'Centro de Custo');
+    const fornecedor = analysis.mappings.find((mapping) => mapping.header === 'Fornecedor');
+    // Usuário inverte a ordem para "Centro de Custo | Fornecedor"
+    centro.role = ROLES.HISTORY;
+    centro.historyOrder = 1;
+    fornecedor.role = ROLES.HISTORY;
+    fornecedor.historyOrder = 2;
+
+    memory = trainAiWithLayout(file, analysis, 'Ordem Customizada', memory);
+
+    const relearned = analyzeFileLayout(file, memory);
+    assert.equal(relearned.status, 'matched');
+    assert.equal(relearned.mappings.find((m) => m.header === 'Centro de Custo').historyOrder, 1);
+    assert.equal(relearned.mappings.find((m) => m.header === 'Fornecedor').historyOrder, 2);
+
+    const { records } = transformRowsWithConfig(file, relearned);
+    assert.equal(records[0].history, 'OBRA A ACME');
+  });
+
   it('limita o crescimento dos pesos aprendidos', () => {
     let memory = loadAiMemory();
     const file = {

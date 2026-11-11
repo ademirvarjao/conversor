@@ -655,6 +655,7 @@ export function analyzeFileLayout(parsedFile, memory) {
     }
 
     let predictedRole = ROLES.HISTORY;
+    let predictedHistoryOrder = 0;
     let confidence = 0;
     let source = 'semantic_ai';
     let changeType = null;
@@ -673,6 +674,7 @@ export function analyzeFileLayout(parsedFile, memory) {
 
       if (bestProfileMapping && bestSimilarity >= 0.72) {
         predictedRole = bestProfileMapping.role;
+        predictedHistoryOrder = bestProfileMapping.historyOrder || 0;
         confidence = Math.round(Math.min(99, 55 + bestSimilarity * 44));
         source = 'learned_profile';
         reason = `Reconhecida no perfil "${matchedProfile.name}"`;
@@ -701,7 +703,7 @@ export function analyzeFileLayout(parsedFile, memory) {
       colIdx: idx,
       header: stats.header,
       role: predictedRole,
-      historyOrder: 0,
+      historyOrder: predictedHistoryOrder,
       confidence,
       source,
       changeType,
@@ -791,10 +793,22 @@ export function analyzeFileLayout(parsedFile, memory) {
     }
   }
 
-  // 4) Ordem do histórico (somente colunas de histórico).
-  let order = 1;
+  // 4) Ordem do histórico: preserva a ordem aprendida no perfil e, para
+  // colunas novas, mantém a ordem em que aparecem no arquivo.
+  const historyMappings = mappings
+    .map((mapping, index) => ({ mapping, index }))
+    .filter((entry) => entry.mapping.role === ROLES.HISTORY)
+    .sort(
+      (a, b) =>
+        (a.mapping.historyOrder || Number.MAX_SAFE_INTEGER) -
+          (b.mapping.historyOrder || Number.MAX_SAFE_INTEGER) || a.index - b.index
+    );
+
+  historyMappings.forEach((entry, position) => {
+    entry.mapping.historyOrder = position + 1;
+  });
   for (const mapping of mappings) {
-    mapping.historyOrder = mapping.role === ROLES.HISTORY ? order++ : 0;
+    if (mapping.role !== ROLES.HISTORY) mapping.historyOrder = 0;
   }
 
   const evaluated = mappings.filter((mapping) => mapping.role !== ROLES.IGNORE);

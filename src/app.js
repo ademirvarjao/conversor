@@ -793,7 +793,11 @@ function bindUploadEvents() {
     if (!state.processing) fileInput.click();
   };
 
-  dropzone.addEventListener('click', openPicker);
+  dropzone.addEventListener('click', (event) => {
+    // O input de arquivo é filho do dropzone: evita reabrir o seletor em laço.
+    if (event.target === fileInput) return;
+    openPicker();
+  });
   dropzone.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
