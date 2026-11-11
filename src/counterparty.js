@@ -413,6 +413,62 @@ export function contactCode(code) {
   return String(code ?? '').replace(/[^0-9]/g, '');
 }
 
+/** Status possíveis de uma linha conciliada. */
+export const ROW_STATUS = {
+  MATCHED: 'matched',
+  AMBIGUOUS: 'ambiguous',
+  UNMATCHED: 'unmatched',
+  MANUAL: 'manual',
+  MANUAL_ACCOUNT: 'manualAccount',
+};
+
+/** Procura no cadastro o contato cuja conta (`contactb`) bate com a digitada. */
+export function findContactByAccount(contacts, account, direction) {
+  const digits = contactCode(account);
+  if (!digits) return null;
+
+  const natureza = direction === DIRECTION.PAYMENT ? NATUREZA.CREDORA : NATUREZA.DEVEDORA;
+  return (
+    (contacts || []).find(
+      (contact) => contactCode(contact.code) === digits && contact.natureza === natureza
+    ) || null
+  );
+}
+
+/**
+ * Aplica uma conta de contrapartida digitada à mão numa linha.
+ *
+ * A coluna usada continua dependendo da direção (pagamento → débito,
+ * recebimento → crédito). Se a conta existir no cadastro, o contato é vinculado
+ * junto (e o histórico ganha o nome); se não existir, a conta fica só na linha,
+ * marcada como manual.
+ */
+export function applyRowAccount(row, rawAccount, contact = null) {
+  const account = contactCode(rawAccount);
+  if (!row || !account) return row;
+
+  const isPayment = row.direction === DIRECTION.PAYMENT;
+  row.debitAccount = isPayment ? account : '';
+  row.creditAccount = isPayment ? '' : account;
+
+  if (contact) {
+    row.contact = {
+      code: contact.code,
+      name: contact.name,
+      natureza: contact.natureza,
+      classification: contact.classification,
+    };
+    row.history = linkHistory(row.rawHistory, contact);
+    row.status = ROW_STATUS.MANUAL;
+  } else if (!row.contact) {
+    row.status = ROW_STATUS.MANUAL_ACCOUNT;
+  }
+
+  row.score = 1;
+  row.learnedAlias = false;
+  return row;
+}
+
 /**
  * Converte a tabela do extrato (PDF ou .xlsx) em lançamentos prontos para a
  * conciliação. As colunas são achadas pelo cabeçalho e, quando ele não ajuda,
@@ -776,7 +832,8 @@ export function linkHistory(history, contact) {
   if (!contact) return original;
 
   const compactHistory = compactName(original);
-  if (contact.compactNames.some((name) => name.length >= 6 && compactHistory.includes(name))) {
+  const compactNames = contact.compactNames || [compactName(contact.name)];
+  if (compactNames.some((name) => name.length >= 6 && compactHistory.includes(name))) {
     return original;
   }
 
@@ -810,7 +867,12 @@ export function summarizeReconciliation(rows) {
   };
 
   for (const row of rows) {
-    if (row.status === 'matched' || row.status === 'manual' || row.status === 'learned') {
+    if (
+      row.status === 'matched' ||
+      row.status === 'manual' ||
+      row.status === 'learned' ||
+      row.status === 'manualAccount'
+    ) {
       stats.matched += 1;
     }
     else if (row.status === 'ambiguous') stats.ambiguous += 1;

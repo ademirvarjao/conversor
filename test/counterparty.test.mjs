@@ -4,6 +4,8 @@ import { describe, it } from 'node:test';
 import {
   DIRECTION,
   NATUREZA,
+  applyRowAccount,
+  findContactByAccount,
   buildContactsFromLines,
   buildContactsFromTable,
   buildSourceTransactions,
@@ -385,6 +387,83 @@ describe('conciliação de clientes e fornecedores', () => {
     assert.equal(stats.creditCents, 25000);
     assert.equal(stats.valueCents, 40000);
     assert.equal(stats.suppliers, 2);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                        Conta de contrapartida manual                       */
+/* -------------------------------------------------------------------------- */
+
+describe('conta de contrapartida digitada à mão', () => {
+  const contacts = buildContactsFromLines(questorLines()).contacts;
+
+  it('encontra o contato pela conta, respeitando a natureza da direção', () => {
+    const fornecedor = findContactByAccount(contacts, '5.000.046', DIRECTION.PAYMENT);
+    assert.equal(fornecedor.name, 'LIGHT SERVICO DE ELETRICIDADE S/A');
+
+    // conta de cliente não serve para pagamento (e vice-versa)
+    assert.equal(findContactByAccount(contacts, '1.000.077', DIRECTION.PAYMENT), null);
+    assert.equal(findContactByAccount(contacts, '1.000.077', DIRECTION.RECEIPT).name, 'CEREAIS BRAMIL LTDA');
+
+    // aceita com ou sem pontuação
+    assert.equal(findContactByAccount(contacts, '5000046', DIRECTION.PAYMENT).code, '5.000.046');
+    assert.equal(findContactByAccount(contacts, '', DIRECTION.PAYMENT), null);
+  });
+
+  it('aplica a conta no débito (pagamento) e no crédito (recebimento)', () => {
+    const pagamento = { direction: DIRECTION.PAYMENT, rawHistory: 'NF 10', history: 'NF 10' };
+    applyRowAccount(pagamento, '5.000.046');
+    assert.equal(pagamento.debitAccount, '5000046');
+    assert.equal(pagamento.creditAccount, '');
+    assert.equal(pagamento.status, 'manualAccount');
+
+    const recebimento = { direction: DIRECTION.RECEIPT, rawHistory: 'PV 20', history: 'PV 20' };
+    applyRowAccount(recebimento, '1.000.077');
+    assert.equal(recebimento.creditAccount, '1000077');
+    assert.equal(recebimento.debitAccount, '');
+  });
+
+  it('vincula o contato e junta o nome ao histórico quando a conta existe no cadastro', () => {
+    const contact = findContactByAccount(contacts, '5.000.046', DIRECTION.PAYMENT);
+    const row = { direction: DIRECTION.PAYMENT, rawHistory: 'NF 10', history: 'NF 10' };
+
+    applyRowAccount(row, '5.000.046', contact);
+    assert.equal(row.status, 'manual');
+    assert.equal(row.contact.code, '5.000.046');
+    assert.equal(row.history, 'LIGHT SERVICO DE ELETRICIDADE S/A — NF 10');
+    assert.equal(row.debitAccount, '5000046');
+  });
+
+  it('não apaga o contato já vinculado quando a conta é de fora do cadastro', () => {
+    const row = {
+      direction: DIRECTION.PAYMENT,
+      rawHistory: 'NF 10',
+      history: 'PLASTTOTAL — NF 10',
+      status: 'matched',
+      contact: { code: '5.086.959', name: 'PLASTTOTAL', natureza: NATUREZA.CREDORA },
+      debitAccount: '5086959',
+    };
+
+    applyRowAccount(row, '999999');
+    assert.equal(row.debitAccount, '999999');
+    assert.equal(row.contact.code, '5.086.959');
+    assert.equal(row.status, 'matched');
+  });
+
+  it('conta manual conta como conciliada no resumo', () => {
+    const stats = summarizeReconciliation([
+      {
+        status: 'manualAccount',
+        direction: DIRECTION.RECEIPT,
+        debitCents: 0,
+        creditCents: 15000,
+        contact: null,
+      },
+    ]);
+    assert.equal(stats.matched, 1);
+    assert.equal(stats.unmatched, 0);
+    assert.equal(stats.customers, 0);
+    assert.equal(stats.creditCents, 15000);
   });
 });
 
