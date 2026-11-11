@@ -12,8 +12,9 @@ import {
   trainAiWithLayout,
   transformRowsWithConfig,
 } from './ai-engine.js';
-import { formatLocalDateTime, formatValuePlainBr, sumValues } from './format.js';
+import { formatLocalDateTime, formatValueGroupedBr, formatValuePlainBr, sumValues } from './format.js';
 import { summarizeRecords } from './summary.js';
+import { applyRowEdits, recordKey, setHistoryOverride } from './row-edits.js';
 import { exportToPdf, exportToXlsx } from './exporters.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
@@ -30,7 +31,9 @@ import {
 } from './sync-vault.js';
 import { APP_VERSION, REQUIRED_ELEMENT_IDS } from './ui-contract.js';
 
-const PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 100;
+/** Opções de linhas por página (`'all'` mostra a planilha inteira). */
+const PAGE_SIZE_OPTIONS = [50, 100, 300, 1000, 'all'];
 const MAX_FILE_BYTES = 60 * 1024 * 1024; // 60 MB por arquivo
 const SEARCH_DEBOUNCE_MS = 180;
 const SUPPORTED_EXTENSIONS = ['pdf', 'xlsx'];
@@ -54,6 +57,14 @@ const state = {
   searchTerm: '',
   typeFilter: 'all',
   currentPage: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  /** Chaves (`arquivo#linha`) marcadas na tabela. */
+  selected: new Set(),
+  /** Histórico digitado à mão, por chave de origem. */
+  historyOverrides: new Map(),
+  /** Linhas que o usuário excluiu (podem ser restauradas). */
+  removedKeys: new Set(),
+  removedCount: 0,
   exportOnlyFiltered: false,
   processing: false,
 };
@@ -190,7 +201,7 @@ function syncRulesToAnalysis(file) {
 /*                          Consolidação e filtros                            */
 /* -------------------------------------------------------------------------- */
 
-function rebuildUnifiedOutput() {
+function rebuildUnifiedOutput({ resetPage = true } = {}) {
   const allRecords = [];
   let skippedCount = 0;
 
@@ -201,18 +212,32 @@ function rebuildUnifiedOutput() {
     skippedCount += result.skipped.length;
   }
 
+  // Reaplica o que o usuário editou/excluiu à mão — a chave é a origem
+  // (arquivo + linha), então as edições sobrevivem a remapear/treinar a IA.
+  const { rows: keptRecords, removed } = applyRowEdits(allRecords, {
+    historyOverrides: state.historyOverrides,
+    removedKeys: state.removedKeys,
+  });
+  state.removedCount = removed;
+
   // Ordenação cronológica crescente e estável (por arquivo/linha de origem).
-  allRecords.sort(
+  keptRecords.sort(
     (a, b) =>
       a.dateIso.localeCompare(b.dateIso) ||
       a.sourceFile.localeCompare(b.sourceFile) ||
       (a.sourceRow || 0) - (b.sourceRow || 0)
   );
 
-  state.unifiedRows = allRecords;
-  state.summary = summarizeRecords(allRecords, { skippedCount });
+  state.unifiedRows = keptRecords;
+  state.summary = summarizeRecords(keptRecords, { skippedCount });
 
-  applyFilters({ resetPage: true });
+  // Seleção só faz sentido para linhas que ainda existem.
+  const alive = new Set(keptRecords.map((record) => recordKey(record)));
+  for (const key of [...state.selected]) {
+    if (!alive.has(key)) state.selected.delete(key);
+  }
+
+  applyFilters({ resetPage });
   renderFilesList();
   renderOutputSection();
 }
@@ -501,6 +526,107 @@ function renderMappingRows(file) {
 /*                          Resultado e paginação                             */
 /* -------------------------------------------------------------------------- */
 
+/** Quantas linhas cabem na página (a planilha inteira quando `'all'`). */
+function rowsPerPage() {
+  return state.pageSize === 'all' ? Infinity : Number(state.pageSize) || DEFAULT_PAGE_SIZE;
+}
+
+/** Mantém seleção, botões de ação e o "selecionar tudo" coerentes. */
+function renderPreviewSelection() {
+  const ids = state.filteredRows.map((record) => recordKey(record));
+  const selectedHere = ids.filter((key) => state.selected.has(key)).length;
+  const total = state.selected.size;
+
+  const selectAll = dom['preview-select-all'];
+  if (selectAll) {
+    selectAll.checked = ids.length > 0 && selectedHere === ids.length;
+    selectAll.indeterminate = selectedHere > 0 && selectedHere < ids.length;
+    selectAll.disabled = ids.length === 0;
+    selectAll.title = ids.length
+      ? `Selecionar todos os ${ids.length} lançamentos do filtro atual`
+      : 'Nenhum lançamento para selecionar';
+    selectAll.setAttribute(
+      'aria-label',
+      ids.length ? `Selecionar todos os ${ids.length} lançamentos do filtro atual` : 'Selecionar todos os lançamentos'
+    );
+  }
+
+  const del = dom['btn-delete-selected'];
+  if (del) {
+    del.disabled = total === 0;
+    del.textContent = total ? `Excluir selecionados (${total})` : 'Excluir selecionados';
+  }
+
+  const restore = dom['btn-restore-deleted'];
+  if (restore) {
+    restore.disabled = state.removedCount === 0;
+    restore.textContent = state.removedCount
+      ? `Restaurar excluídas (${state.removedCount})`
+      : 'Restaurar excluídas';
+  }
+
+  const clear = dom['btn-clear-preview-selection'];
+  if (clear) {
+    clear.disabled = total === 0;
+    clear.textContent = total ? `Limpar seleção (${total})` : 'Limpar seleção';
+  }
+}
+
+/** Exclui da planilha os lançamentos marcados (dá para restaurar depois). */
+function deleteSelectedRows() {
+  const keys = [...state.selected];
+  if (keys.length === 0) return;
+
+  for (const key of keys) state.removedKeys.add(key);
+  state.selected.clear();
+  rebuildUnifiedOutput({ resetPage: false });
+
+  showToast(
+    `${keys.length} lançamento(s) excluído(s) da planilha — use “Restaurar excluídas” para voltar.`,
+    'success'
+  );
+}
+
+/** Exclui um único lançamento (botão ✕ da linha). */
+function deleteRow(key) {
+  if (!key) return;
+  state.removedKeys.add(key);
+  state.selected.delete(key);
+  rebuildUnifiedOutput({ resetPage: false });
+  showToast('Lançamento excluído — use “Restaurar excluídas” para voltar.');
+}
+
+/** Devolve à planilha tudo o que foi excluído. */
+function restoreDeletedRows() {
+  if (state.removedKeys.size === 0) return;
+  const count = state.removedKeys.size;
+  state.removedKeys.clear();
+  rebuildUnifiedOutput({ resetPage: false });
+  showToast(`${count} lançamento(s) restaurado(s) na planilha.`);
+}
+
+/** Grava o histórico digitado na linha, sem sair do lugar. */
+function commitHistoryEdit(input) {
+  const key = input?.dataset?.previewHistory;
+  if (!key) return;
+
+  const record = state.unifiedRows.find((item) => recordKey(item) === key);
+  if (!record) return;
+
+  if (input.dataset.previewCancelled) {
+    delete input.dataset.previewCancelled;
+    input.value = record.history;
+    return;
+  }
+
+  const changed = setHistoryOverride(state, record, input.value);
+  applyFilters();
+  renderOutputSection();
+
+  if (changed) showToast('Histórico atualizado — o novo texto vale para as exportações.');
+  else if (input.value.trim() === '') showToast('Edição desfeita: voltou o histórico do arquivo.', 'warn');
+}
+
 function renderOutputSection() {
   const section = dom['output-section'];
   if (!section) return;
@@ -520,28 +646,34 @@ function renderOutputSection() {
       : `${summary.minDateBr} a ${summary.maxDateBr}`
     : 'Sem datas';
 
-  dom['kpi-in'].textContent = formatValuePlainBr(summary.totalIn);
+  dom['kpi-in'].textContent = formatValueGroupedBr(summary.totalIn);
   dom['kpi-in-count'].textContent = `${summary.inCount} recebimento(s)`;
-  dom['kpi-out'].textContent = formatValuePlainBr(summary.totalOutAbs);
+  dom['kpi-out'].textContent = formatValueGroupedBr(summary.totalOutAbs);
   dom['kpi-out-count'].textContent = `${summary.outCount} pagamento(s)`;
-  dom['kpi-net'].textContent = formatValuePlainBr(summary.netTotal);
+  dom['kpi-net'].textContent = formatValueGroupedBr(summary.netTotal);
   dom['kpi-net'].style.color = summary.netTotal >= 0 ? 'var(--emerald)' : 'var(--crimson)';
   dom['kpi-skipped'].textContent = `${summary.skippedCount} linha(s) ignorada(s)`;
 
   const total = state.filteredRows.length;
-  const maxPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const perPage = rowsPerPage();
+  const maxPage = Math.max(1, Math.ceil(total / perPage));
   if (state.currentPage > maxPage) state.currentPage = maxPage;
 
-  const startIndex = (state.currentPage - 1) * PAGE_SIZE;
-  const endIndex = Math.min(total, startIndex + PAGE_SIZE);
-  const pageRows = state.filteredRows.slice(startIndex, endIndex);
+  const startIndex = Number.isFinite(perPage) ? (state.currentPage - 1) * perPage : 0;
+  const pageRows =
+    state.filteredRows.length === 0
+      ? []
+      : Number.isFinite(perPage)
+        ? state.filteredRows.slice(startIndex, startIndex + perPage)
+        : state.filteredRows.slice();
+  const endIndex = startIndex + pageRows.length;
 
   const tbody = dom['preview-tbody'];
   tbody.innerHTML = '';
 
   if (pageRows.length === 0) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="3" class="empty-row">${
+    row.innerHTML = `<td colspan="5" class="empty-row">${
       state.unifiedRows.length === 0
         ? 'Nenhum lançamento válido foi extraído dos arquivos importados.'
         : 'Nenhum lançamento encontrado com o filtro atual.'
@@ -552,12 +684,38 @@ function renderOutputSection() {
     for (const record of pageRows) {
       const row = document.createElement('tr');
       const valueClass = record.value < 0 ? 'val-neg' : 'val-pos';
+      const key = recordKey(record);
+      row.dataset.previewRow = key;
       row.innerHTML = `
+        <td class="col-select">
+          <input
+            type="checkbox"
+            data-preview-select="${escapeHtml(key)}"
+            aria-label="Selecionar o lançamento de ${escapeHtml(record.dateBr)}"
+            ${state.selected.has(key) ? 'checked' : ''}
+          />
+        </td>
         <td class="col-date">${escapeHtml(record.dateBr)}</td>
         <td class="col-val ${valueClass}">${escapeHtml(formatValuePlainBr(record.value))}</td>
-        <td class="col-hist" title="Origem: ${escapeHtml(record.sourceFile)}">${escapeHtml(
-          record.history
-        )}</td>
+        <td class="col-hist" title="Origem: ${escapeHtml(record.sourceFile)}">
+          <input
+            class="preview-history-input"
+            type="text"
+            data-preview-history="${escapeHtml(key)}"
+            value="${escapeHtml(record.history)}"
+            aria-label="Histórico do lançamento de ${escapeHtml(record.dateBr)}"
+            title="Clique para editar o histórico"
+          />
+        </td>
+        <td class="col-actions">
+          <button
+            class="row-delete-btn"
+            type="button"
+            data-preview-delete="${escapeHtml(key)}"
+            aria-label="Excluir o lançamento de ${escapeHtml(record.dateBr)}"
+            title="Excluir este lançamento"
+          >✕</button>
+        </td>
       `;
       fragment.appendChild(row);
     }
@@ -573,6 +731,8 @@ function renderOutputSection() {
 
   dom['btn-prev-page'].disabled = state.currentPage <= 1;
   dom['btn-next-page'].disabled = state.currentPage >= maxPage;
+
+  renderPreviewSelection();
 
   const hasRows = state.unifiedRows.length > 0;
   dom['btn-export-xlsx'].disabled = !hasRows;
@@ -1091,6 +1251,63 @@ function bindOutputEvents() {
     });
   });
 
+  dom['preview-select-all']?.addEventListener('change', (event) => {
+    const select = event.target.checked;
+    for (const record of state.filteredRows) {
+      const key = recordKey(record);
+      if (select) state.selected.add(key);
+      else state.selected.delete(key);
+    }
+    renderOutputSection();
+  });
+
+  dom['preview-tbody']?.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('[data-preview-select]');
+    if (checkbox) {
+      const key = checkbox.dataset.previewSelect;
+      if (checkbox.checked) state.selected.add(key);
+      else state.selected.delete(key);
+      renderPreviewSelection();
+      return;
+    }
+
+    const historyInput = event.target.closest('[data-preview-history]');
+    if (historyInput) commitHistoryEdit(historyInput);
+  });
+
+  dom['preview-tbody']?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-preview-delete]');
+    if (!button) return;
+    deleteRow(button.dataset.previewDelete);
+  });
+
+  dom['preview-tbody']?.addEventListener('keydown', (event) => {
+    const input = event.target.closest('[data-preview-history]');
+    if (!input) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      input.dataset.previewCancelled = '1';
+      input.blur();
+    }
+  });
+
+  dom['btn-delete-selected']?.addEventListener('click', deleteSelectedRows);
+  dom['btn-restore-deleted']?.addEventListener('click', restoreDeletedRows);
+  dom['btn-clear-preview-selection']?.addEventListener('click', () => {
+    state.selected.clear();
+    renderOutputSection();
+  });
+
+  dom['preview-page-size']?.addEventListener('change', (event) => {
+    const value = event.target.value;
+    state.pageSize = value === 'all' ? 'all' : Number(value) || DEFAULT_PAGE_SIZE;
+    state.currentPage = 1;
+    renderOutputSection();
+  });
+
   dom['btn-prev-page']?.addEventListener('click', () => {
     if (state.currentPage > 1) {
       state.currentPage--;
@@ -1100,7 +1317,7 @@ function bindOutputEvents() {
   });
 
   dom['btn-next-page']?.addEventListener('click', () => {
-    const maxPage = Math.max(1, Math.ceil(state.filteredRows.length / PAGE_SIZE));
+    const maxPage = Math.max(1, Math.ceil(state.filteredRows.length / rowsPerPage()));
     if (state.currentPage < maxPage) {
       state.currentPage++;
       renderOutputSection();
@@ -1771,6 +1988,12 @@ function init() {
   cacheDom();
   updateAiBadge();
 
+  // Tamanho da página vem do seletor; valor estranho cai no padrão.
+  const initialSize = dom['preview-page-size']?.value;
+  state.pageSize =
+    initialSize === 'all' ? 'all' : PAGE_SIZE_OPTIONS.includes(Number(initialSize)) ? Number(initialSize) : DEFAULT_PAGE_SIZE;
+  if (dom['preview-page-size']) dom['preview-page-size'].value = String(state.pageSize);
+
   if (dom['app-version']) dom['app-version'].textContent = `v${APP_VERSION}`;
 
   bindUploadEvents();
@@ -1817,4 +2040,4 @@ try {
 }
 
 // Exposto para depuração manual no console e para testes de integração.
-if (typeof window !== 'undefined') window.__conversor = { state };
+if (typeof window !== 'undefined') window.__conversor = { state, rebuildUnifiedOutput, renderOutputSection };

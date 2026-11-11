@@ -49,6 +49,23 @@ describe('index.html x controlador', () => {
     assert.match(header, /Colar chave/i);
   });
 
+  it('oferece seleção, exclusão e linhas por página na planilha consolidada', () => {
+    for (const id of [
+      'preview-select-all',
+      'preview-page-size',
+      'btn-delete-selected',
+      'btn-restore-deleted',
+      'btn-clear-preview-selection',
+    ]) {
+      assert.ok(htmlIds.includes(id), `falta #${id}`);
+    }
+    for (const value of ['50', '100', '300', '1000', 'all']) {
+      assert.match(html, new RegExp(`<option value="${value}"`), `falta a opção ${value} em #preview-page-size`);
+    }
+    assert.ok(html.includes('col-hist'), 'falta a coluna de histórico');
+    assert.ok(html.includes('class="col-actions"'), 'falta a coluna de ações (excluir linha)');
+  });
+
   it('leva para a página do conciliador pelo ícone da marca', () => {
     const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
     assert.match(

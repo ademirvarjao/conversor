@@ -276,20 +276,55 @@
           <caption class="sr-only">Pré-visualização dos lançamentos consolidados</caption>
           <thead>
             <tr>
+              <th scope="col" class="col-select">
+                <input
+                  id="preview-select-all"
+                  type="checkbox"
+                  aria-label="Selecionar todos os lançamentos do filtro atual"
+                  title="Selecionar todos os lançamentos do filtro atual"
+                />
+              </th>
               <th scope="col" class="col-date">data</th>
               <th scope="col" class="col-val">valor</th>
               <th scope="col" class="col-hist">historico</th>
+              <th scope="col" class="col-actions">ações</th>
             </tr>
           </thead>
           <tbody id="preview-tbody"></tbody>
         </table>
       </div>
 
+      <div class="preview-actions">
+        <p class="preview-actions-hint">
+          O histórico é editável: clique no texto do lançamento para corrigir. Marque as linhas que não devem entrar no
+          arquivo final e exclua de uma vez.
+        </p>
+        <div class="preview-actions-btns">
+          <button id="btn-delete-selected" class="btn btn-sm btn-danger-outline" type="button" disabled>Excluir selecionados</button>
+          <button id="btn-restore-deleted" class="btn btn-sm btn-ghost-dark" type="button" disabled>Restaurar excluídas</button>
+          <button id="btn-clear-preview-selection" class="btn btn-sm btn-ghost-dark" type="button" disabled>
+            Limpar seleção
+          </button>
+        </div>
+      </div>
+
       <div class="pagination-bar">
         <span id="pagination-info" class="pagination-info" aria-live="polite">Exibindo 0 de 0</span>
-        <div class="pagination-btns">
-          <button id="btn-prev-page" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
-          <button id="btn-next-page" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
+        <div class="pagination-controls">
+          <label class="cp-page-size" for="preview-page-size">
+            <span>Linhas por página</span>
+            <select id="preview-page-size">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="300">300</option>
+              <option value="1000">1000</option>
+              <option value="all">todas</option>
+            </select>
+          </label>
+          <div class="pagination-btns">
+            <button id="btn-prev-page" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
+            <button id="btn-next-page" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
+          </div>
         </div>
       </div>
     </section>
@@ -297,7 +332,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.9.7</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.9.8</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>

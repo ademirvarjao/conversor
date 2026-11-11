@@ -2200,3 +2200,76 @@ body {
   font-size: 0.74rem;
   color: var(--text-light);
 }
+
+/* Edição e exclusão na planilha consolidada (página principal) */
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.preview-actions-hint {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 0.76rem;
+  color: var(--text-light);
+}
+
+.preview-actions-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.data-table th.col-actions,
+.data-table td.col-actions {
+  width: 46px;
+  text-align: center;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.row-delete-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 5px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.row-delete-btn:hover {
+  background: #fef2f2;
+  color: var(--crimson);
+}
+
+.row-delete-btn:focus-visible {
+  outline: 2px solid var(--crimson);
+  outline-offset: 1px;
+}
+
+.preview-history-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+
+.preview-history-input:hover {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.preview-history-input:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border-color: var(--primary);
+  background: #fff;
+}
