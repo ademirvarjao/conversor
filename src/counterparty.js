@@ -278,14 +278,20 @@ export function dedupeContacts(contacts) {
 
   for (const contact of contacts || []) {
     const key = `${contact.natureza}|${contact.code}`;
+    const incomingAliases =
+      Array.isArray(contact.aliases) && contact.aliases.length > 0
+        ? [...contact.aliases, contact.name]
+        : [contact.name];
     const current = byKey.get(key);
     if (!current) {
-      byKey.set(key, { ...contact, aliases: [contact.name] });
+      byKey.set(key, { ...contact, aliases: [...new Set(incomingAliases)] });
       continue;
     }
 
-    if (!current.aliases.some((alias) => normalizeKey(alias) === normalizeKey(contact.name))) {
-      current.aliases.push(contact.name);
+    for (const alias of incomingAliases) {
+      if (!current.aliases.some((existing) => normalizeKey(existing) === normalizeKey(alias))) {
+        current.aliases.push(alias);
+      }
     }
     if (contact.name.length > current.name.length) current.name = contact.name;
     if (!current.document && contact.document) current.document = contact.document;
@@ -313,6 +319,59 @@ function finalizeContact(contact) {
     compactNames: [...compact],
     label: `${contact.name}${contact.code ? ` (${contact.code})` : ''}`,
   };
+}
+
+/**
+ * Junta os contatos de vários arquivos de cadastro num só, sem duplicar o mesmo
+ * `contactb` e guardando as grafias de todos eles.
+ */
+export function mergeContacts(lists) {
+  const all = [];
+  for (const list of lists || []) {
+    for (const contact of list || []) all.push(contact);
+  }
+  return dedupeContacts(all);
+}
+
+/** Chave de comparação de um lançamento (para não duplicar arquivos repetidos). */
+function transactionKey(transaction) {
+  return [
+    transaction.dateIso || transaction.date || '',
+    transaction.amountCents,
+    normalizeKey(transaction.history),
+  ].join('|');
+}
+
+/**
+ * Junta os lançamentos de vários extratos.
+ *
+ * A mesma linha pode aparecer em dois arquivos (extrato do mês + cópia): nesse
+ * caso fica apenas uma. Mas duas linhas idênticas dentro do mesmo arquivo são
+ * legítimas (duas taxas iguais no mesmo dia), então vale a maior quantidade
+ * encontrada em um único arquivo.
+ */
+export function mergeTransactions(lists) {
+  const maxByKey = new Map();
+  const sampleByKey = new Map();
+
+  for (const list of lists || []) {
+    const countByKey = new Map();
+    for (const transaction of list || []) {
+      const key = transactionKey(transaction);
+      countByKey.set(key, (countByKey.get(key) || 0) + 1);
+      if (!sampleByKey.has(key)) sampleByKey.set(key, transaction);
+    }
+    for (const [key, count] of countByKey) {
+      maxByKey.set(key, Math.max(maxByKey.get(key) || 0, count));
+    }
+  }
+
+  const merged = [];
+  for (const [key, count] of maxByKey) {
+    for (let index = 0; index < count; index += 1) merged.push(sampleByKey.get(key));
+  }
+
+  return merged.sort((a, b) => String(a.dateIso || a.date).localeCompare(String(b.dateIso || b.date)));
 }
 
 /* -------------------------------------------------------------------------- */

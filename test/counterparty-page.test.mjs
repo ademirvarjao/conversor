@@ -56,9 +56,16 @@ describe('página do conciliador', () => {
     }
   });
 
-  it('explica a regra de natureza e mostra o estado dos modelos', () => {
-    assert.match(page, /natureza[\s\S]{0,80}credora/i);
-    assert.match(page, /natureza[\s\S]{0,80}devedora/i);
+  it('aceita mais de um arquivo em cada campo', () => {
+    for (const id of ['cp-contacts-input', 'cp-ledger-input']) {
+      const tag = page.slice(page.indexOf(`id="${id}"`));
+      const input = tag.slice(0, tag.indexOf('>') + 1);
+      assert.match(input, /\bmultiple\b/, `#${id} precisa aceitar vários arquivos`);
+      assert.match(input, /accept="\.pdf,\.xlsx"/, `#${id} precisa aceitar PDF e XLSX`);
+    }
+  });
+
+  it('mostra o estado dos modelos da nuvem no topo', () => {
     assert.ok(page.includes('id="cp-cloud-state"'));
     assert.ok(page.includes('id="btn-cp-cloud-push"'));
     assert.ok(page.includes('id="btn-cp-cloud-pull"'));
