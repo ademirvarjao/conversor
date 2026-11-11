@@ -1041,6 +1041,46 @@ body {
   gap: 8px;
 }
 
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.cp-page-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.cp-page-size select {
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cp-page-size select:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border-color: var(--primary);
+}
+
+.cp-clear-selection {
+  margin-left: auto;
+}
+
+.cp-clear-selection:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Modal */
 .modal-backdrop {
   position: fixed;
