@@ -1668,33 +1668,6 @@ body {
   padding-bottom: 40px;
 }
 
-.cp-hero {
-  padding: 22px 24px;
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, #0f2744 0%, #17395f 65%, #1e4a7a 100%);
-  color: #ffffff;
-  box-shadow: 0 10px 26px rgba(15, 39, 68, 0.18);
-}
-
-.cp-hero .step-tag {
-  background: rgba(56, 189, 248, 0.18);
-  color: #7dd3fc;
-}
-
-.cp-hero-title {
-  margin: 8px 0 6px;
-  font-size: 1.35rem;
-  color: #ffffff;
-}
-
-.cp-hero-sub {
-  margin: 0;
-  max-width: 90ch;
-  font-size: 0.9rem;
-  line-height: 1.55;
-  color: #cbd5e1;
-}
-
 .cp-files-card .section-header {
   margin-bottom: 12px;
 }
@@ -1753,12 +1726,6 @@ body {
 @media (max-width: 720px) {
   .cp-main {
     padding-top: 14px;
-  }
-  .cp-hero {
-    padding: 16px 18px;
-  }
-  .cp-hero-title {
-    font-size: 1.12rem;
   }
   .cp-file {
     padding-left: 16px;

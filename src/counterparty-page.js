@@ -23,6 +23,8 @@ import {
   learnFromReconciliation,
   learnManualLink,
   linkHistory,
+  mergeContacts,
+  mergeTransactions,
   reconcileCounterparties,
   sanitizeCounterparties,
   scoreCandidates,
@@ -297,42 +299,62 @@ function updateRunButton() {
   button.disabled = state.busy || state.contacts.length === 0 || state.transactions.length === 0;
 }
 
-async function loadContacts(file) {
-  const statusEl = dom['cp-contacts-status'];
-  if (statusEl) statusEl.textContent = `Lendo ${file.name}…`;
-  cpAlert('');
-
+/** Lê um arquivo de cadastro e devolve os contatos crus. */
+async function readContactFile(file, onProgress) {
   const extension = fileExtension(file.name);
   const buffer = await file.arrayBuffer();
-  let contacts = [];
-  let rejected = 0;
 
   if (extension === 'pdf') {
-    const { lines } = await extractPdfLines(new Uint8Array(buffer), pdfjsLib, {
-      onProgress: (page, total) => {
-        if (statusEl) statusEl.textContent = `Lendo ${file.name} — página ${page} de ${total}…`;
-      },
-    });
-    const parsed = buildContactsFromLines(lines);
-    contacts = parsed.contacts;
-    rejected = parsed.rejected;
-  } else {
-    const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
-    if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
-    const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
-    const built = buildContactsFromTable(parsed.headers, parsed.rows);
-    contacts = built.contacts;
-    rejected = built.rejected;
+    const { lines } = await extractPdfLines(new Uint8Array(buffer), pdfjsLib, { onProgress });
+    return buildContactsFromLines(lines);
   }
 
+  const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
+  if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
+  const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
+  return buildContactsFromTable(parsed.headers, parsed.rows);
+}
+
+/** Carrega um ou mais cadastros e junta tudo num só (mesmo `contactb` não duplica). */
+async function loadContacts(fileList) {
+  const files = [...(fileList || [])];
+  if (files.length === 0) return;
+
+  const statusEl = dom['cp-contacts-status'];
+  const lists = [];
+  const failures = [];
+  let rejected = 0;
+  let read = 0;
+
+  cpAlert('');
+  for (const [index, file] of files.entries()) {
+    if (statusEl) statusEl.textContent = `Lendo ${file.name} (${index + 1}/${files.length})…`;
+    try {
+      const parsed = await readContactFile(file, (page, total) => {
+        if (statusEl) {
+          statusEl.textContent = `${file.name} — página ${page} de ${total} (${index + 1}/${files.length})`;
+        }
+      });
+      lists.push(parsed.contacts);
+      rejected += parsed.rejected || 0;
+      read += 1;
+    } catch (error) {
+      console.error(error);
+      failures.push(`${file.name}: ${error.message}`);
+    }
+  }
+
+  const contacts = mergeContacts(lists);
   if (contacts.length === 0) {
     throw new Error(
-      `Nenhum contato reconhecido em "${file.name}". Confira se o arquivo tem as colunas contactb, nomepessoa e natureza.`
+      failures.length > 0
+        ? `Nenhum contato reconhecido. ${failures[0]}`
+        : 'Nenhum contato reconhecido. Confira se os arquivos têm as colunas contactb, nomepessoa e natureza.'
     );
   }
 
   state.contacts = contacts;
-  state.contactFile = file.name;
+  state.contactFile = files.map((file) => file.name).join(', ');
   state.rows = [];
   state.stats = summarizeReconciliation([]);
   state.page = 1;
@@ -340,62 +362,97 @@ async function loadContacts(file) {
 
   const summary = contactSummary(contacts);
   if (statusEl) {
-    statusEl.textContent = `${contacts.length} contatos • ${summary.suppliers} credora • ${summary.customers} devedora`;
+    statusEl.textContent = `${read} arquivo(s) • ${contacts.length} contatos • ${summary.suppliers} credora • ${summary.customers} devedora`;
   }
   dom['cp-contacts-status']?.closest('.cp-file')?.classList.add('is-loaded');
 
+  const failureNote =
+    failures.length > 0
+      ? ` <strong>${failures.length} arquivo(s) não lido(s):</strong> ${failures.map(escapeHtml).join(' • ')}`
+      : '';
   cpAlert(
-    `Cadastro lido: <strong>${contacts.length}</strong> contatos (${summary.suppliers} fornecedores credora, ${
+    `Cadastro lido: <strong>${contacts.length}</strong> contatos de ${read} arquivo(s) (${summary.suppliers} fornecedores credora, ${
       summary.customers
-    } clientes devedora)${rejected ? ` • ${rejected} linha(s) ignorada(s)` : ''}.`
+    } clientes devedora)${rejected ? ` • ${rejected} linha(s) ignorada(s)` : ''}.${failureNote}`,
+    failures.length > 0 ? 'warn' : 'info'
   );
   updateRunButton();
 }
 
-async function loadLedger(file) {
-  const statusEl = dom['cp-ledger-status'];
-  if (statusEl) statusEl.textContent = `Lendo ${file.name}…`;
-  cpAlert('');
-
+/** Lê um arquivo de extrato e devolve os lançamentos com sinal. */
+async function readLedgerFile(file, onProgress) {
   const extension = fileExtension(file.name);
   const buffer = await file.arrayBuffer();
-  let transactions = [];
 
   if (extension === 'pdf') {
-    const parsed = await parsePdfFile(buffer, file.name, pdfjsLib, {
-      onProgress: (page, total) => {
-        if (statusEl) statusEl.textContent = `Lendo ${file.name} — página ${page} de ${total}…`;
-      },
-    });
-    transactions = transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
-  } else {
-    const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
-    if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
-    const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
-    transactions = transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
+    const parsed = await parsePdfFile(buffer, file.name, pdfjsLib, { onProgress });
+    return transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
   }
 
+  const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
+  if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
+  const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
+  return transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
+}
+
+/** Carrega um ou mais extratos, juntando os lançamentos sem duplicar arquivos repetidos. */
+async function loadLedger(fileList) {
+  const files = [...(fileList || [])];
+  if (files.length === 0) return;
+
+  const statusEl = dom['cp-ledger-status'];
+  const lists = [];
+  const failures = [];
+  let read = 0;
+
+  cpAlert('');
+  for (const [index, file] of files.entries()) {
+    if (statusEl) statusEl.textContent = `Lendo ${file.name} (${index + 1}/${files.length})…`;
+    try {
+      const transactions = await readLedgerFile(file, (page, total) => {
+        if (statusEl) {
+          statusEl.textContent = `${file.name} — página ${page} de ${total} (${index + 1}/${files.length})`;
+        }
+      });
+      lists.push(transactions);
+      read += 1;
+    } catch (error) {
+      console.error(error);
+      failures.push(`${file.name}: ${error.message}`);
+    }
+  }
+
+  const transactions = mergeTransactions(lists);
   if (transactions.length === 0) {
-    throw new Error(`Nenhum lançamento com data e valor foi reconhecido em "${file.name}".`);
+    throw new Error(
+      failures.length > 0
+        ? `Nenhum lançamento reconhecido. ${failures[0]}`
+        : 'Nenhum lançamento com data e valor foi reconhecido nos arquivos enviados.'
+    );
   }
 
   const payments = transactions.filter((item) => item.direction === DIRECTION.PAYMENT).length;
   const receipts = transactions.length - payments;
 
   state.transactions = transactions;
-  state.ledgerFile = file.name;
+  state.ledgerFile = files.map((file) => file.name).join(', ');
   state.rows = [];
   state.stats = summarizeReconciliation([]);
   state.page = 1;
   dom['cp-result']?.classList.add('hidden');
 
   if (statusEl) {
-    statusEl.textContent = `${transactions.length} lançamentos • ${payments} pagamentos • ${receipts} recebimentos`;
+    statusEl.textContent = `${read} arquivo(s) • ${transactions.length} lançamentos • ${payments} pagamentos • ${receipts} recebimentos`;
   }
   dom['cp-ledger-status']?.closest('.cp-file')?.classList.add('is-loaded');
 
+  const failureNote =
+    failures.length > 0
+      ? ` <strong>${failures.length} arquivo(s) não lido(s):</strong> ${failures.map(escapeHtml).join(' • ')}`
+      : '';
   cpAlert(
-    `Extrato lido: <strong>${transactions.length}</strong> lançamentos (${payments} pagamentos, ${receipts} recebimentos). Clique em <em>Conciliar agora</em>.`
+    `Extrato lido: <strong>${transactions.length}</strong> lançamentos de ${read} arquivo(s) (${payments} pagamentos, ${receipts} recebimentos). Clique em <em>Conciliar agora</em>.${failureNote}`,
+    failures.length > 0 ? 'warn' : 'info'
   );
   updateRunButton();
 }
@@ -727,10 +784,10 @@ function applyLink(code) {
 
 function bindEvents() {
   dom['cp-contacts-input']?.addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = [...(event.target.files || [])];
+    if (files.length === 0) return;
     try {
-      await loadContacts(file);
+      await loadContacts(files);
     } catch (error) {
       console.error(error);
       cpAlert(`<strong>Cadastro não lido.</strong> ${escapeHtml(error.message)}`, 'error');
@@ -739,10 +796,10 @@ function bindEvents() {
   });
 
   dom['cp-ledger-input']?.addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = [...(event.target.files || [])];
+    if (files.length === 0) return;
     try {
-      await loadLedger(file);
+      await loadLedger(files);
     } catch (error) {
       console.error(error);
       cpAlert(`<strong>Extrato não lido.</strong> ${escapeHtml(error.message)}`, 'error');

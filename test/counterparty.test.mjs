@@ -13,6 +13,8 @@ import {
   learnFromReconciliation,
   learnManualLink,
   linkHistory,
+  mergeContacts,
+  mergeTransactions,
   normalizeKey,
   reconcileCounterparties,
   sanitizeCounterparties,
@@ -215,6 +217,73 @@ describe('lançamentos de origem', () => {
     assert.equal(transactions[0].direction, DIRECTION.PAYMENT);
     assert.equal(transactions[1].amountCents, 261850);
     assert.equal(transactions[1].direction, DIRECTION.RECEIPT);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                         Vários arquivos por campo                          */
+/* -------------------------------------------------------------------------- */
+
+describe('importação de vários arquivos', () => {
+  it('junta cadastros de arquivos diferentes sem duplicar o mesmo código', () => {
+    const first = buildContactsFromLines(questorLines()).contacts;
+    const second = buildContactsFromLines([
+      headerLine(2),
+      contactLine(2, 700, { classificacao: '2.1.03.001.001', codigo: '5.086.959', nome: 'PLasttotal Plasticos Industriais Ltda', natureza: 'Credora' }),
+      contactLine(2, 690, { classificacao: '2.1.03.001.001', codigo: '5.077.001', nome: 'FORNECEDOR NOVO LTDA', natureza: 'Credora' }),
+    ]).contacts;
+
+    const merged = mergeContacts([first, second]);
+
+    assert.equal(merged.length, 6); // 5 do primeiro + 1 novo
+    const plast = merged.filter((contact) => contact.code === '5.086.959');
+    assert.equal(plast.length, 1, 'o mesmo código não pode duplicar');
+    assert.ok(plast[0].aliases.length >= 1);
+  });
+
+  it('guarda as grafias diferentes do mesmo código vindas de arquivos diferentes', () => {
+    const a = buildContactsFromLines([
+      headerLine(),
+      contactLine(1, 700, { classificacao: '2.1.03.001.001', codigo: '5.000.046', nome: 'LIGHT SERVICOS DE ELETRICIDADE S/A', natureza: 'Credora' }),
+    ]).contacts;
+    const b = buildContactsFromLines([
+      headerLine(2),
+      contactLine(2, 700, { classificacao: '2.1.03.001.001', codigo: '5.000.046', nome: 'LIGHT SERVICO DE ELETRICIDADE LTDA', natureza: 'Credora' }),
+    ]).contacts;
+
+    const merged = mergeContacts([a, b]);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].aliases.length, 2);
+    assert.ok(merged[0].compactNames.length >= 2);
+  });
+
+  it('não duplica o mesmo extrato enviado duas vezes', () => {
+    const one = buildSourceTransactions(
+      recordsFrom([
+        ['01/10/2026', '-100,00', 'Taxa bancária'],
+        ['01/10/2026', '-100,00', 'Taxa bancária'],
+      ])
+    );
+
+    const merged = mergeTransactions([one, one]);
+    assert.equal(merged.length, 2, 'as duas linhas do mesmo arquivo são legítimas');
+  });
+
+  it('soma arquivos diferentes e ordena por data', () => {
+    const october = buildSourceTransactions(recordsFrom([['01/10/2026', '-100,00', 'Taxa']]));
+    const november = buildSourceTransactions(recordsFrom([['05/11/2026', '250,00', 'Recebimento']]));
+
+    const merged = mergeTransactions([november, october]);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].date, '01/10/2026');
+    assert.equal(merged[1].date, '05/11/2026');
+  });
+
+  it('mantém lançamentos de mesmo valor com históricos diferentes', () => {
+    const a = buildSourceTransactions(recordsFrom([['01/10/2026', '-100,00', 'Taxa A']]));
+    const b = buildSourceTransactions(recordsFrom([['01/10/2026', '-100,00', 'Taxa B']]));
+
+    assert.equal(mergeTransactions([a, b]).length, 2);
   });
 });
 
