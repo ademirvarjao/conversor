@@ -1580,23 +1580,12 @@ function renderTopKey() {
   const hasKey = !!identity;
   const shown = hasKey ? formatAccessCode(identity.code) : '';
 
-  // Com a aba bloqueada a chave nem aparece: ela é o segredo do cofre.
+  // A chave é consultável por qualquer um: ela é a identidade do usuário, não
+  // uma senha de administração. O que a trava protege é a conexão do banco.
   button.classList.toggle('is-empty', !hasKey);
-  button.classList.toggle('is-locked', cloud.locked);
-  codeEl.textContent = cloud.locked ? '••••-••••' : hasKey ? shown : 'criar agora';
+  codeEl.textContent = hasKey ? shown : 'criar agora';
   if (dom['cloud-key-caption']) {
-    dom['cloud-key-caption'].textContent = cloud.locked
-      ? 'Nuvem bloqueada'
-      : hasKey
-        ? 'Chave de acesso'
-        : 'Chave para outro PC';
-  }
-
-  if (cloud.locked) {
-    const message = 'Nuvem bloqueada. Clique para entrar com login e senha.';
-    button.title = message;
-    button.setAttribute('aria-label', message);
-    return;
+    dom['cloud-key-caption'].textContent = hasKey ? 'Chave de acesso' : 'Chave para outro PC';
   }
 
   button.title = hasKey
@@ -1699,16 +1688,19 @@ function cloudStatusMessage(hasConfig, identity) {
 }
 
 /**
- * Mostra/esconde o portão de login e o conteúdo da aba Nuvem.
- * @returns {boolean} `true` quando a aba está desbloqueada
+ * Mostra/esconde a área de administração da conexão do banco.
+ *
+ * A trava NÃO esconde mais a nuvem inteira: a chave de acesso, o envio e o
+ * download continuam livres para todos. O que fica restrito é "quem manda o app
+ * falar com qual banco" (Project URL + chave pública), que é o único ponto que
+ * pode desviar os dados de todo mundo.
+ *
+ * @returns {boolean} `true` quando a área administrativa está liberada
  */
 function applyCloudLock() {
   const unlocked = !cloud.locked;
-  dom['cloud-panel']?.classList.toggle('hidden', !unlocked);
   dom['cloud-lock-gate']?.classList.toggle('hidden', unlocked);
-  if (dom['cloud-lock-user'] && !unlocked && !dom['cloud-lock-user'].value) {
-    dom['cloud-lock-user'].value = '';
-  }
+  dom['cloud-admin-panel']?.classList.toggle('hidden', !unlocked);
   return unlocked;
 }
 
@@ -1717,14 +1709,6 @@ function setCloudLockError(message) {
   if (!box) return;
   box.textContent = message || '';
   box.classList.toggle('hidden', !message);
-}
-
-/** Pede login e senha (usado ao abrir a aba e ao clicar na chave do topo). */
-function focusCloudLogin() {
-  if (!cloud.locked) return;
-  setCloudLockError('');
-  dom['cloud-lock-password'] && (dom['cloud-lock-password'].value = '');
-  dom['cloud-lock-user']?.focus();
 }
 
 async function submitCloudUnlock(event) {
@@ -1769,7 +1753,7 @@ async function submitCloudUnlock(event) {
     setCloudLockError('');
     if (dom['cloud-lock-password']) dom['cloud-lock-password'].value = '';
     renderCloudPanel();
-    showToast('Nuvem desbloqueada.', 'success');
+    showToast('Conexão do banco liberada nesta aba.', 'success');
   } catch (error) {
     setCloudLockError(error?.message || 'Não foi possível validar a senha.');
   } finally {
@@ -1780,10 +1764,8 @@ async function submitCloudUnlock(event) {
 function lockCloudPanel() {
   clearUnlock();
   cloud.locked = true;
-  cloud.ping = null;
   renderCloudPanel();
-  focusCloudLogin();
-  showToast('Nuvem bloqueada neste navegador.', 'warn');
+  showToast('Conexão do banco bloqueada de novo neste navegador.', 'warn');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1868,13 +1850,9 @@ async function leaveCloudAccount() {
 }
 
 function renderCloudPanel() {
-  const unlocked = applyCloudLock();
-  if (!unlocked) {
-    renderTopKey();
-    return;
-  }
-
+  applyCloudLock();
   renderCloudAccount();
+
 
   const hasConfig = !!cloud.config;
   const identity = cloud.identity;
@@ -1993,10 +1971,6 @@ async function pullNow({ silent = false } = {}) {
 }
 
 async function cloudPush({ silent = false } = {}) {
-  if (cloud.locked) {
-    if (!silent) showToast(CLOUD_LOCKED_MESSAGE, 'warn');
-    return;
-  }
   if (!cloud.config) {
     if (!silent) showToast('Configure o banco compartilhado primeiro.', 'warn');
     return;
@@ -2014,10 +1988,6 @@ async function cloudPush({ silent = false } = {}) {
 }
 
 async function cloudPull({ silent = false } = {}) {
-  if (cloud.locked) {
-    if (!silent) showToast(CLOUD_LOCKED_MESSAGE, 'warn');
-    return;
-  }
   if (!cloud.config || !cloud.identity) {
     if (!silent) showToast('Configure o banco e a chave de acesso primeiro.', 'warn');
     return;
@@ -2032,16 +2002,11 @@ async function cloudPull({ silent = false } = {}) {
 /** Envia em segundo plano depois de treinar (sem travar a interface). */
 let cloudPushTimer = null;
 
-/** Mensagem única para qualquer tentativa de sincronizar com a aba bloqueada. */
-const CLOUD_LOCKED_MESSAGE = 'Nuvem bloqueada: entre com login e senha na aba Nuvem para sincronizar.';
-
 /**
  * Envia em segundo plano depois de treinar (sem travar a interface). O timer é
  * único: várias alterações seguidas geram **um** envio, não um por alteração.
  */
 function scheduleCloudPush() {
-  // Trava fechada = nada sai deste navegador para a nuvem, nem em segundo plano.
-  if (cloud.locked) return;
   if (!cloud.config || !cloud.identity) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => {
@@ -2246,14 +2211,6 @@ function bindCloudEvents() {
 
   // A chave na barra superior: cria quando ainda não existe, copia quando existe.
   dom['btn-cloud-key']?.addEventListener('click', async () => {
-    // A chave de acesso é o segredo do cofre: com a aba bloqueada, o clique
-    // leva para o login em vez de criar/copiar a chave.
-    if (cloud.locked) {
-      activateModalTab('cloud');
-      focusCloudLogin();
-      showToast('Nuvem bloqueada: entre com login e senha para ver sua chave.', 'warn');
-      return;
-    }
     if (!cloud.identity) {
       await withCloudBusy(createAccessIdentity);
       return;
@@ -2303,15 +2260,7 @@ function bindCloudEvents() {
     }
   };
 
-  dom['btn-cloud-key-use']?.addEventListener('click', () => {
-    if (cloud.locked) {
-      activateModalTab('cloud');
-      focusCloudLogin();
-      showToast('Nuvem bloqueada: entre com login e senha para usar uma chave.', 'warn');
-      return;
-    }
-    submitTopKey();
-  });
+  dom['btn-cloud-key-use']?.addEventListener('click', submitTopKey);
 
   // Portão de entrada da aba Nuvem.
   dom['cloud-lock-form']?.addEventListener('submit', submitCloudUnlock);

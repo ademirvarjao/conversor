@@ -43,7 +43,6 @@ import {
 } from './exporters.js';
 import { formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
-import { loadUnlock } from './cloud-lock.js';
 import { formatAccessCode } from './sync-crypto.js';
 import {
   applyVaultPayload,
@@ -283,16 +282,6 @@ function counterpartyMemory() {
 /*                            Nuvem (modelos da IA)                           */
 /* -------------------------------------------------------------------------- */
 
-/**
- * A aba Nuvem do conversor é protegida por login e senha (`cloud-lock.js`).
- * Na conciliação a sincronização fica desativada enquanto a trava estiver
- * fechada: sem isso, qualquer pessoa que abrisse esta página poderia enviar ou
- * baixar o cofre de modelos.
- */
-function cloudUnlocked() {
-  return Boolean(loadUnlock());
-}
-
 function renderCloudState(message, tone = 'idle') {
   const element = dom['cp-cloud-state'];
   if (element) {
@@ -300,25 +289,12 @@ function renderCloudState(message, tone = 'idle') {
     element.dataset.tone = tone;
   }
   const hasIdentity = Boolean(cloud.identity && cloud.config);
-  const locked = !cloudUnlocked();
   for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
-    const button = dom[id];
-    if (!button) continue;
-    if (button.dataset.baseTitle === undefined) button.dataset.baseTitle = button.title || '';
-    button.disabled = !hasIdentity || locked || cloud.busy;
-    button.title = locked
-      ? 'Nuvem bloqueada: entre com login e senha na aba Nuvem da página inicial.'
-      : button.dataset.baseTitle;
+    if (dom[id]) dom[id].disabled = !hasIdentity || cloud.busy;
   }
 }
 
 async function pushModels({ silent = false } = {}) {
-  if (!cloudUnlocked()) {
-    if (!silent) {
-      showToast('Nuvem bloqueada: entre na aba Nuvem da página inicial para sincronizar.', 'warn');
-    }
-    return;
-  }
   if (!cloud.config || !cloud.identity) {
     if (!silent) showToast('Crie sua chave na página inicial para guardar os modelos na nuvem.', 'warn');
     return;
@@ -350,10 +326,6 @@ async function pushModels({ silent = false } = {}) {
 }
 
 async function pullModels() {
-  if (!cloudUnlocked()) {
-    showToast('Nuvem bloqueada: entre na aba Nuvem da página inicial para sincronizar.', 'warn');
-    return;
-  }
   if (!cloud.config || !cloud.identity) {
     showToast('Crie sua chave na página inicial para baixar os modelos da nuvem.', 'warn');
     return;
@@ -389,7 +361,6 @@ async function pullModels() {
 }
 
 function describeIdentity() {
-  if (!cloudUnlocked()) return 'Modelos: nuvem bloqueada — desbloqueie na página inicial';
   if (!cloud.identity) return 'Modelos: só neste navegador';
   const code = formatAccessCode(cloud.identity.code || '');
   return `Modelos: chave ${code || '—'}`;
