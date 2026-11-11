@@ -49,6 +49,14 @@ export function formatValuePlainBr(value) {
   return `${cents < 0 ? '-' : ''}${integer},${decimals}`;
 }
 
+/**
+ * Formato de exibição com separador de milhar e **sem** símbolo de moeda.
+ * Ex.: 1128118.12 -> "1.128.118,12" | -42 -> "-42,00".
+ */
+export function formatValueGroupedBr(value) {
+  return formatValueCurrencyBr(value).replace('R$ ', '');
+}
+
 /** Formato de exibição com símbolo de moeda e separador de milhar. */
 export function formatValueCurrencyBr(value) {
   const cents = toCents(value);

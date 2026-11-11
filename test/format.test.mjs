@@ -5,6 +5,7 @@ import {
   formatIsoToBrDate,
   formatLocalDateTime,
   formatValueCurrencyBr,
+  formatValueGroupedBr,
   formatValuePlainBr,
   fromCents,
   isoToUtcDate,
@@ -64,6 +65,17 @@ describe('formatValueCurrencyBr', () => {
     assert.equal(formatValueCurrencyBr(-1234.5), '-R$ 1.234,50');
     assert.equal(formatValueCurrencyBr(1000000), 'R$ 1.000.000,00');
     assert.equal(formatValueCurrencyBr(0), 'R$ 0,00');
+  });
+});
+
+describe('formatValueGroupedBr', () => {
+  it('usa ponto de milhar sem símbolo de moeda', () => {
+    assert.equal(formatValueGroupedBr(1128118.12), '1.128.118,12');
+    assert.equal(formatValueGroupedBr(1600389.76), '1.600.389,76');
+    assert.equal(formatValueGroupedBr(-1128118.12), '-1.128.118,12');
+    assert.equal(formatValueGroupedBr(472271.64), '472.271,64');
+    assert.equal(formatValueGroupedBr(999), '999,00');
+    assert.equal(formatValueGroupedBr(0), '0,00');
   });
 });
 
