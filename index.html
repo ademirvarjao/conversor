@@ -244,7 +244,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.4.0</span> — processamento 100% local no navegador.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.5.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -284,6 +284,7 @@
           <button class="mtab active" data-mtab="profiles" type="button" role="tab" aria-selected="true" aria-controls="mtab-profiles" id="tab-profiles">Layouts Memorizados</button>
           <button class="mtab" data-mtab="logs" type="button" role="tab" aria-selected="false" aria-controls="mtab-logs" id="tab-logs" tabindex="-1">Log de Aprendizado</button>
           <button class="mtab" data-mtab="settings" type="button" role="tab" aria-selected="false" aria-controls="mtab-settings" id="tab-settings" tabindex="-1">Backup / LLM Opcional</button>
+          <button class="mtab" data-mtab="cloud" type="button" role="tab" aria-selected="false" aria-controls="mtab-cloud" id="tab-cloud" tabindex="-1">Nuvem (Equipe)</button>
         </div>
 
         <div id="mtab-profiles" class="mtab-panel" role="tabpanel" aria-labelledby="tab-profiles"></div>
@@ -323,6 +324,85 @@
               <button id="btn-save-llm" class="btn btn-sm btn-primary" type="button">Salvar Configuração</button>
             </div>
           </div>
+        </div>
+
+        <div id="mtab-cloud" class="mtab-panel hidden" role="tabpanel" aria-labelledby="tab-cloud">
+          <div class="settings-block">
+            <h3>Modelos treinados no banco compartilhado</h3>
+            <p>
+              Os modelos aprendidos (pesos semânticos, perfis de layout e log) ficam em um banco
+              compartilhado, <strong>cifrados neste navegador</strong> com a sua chave de acesso. Os
+              arquivos e os lançamentos financeiros <strong>nunca</strong> saem daqui.
+            </p>
+            <p id="cloud-status" class="cloud-status" role="status">Carregando…</p>
+          </div>
+
+          <div class="settings-block">
+            <h3>1. Sua chave de acesso</h3>
+            <div id="cloud-identity-empty">
+              <p>
+                Sem senha e sem cadastro: a chave é a sua identidade. Ela também serve para
+                recuperar os modelos em outro computador.
+              </p>
+              <div class="btn-row">
+                <button id="btn-cloud-create" class="btn btn-sm btn-primary" type="button">Criar minha chave</button>
+              </div>
+              <div class="cloud-recover">
+                <div class="field-group">
+                  <label for="cloud-code-input">Já tenho uma chave de acesso</label>
+                  <input id="cloud-code-input" type="text" placeholder="ABCD-EFGH" maxlength="12" autocomplete="off" spellcheck="false" />
+                </div>
+                <button id="btn-cloud-recover" class="btn btn-sm btn-secondary" type="button">Entrar com a chave</button>
+              </div>
+            </div>
+
+            <div id="cloud-identity-active" class="hidden">
+              <p>Sua chave de acesso — guarde com você:</p>
+              <p class="cloud-code" id="cloud-code-display">--------</p>
+              <div class="btn-row">
+                <button id="btn-cloud-copy" class="btn btn-sm btn-secondary" type="button">Copiar chave</button>
+                <button id="btn-cloud-download" class="btn btn-sm btn-ghost-dark" type="button">Baixar cartão da chave</button>
+                <button id="btn-cloud-forget" class="btn btn-sm btn-danger-outline" type="button">Esquecer neste dispositivo</button>
+              </div>
+              <p class="cloud-hint">
+                Em outro computador, informe esta chave para recuperar seus modelos. Quem tiver a
+                chave acessa os modelos — não compartilhe.
+              </p>
+            </div>
+          </div>
+
+          <div class="settings-block">
+            <h3>2. Sincronizar</h3>
+            <div class="btn-row">
+              <button id="btn-cloud-push" class="btn btn-sm btn-primary" type="button">Enviar modelos</button>
+              <button id="btn-cloud-pull" class="btn btn-sm btn-secondary" type="button">Baixar modelos</button>
+            </div>
+            <p class="cloud-hint">
+              O envio acontece automaticamente depois de cada treinamento. O download substitui os
+              modelos deste navegador pelos da nuvem (a chave do LLM continua só aqui).
+            </p>
+          </div>
+
+          <details class="settings-block cloud-config" id="cloud-config-block">
+            <summary>Configuração do banco (administrador)</summary>
+            <p>
+              Crie um projeto no <strong>Supabase</strong>, rode o SQL de
+              <code>supabase/schema.sql</code> e cole abaixo a <em>Project URL</em> e a chave
+              <em>anon public</em>.
+            </p>
+            <div class="field-group">
+              <label for="cloud-url">Project URL</label>
+              <input id="cloud-url" type="url" placeholder="https://xxxxxxxx.supabase.co" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="field-group">
+              <label for="cloud-anon-key">Chave anônima (public)</label>
+              <input id="cloud-anon-key" type="password" placeholder="eyJhbGciOiJIUzI1NiIs..." autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="btn-row">
+              <button id="btn-cloud-save-config" class="btn btn-sm btn-primary" type="button">Salvar conexão</button>
+              <button id="btn-cloud-test" class="btn btn-sm btn-ghost-dark" type="button">Testar conexão</button>
+            </div>
+          </details>
         </div>
       </div>
     </div>

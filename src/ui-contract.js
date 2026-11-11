@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.4.0';
+export const APP_VERSION = '1.5.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -56,6 +56,7 @@ export const REQUIRED_ELEMENT_IDS = [
   'mtab-profiles',
   'mtab-logs',
   'mtab-settings',
+  'mtab-cloud',
   'btn-export-memory',
   'import-memory-input',
   'btn-reset-memory',
@@ -66,4 +67,21 @@ export const REQUIRED_ELEMENT_IDS = [
   'processing-banner',
   'processing-text',
   'app-version',
+  // Nuvem compartilhada (chave de acesso + banco de modelos)
+  'cloud-status',
+  'cloud-identity-empty',
+  'cloud-identity-active',
+  'cloud-code-display',
+  'cloud-code-input',
+  'btn-cloud-create',
+  'btn-cloud-recover',
+  'btn-cloud-copy',
+  'btn-cloud-download',
+  'btn-cloud-forget',
+  'btn-cloud-push',
+  'btn-cloud-pull',
+  'cloud-url',
+  'cloud-anon-key',
+  'btn-cloud-save-config',
+  'btn-cloud-test',
 ];

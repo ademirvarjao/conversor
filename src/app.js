@@ -15,6 +15,19 @@ import {
 import { formatLocalDateTime, formatValuePlainBr, sumValues } from './format.js';
 import { summarizeRecords } from './summary.js';
 import { exportToPdf, exportToXlsx } from './exporters.js';
+import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
+import {
+  applyVaultPayload,
+  clearIdentity,
+  loadCloudConfig,
+  loadIdentity,
+  pullVault,
+  pushVault,
+  restoreIdentityFromCode,
+  saveCloudConfig,
+  saveIdentity,
+  touchIdentitySync,
+} from './sync-vault.js';
 import { APP_VERSION, REQUIRED_ELEMENT_IDS } from './ui-contract.js';
 
 const PAGE_SIZE = 100;
@@ -43,6 +56,17 @@ const state = {
   currentPage: 1,
   exportOnlyFiltered: false,
   processing: false,
+};
+
+/**
+ * Estado da nuvem compartilhada: configuração do banco (URL + chave anônima) e
+ * a identidade deste navegador (chave de acesso + slot cifrado).
+ */
+const cloud = {
+  config: loadCloudConfig(),
+  identity: loadIdentity(),
+  busy: false,
+  statusTone: 'idle',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -778,6 +802,8 @@ function activateModalTab(tabName) {
   dom['mtab-profiles'].classList.toggle('hidden', tabName !== 'profiles');
   dom['mtab-logs'].classList.toggle('hidden', tabName !== 'logs');
   dom['mtab-settings'].classList.toggle('hidden', tabName !== 'settings');
+  dom['mtab-cloud']?.classList.toggle('hidden', tabName !== 'cloud');
+  if (tabName === 'cloud') renderCloudPanel();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -979,6 +1005,8 @@ function bindTrainerEvents() {
         : 'Layout aplicado, mas o navegador bloqueou o salvamento da memória.',
       saved ? 'success' : 'warn'
     );
+    // Com a nuvem conectada, o novo modelo sobe sozinho.
+    if (saved) scheduleCloudPush();
   });
 
   dom['btn-close-trainer']?.addEventListener('click', () => {
@@ -1255,6 +1283,305 @@ function bindModalEvents() {
   });
 }
 
+/* -------------------------------------------------------------------------- */
+/*                        Nuvem compartilhada (modelos)                       */
+/* -------------------------------------------------------------------------- */
+
+function setCloudStatus(message, tone = 'idle') {
+  const box = dom['cloud-status'];
+  if (!box) return;
+  box.textContent = message;
+  box.classList.remove('is-ok', 'is-warn', 'is-error');
+  if (tone === 'ok') box.classList.add('is-ok');
+  else if (tone === 'warn') box.classList.add('is-warn');
+  else if (tone === 'error') box.classList.add('is-error');
+  cloud.statusTone = tone;
+}
+
+function describeLastSync(identity) {
+  if (!identity?.lastSyncAt) return 'nenhuma sincronização ainda';
+  const date = new Date(identity.lastSyncAt);
+  if (Number.isNaN(date.getTime())) return 'nenhuma sincronização ainda';
+  return `última sincronização em ${date.toLocaleString('pt-BR')}`;
+}
+
+function renderCloudPanel() {
+  const hasConfig = !!cloud.config;
+  const identity = cloud.identity;
+
+  if (dom['cloud-url']) dom['cloud-url'].value = cloud.config?.url || '';
+  if (dom['cloud-anon-key']) dom['cloud-anon-key'].value = cloud.config?.anonKey || '';
+
+  dom['cloud-identity-empty']?.classList.toggle('hidden', !!identity);
+  dom['cloud-identity-active']?.classList.toggle('hidden', !identity);
+
+  if (identity && dom['cloud-code-display']) {
+    dom['cloud-code-display'].textContent = formatAccessCode(identity.code);
+  }
+
+  const disableActions = !hasConfig || !identity || cloud.busy;
+  for (const id of ['btn-cloud-push', 'btn-cloud-pull']) {
+    if (dom[id]) dom[id].disabled = disableActions;
+  }
+  // A chave de acesso é local: pode ser criada/informada mesmo antes de o
+  // administrador publicar a URL do banco.
+  if (dom['btn-cloud-create']) dom['btn-cloud-create'].disabled = cloud.busy;
+  if (dom['btn-cloud-recover']) dom['btn-cloud-recover'].disabled = cloud.busy;
+
+  if (cloud.busy) return;
+  if (!hasConfig) {
+    setCloudStatus(
+      'Banco compartilhado ainda não configurado. Peça a URL e a chave anônima ao administrador e cole em “Configuração do banco”.',
+      'warn'
+    );
+  } else if (!identity) {
+    setCloudStatus(
+      'Conectado ao banco, mas sem chave neste dispositivo. Crie uma chave nova ou informe a que você já usa.',
+      'warn'
+    );
+  } else {
+    setCloudStatus(
+      `Conectado como ${formatAccessCode(identity.code)} — ${describeLastSync(identity)}.`,
+      'ok'
+    );
+  }
+}
+
+async function withCloudBusy(task) {
+  if (cloud.busy) return;
+  cloud.busy = true;
+  renderCloudPanel();
+  try {
+    await task();
+  } finally {
+    cloud.busy = false;
+    renderCloudPanel();
+  }
+}
+
+/** Envia de fato (usado também dentro de fluxos que já estão "ocupados"). */
+async function pushNow({ silent = false } = {}) {
+  try {
+    const result = await pushVault({
+      config: cloud.config,
+      identity: cloud.identity,
+      memory: state.memory,
+      appVersion: APP_VERSION,
+    });
+    cloud.identity = touchIdentitySync({ ...cloud.identity }, result.updatedAt);
+    return result;
+  } catch (error) {
+    setCloudStatus(`Falha ao enviar: ${error.message}`, 'error');
+    if (!silent) showToast(`Falha ao enviar: ${error.message}`, 'error');
+    return null;
+  }
+}
+
+/** Baixa de fato e devolve `{ payload }`, `null` (vazio) ou `false` (erro). */
+async function pullNow({ silent = false } = {}) {
+  try {
+    const remote = await pullVault({ config: cloud.config, identity: cloud.identity });
+    if (!remote) {
+      setCloudStatus('Nenhum modelo encontrado para esta chave na nuvem.', 'warn');
+      if (!silent) showToast('Nada para baixar: a nuvem ainda não tem modelos desta chave.', 'warn');
+      return null;
+    }
+
+    state.memory = applyVaultPayload(state.memory, remote.payload);
+    saveAiMemory(state.memory);
+    updateAiBadge();
+    renderAiModal();
+    if (state.selectedFileId) openTrainerForFile(state.selectedFileId);
+    renderFilesList();
+
+    cloud.identity = touchIdentitySync({ ...cloud.identity }, remote.updatedAt);
+    showToast(
+      `Modelos restaurados da nuvem: ${state.memory.learnedProfiles.length} perfil(is) de layout.`
+    );
+    return remote;
+  } catch (error) {
+    setCloudStatus(`Falha ao baixar: ${error.message}`, 'error');
+    if (!silent) showToast(`Falha ao baixar: ${error.message}`, 'error');
+    return false;
+  }
+}
+
+async function cloudPush({ silent = false } = {}) {
+  if (!cloud.config) {
+    if (!silent) showToast('Configure o banco compartilhado primeiro.', 'warn');
+    return;
+  }
+  if (!cloud.identity) {
+    if (!silent) showToast('Crie ou informe sua chave de acesso primeiro.', 'warn');
+    return;
+  }
+
+  await withCloudBusy(async () => {
+    if (!silent) setCloudStatus('Enviando modelos para a nuvem…');
+    const result = await pushNow({ silent });
+    if (result && !silent) showToast('Modelos enviados para a nuvem.');
+  });
+}
+
+async function cloudPull({ silent = false } = {}) {
+  if (!cloud.config || !cloud.identity) {
+    if (!silent) showToast('Configure o banco e a chave de acesso primeiro.', 'warn');
+    return;
+  }
+
+  await withCloudBusy(async () => {
+    if (!silent) setCloudStatus('Baixando modelos da nuvem…');
+    await pullNow({ silent });
+  });
+}
+
+/** Envia em segundo plano depois de treinar (sem travar a interface). */
+function scheduleCloudPush() {
+  if (!cloud.config || !cloud.identity) return;
+  setTimeout(() => {
+    void cloudPush({ silent: true });
+  }, 900);
+}
+
+function downloadKeyCard(identity) {
+  const code = formatAccessCode(identity.code);
+  const content = [
+    'CONVERSOR — CARTÃO DE ACESSO À NUVEM',
+    '',
+    `Chave de acesso: ${code}`,
+    `Criada em: ${new Date(identity.createdAt).toLocaleString('pt-BR')}`,
+    '',
+    'Como usar:',
+    '1. Abra o Conversor em qualquer computador.',
+    '2. Vá em Memória da IA → aba "Nuvem (Equipe)".',
+    '3. Informe esta chave em "Já tenho uma chave de acesso".',
+    '',
+    'Guarde este cartão em local seguro: quem tiver a chave acessa seus modelos.',
+  ].join('\n');
+
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'conversor-chave-de-acesso.txt';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function bindCloudEvents() {
+  dom['btn-cloud-save-config']?.addEventListener('click', async () => {
+    const config = {
+      url: dom['cloud-url']?.value || '',
+      anonKey: dom['cloud-anon-key']?.value || '',
+    };
+    if (!saveCloudConfig(config)) {
+      showToast('Informe a Project URL e a chave anônima do Supabase.', 'warn');
+      return;
+    }
+    cloud.config = loadCloudConfig();
+    renderCloudPanel();
+    showToast('Conexão com o banco compartilhado salva.');
+  });
+
+  dom['btn-cloud-test']?.addEventListener('click', async () => {
+    const config = {
+      url: dom['cloud-url']?.value || '',
+      anonKey: dom['cloud-anon-key']?.value || '',
+    };
+    try {
+      const { pingDatabase } = await import('./sync-client.js');
+      await pingDatabase(config);
+      showToast('Conexão com o banco funcionando.', 'success');
+    } catch (error) {
+      showToast(`Falha no teste: ${error.message}`, 'error');
+    }
+  });
+
+  dom['btn-cloud-create']?.addEventListener('click', async () => {
+    await withCloudBusy(async () => {
+      try {
+        const code = generateAccessCode();
+        const identity = await restoreIdentityFromCode(code);
+        saveIdentity(identity);
+        cloud.identity = identity;
+        renderCloudPanel();
+        showToast(`Chave criada: ${formatAccessCode(code)}. Guarde-a para recuperar em outra máquina.`);
+        // Já publica o que existe localmente, para a equipe ver os modelos atuais.
+        if (cloud.config) await pushNow({ silent: true });
+      } catch (error) {
+        setCloudStatus(`Falha ao criar a chave: ${error.message}`, 'error');
+      }
+    });
+  });
+
+  dom['btn-cloud-recover']?.addEventListener('click', async () => {
+    const typed = dom['cloud-code-input']?.value || '';
+    const code = normalizeAccessCode(typed);
+    if (!code) {
+      showToast('Chave inválida: use os 8 caracteres no formato ABCD-EFGH.', 'warn');
+      return;
+    }
+
+    await withCloudBusy(async () => {
+      try {
+        const identity = await restoreIdentityFromCode(code);
+        saveIdentity(identity);
+        cloud.identity = identity;
+        if (dom['cloud-code-input']) dom['cloud-code-input'].value = '';
+        renderCloudPanel();
+        showToast(`Chave aceita: ${formatAccessCode(code)}. Baixando seus modelos…`);
+        const pulled = await pullNow({ silent: true });
+        if (pulled === null) {
+          setCloudStatus(
+            `Chave ${formatAccessCode(code)} criada neste dispositivo, mas a nuvem ainda não tem modelos para ela. ` +
+              'Se você já usava essa chave em outra máquina, confira se digitou certo — uma chave diferente abre um cofre novo.',
+            'warn'
+          );
+        } else if (pulled === false) {
+          cloud.identity = null;
+          clearIdentity();
+          renderCloudPanel();
+        }
+      } catch (error) {
+        clearIdentity();
+        cloud.identity = null;
+        renderCloudPanel();
+        setCloudStatus(`Não foi possível usar esta chave: ${error.message}`, 'error');
+      }
+    });
+  });
+
+  dom['btn-cloud-copy']?.addEventListener('click', async () => {
+    if (!cloud.identity) return;
+    const code = formatAccessCode(cloud.identity.code);
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast('Chave copiada.');
+    } catch {
+      showToast(`Copie manualmente: ${code}`, 'warn');
+    }
+  });
+
+  dom['btn-cloud-download']?.addEventListener('click', () => {
+    if (!cloud.identity) return;
+    downloadKeyCard(cloud.identity);
+    showToast('Cartão da chave baixado.');
+  });
+
+  dom['btn-cloud-forget']?.addEventListener('click', () => {
+    if (!window.confirm('Esquecer a chave neste dispositivo? Sem ela, os modelos da nuvem não podem ser recuperados.')) {
+      return;
+    }
+    clearIdentity();
+    cloud.identity = null;
+    renderCloudPanel();
+    showToast('Chave removida deste dispositivo.', 'warn');
+  });
+
+  dom['btn-cloud-push']?.addEventListener('click', () => cloudPush());
+  dom['btn-cloud-pull']?.addEventListener('click', () => cloudPull());
+}
+
 function bindGlobalEvents() {
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
@@ -1400,6 +1727,7 @@ function init() {
   bindTrainerEvents();
   bindOutputEvents();
   bindModalEvents();
+  bindCloudEvents();
   bindGlobalEvents();
 
   dom['btn-demo']?.addEventListener('click', runDemo);
@@ -1410,6 +1738,7 @@ function init() {
   });
   activateModalTab('profiles');
   dom['ai-modal']?.setAttribute('aria-hidden', 'true');
+  renderCloudPanel();
 
   renderFilesList();
   renderOutputSection();
