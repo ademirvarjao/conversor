@@ -61,6 +61,23 @@ export const ALL_ROLES = Object.values(ROLES);
 
 const VALUE_ROLES = [ROLES.VALUE_AUTO, ROLES.VALUE_OUT, ROLES.VALUE_IN];
 
+/**
+ * Cabeçalhos que indicam, sem ambiguidade, uma coluna de valor/saldo.
+ * Servem para não confundir "nº do documento" com montante.
+ */
+const AMOUNT_HEADER_RE =
+  /\b(valor|valores|vlr|vl|quantia|montante|pago|pagto|pgtos|pgto|recebido|recbto|debito|credito|saida|entrada|saidas|entradas|debitos|creditos|despesa|receita|tarifa|juros|saldo)\b/;
+
+/** Cabeçalhos de saldo/acumulado (valor de contexto, nunca lançamento). */
+const BALANCE_HEADER_RE = /\b(saldo|acumulado|subtotal)\b/;
+
+/** Sequências numéricas (nº do lançamento, ordem, código) não são valores. */
+const SEQUENCE_HEADER_RE = /\b(lancto|lcto|lanc|id|seq|sequencia|ordem|codigo|cod|nro|numero|num)\b/;
+
+/** Números de documento (nota, cheque, título) vão para o histórico. */
+const DOCUMENT_HEADER_RE =
+  /\b(documento|documentos|docto|doc|nf|nota|cheque|chq|titulo|autenticacao|protocolo)\b/;
+
 const BASE_TOKEN_WEIGHTS = {
   // Datas
   data: { date: 4.5 },
@@ -89,6 +106,11 @@ const BASE_TOKEN_WEIGHTS = {
   total: { ignore: 2.6, value_auto: 0.8 },
 
   // Saídas / Pagamentos / Débitos
+  pagto: { value_out: 4.4 },
+  pgtos: { value_out: 4.2 },
+  pagtos: { value_out: 4.2 },
+  pgto: { value_out: 4.4 },
+  pgt: { value_out: 4.0 },
   pago: { value_out: 3.8 },
   pagos: { value_out: 3.6 },
   pagar: { value_out: 3.5 },
@@ -101,6 +123,8 @@ const BASE_TOKEN_WEIGHTS = {
   despesas: { value_out: 3.4 },
   tarifa: { value_out: 2.2, history: 2.0 },
   aplicacao: { value_out: 1.2, history: 1.2 },
+  saque: { value_out: 2.4 },
+  saques: { value_out: 2.4 },
 
   // Entradas / Recebimentos / Créditos
   recebido: { value_in: 3.8 },
@@ -112,6 +136,11 @@ const BASE_TOKEN_WEIGHTS = {
   entrada: { value_in: 4.0 },
   entradas: { value_in: 3.8 },
   receita: { value_in: 3.5 },
+  recbto: { value_in: 4.4 },
+  recbtos: { value_in: 4.2 },
+  recebto: { value_in: 4.4 },
+  deposito: { value_in: 3.2 },
+  depositos: { value_in: 3.0 },
   resgate: { value_in: 1.2, history: 1.2 },
 
   // Indicador D/C
@@ -131,6 +160,13 @@ const BASE_TOKEN_WEIGHTS = {
   nf: { history: 3.5 },
   nota: { history: 3.0 },
   tipo: { history: 3.2 },
+  // Identificadores (nº do lançamento/documento) — nunca são montantes.
+  lancto: { history: 1.2, ignore: 1.2 },
+  lcto: { history: 1.2, ignore: 1.2 },
+  numero: { ignore: 1.8 },
+  nro: { ignore: 1.8 },
+  sequencia: { ignore: 2.0 },
+  seq: { ignore: 2.0 },
   fornecedor: { history: 4.2 },
   cliente: { history: 4.2 },
   favorecido: { history: 4.2 },
@@ -397,6 +433,11 @@ export function computeColumnProfiles(headers, rows, { sampleSize = 120 } = {}) 
     let explicitSignCount = 0;
     let dcCount = 0;
     let totalLen = 0;
+    let integerCount = 0;
+    let nonZeroCount = 0;
+    let sequencePairs = 0;
+    let sequenceRises = 0;
+    let lastMoney = null;
     const uniqueSet = new Set();
     const samples = [];
     const moneyValues = [];
@@ -423,8 +464,19 @@ export function computeColumnProfiles(headers, rows, { sampleSize = 120 } = {}) 
         if (money.value < 0) negCount++;
         if (money.value > 0) posCount++;
         if (money.hasExplicitSign) explicitSignCount++;
+        if (Number.isInteger(money.value)) integerCount++;
+        if (money.value !== 0) nonZeroCount++;
+        // Sequências (1, 2, 3...) crescem linha a linha; montantes, não.
+        if (lastMoney !== null) {
+          sequencePairs++;
+          if (money.value > lastMoney) sequenceRises++;
+        }
+        lastMoney = money.value;
       } else if (isDcText(text)) {
         dcCount++;
+        lastMoney = null;
+      } else {
+        lastMoney = null;
       }
     }
 
@@ -445,6 +497,13 @@ export function computeColumnProfiles(headers, rows, { sampleSize = 120 } = {}) 
       pctDC: dcCount / active,
       avgLen: totalLen / active,
       uniqueRatio: uniqueSet.size / active,
+      // Fração de linhas com valor diferente de zero (uma coluna de "Débito"
+      // preenchida com 0,00 nas linhas de crédito continua esparsa na prática).
+      pctNonZeroMoney: nonZeroCount / totalRows,
+      // Fração de valores "redondos" (sem centavos) — típico de documentos/IDs.
+      integerMoneyRatio: moneyCount ? integerCount / moneyCount : 0,
+      // Fração de pares consecutivos crescentes — típico de numeração sequencial.
+      sequenceRatio: sequencePairs ? sequenceRises / sequencePairs : 0,
       samples,
       moneyCount,
       dateCount,
@@ -456,6 +515,31 @@ export function computeColumnProfiles(headers, rows, { sampleSize = 120 } = {}) 
 /* -------------------------------------------------------------------------- */
 /*                         Classificação de papéis                            */
 /* -------------------------------------------------------------------------- */
+
+/** Sequência numérica (1, 2, 3...): inteiros, únicos e crescentes. */
+function looksLikeSequenceColumn(colStat) {
+  return (
+    colStat.moneyCount >= 5 &&
+    colStat.integerMoneyRatio >= 0.99 &&
+    colStat.pctExplicitSign === 0 &&
+    colStat.uniqueRatio >= 0.95 &&
+    colStat.sequenceRatio >= 0.85
+  );
+}
+
+/**
+ * Coluna de identificação (nº do lançamento, documento, código): parece valor
+ * pelos dados, mas nunca é montante.
+ */
+function isIdentifierColumn(colStat) {
+  if (!colStat) return false;
+  if (AMOUNT_HEADER_RE.test(colStat.normHeader)) return false;
+  return (
+    SEQUENCE_HEADER_RE.test(colStat.normHeader) ||
+    DOCUMENT_HEADER_RE.test(colStat.normHeader) ||
+    looksLikeSequenceColumn(colStat)
+  );
+}
 
 /**
  * Pontua cada função candidata combinando pesos léxicos aprendidos e evidência
@@ -514,6 +598,19 @@ export function scoreColumnRoles(colStat, tokenWeights) {
     scores[ROLES.VALUE_AUTO] -= 3.5;
     scores[ROLES.VALUE_OUT] -= 3.5;
     scores[ROLES.VALUE_IN] -= 3.5;
+  }
+
+  // 3.1) Identificadores: "Lancto", "Documento", "Nº" e sequências numéricas
+  // (inteiros, únicos e crescentes) nunca são montantes — sem esta penalidade,
+  // somaríamos o número do lançamento ao valor da linha.
+  const looksLikeIdentifier = isIdentifierColumn(colStat);
+
+  if (looksLikeIdentifier) {
+    for (const role of VALUE_ROLES) scores[role] -= 7;
+    if (SEQUENCE_HEADER_RE.test(colStat.normHeader) || looksLikeSequenceColumn(colStat)) {
+      scores[ROLES.IGNORE] += 3.2;
+    }
+    scores[ROLES.HISTORY] += 1.5;
   }
 
   if (colStat.pctDC >= 0.7 && colStat.avgLen <= 8) scores[ROLES.DC_FLAG] += 5.5;
@@ -601,6 +698,227 @@ function pickWinner(scores) {
   const [role, topScore] = ranked[0];
   return { role, topScore, margin: topScore - ranked[1][1] };
 }
+
+/* -------------------------------------------------------------------------- */
+/*                   Pares de colunas: entradas × saídas                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Bancos e sistemas contábeis costumam separar o movimento em duas colunas
+ * ("Pagto./Recbto.", "Débito/Crédito", "Saídas/Entradas"): cada linha traz o
+ * valor em UMA delas. Sem reconhecer o par, as duas viram "valor (+/-)" e os
+ * montantes são somados — produzindo números sem nenhum sentido.
+ *
+ * Aqui detectamos o par pela estrutura dos dados (exclusividade mútua entre as
+ * duas colunas) e decidimos qual é saída e qual é entrada por três sinais, em
+ * ordem de confiança: correlação com a coluna de saldo, semântica do cabeçalho
+ * e, por último, a posição (coluna mais à esquerda = saída).
+ */
+
+/** Valor monetário "com conteúdo" (ignora vazio e zeros). */
+function meaningfulMoney(cell) {
+  const money = parseMoneyValue(cell);
+  if (money === null) return null;
+  const value = Math.abs(money.value);
+  return value === 0 ? null : value;
+}
+
+function isBalanceColumn(colStat) {
+  if (!colStat) return false;
+  return BALANCE_HEADER_RE.test(colStat.normHeader) && !/valor/.test(colStat.normHeader);
+}
+
+/** Coluna que pode fazer parte de um par entradas × saídas. */
+function isPairCandidate(colStat, role) {
+  if (!colStat || role === ROLES.DATE) return false;
+  if (isBalanceColumn(colStat)) return false;
+  if (colStat.moneyCount < 3) return false;
+  if (colStat.pctMoney < 0.4) return false;
+  // Uma coluna praticamente sempre preenchida (com valor real, sem zeros)
+  // representa o valor da linha sozinha — não é metade de um par.
+  const meaningfulRatio = Number.isFinite(colStat.pctNonZeroMoney)
+    ? colStat.pctNonZeroMoney
+    : colStat.nonEmptyRatio;
+  return meaningfulRatio <= 0.97;
+}
+
+/** Evidência léxica de saída/entrada de uma coluna. */
+function lexicalSignEvidence(colStat, tokenWeights) {
+  const evidence = { out: 0, in: 0 };
+  const add = (token, factor = 1) => {
+    const weights = tokenWeights?.[token];
+    if (!weights) return;
+    evidence.out += (Number(weights[ROLES.VALUE_OUT]) || 0) * factor;
+    evidence.in += (Number(weights[ROLES.VALUE_IN]) || 0) * factor;
+  };
+  for (const token of colStat.tokens || []) add(token);
+  const compound = colStat.normHeader;
+  if (tokenWeights?.[compound] && !(colStat.tokens || []).includes(compound)) {
+    add(compound, 0.8);
+  }
+  return evidence;
+}
+
+/** Quão exclusivas são duas colunas (cada linha preenche só uma delas). */
+function pairExclusivity(rows, idxA, idxB) {
+  let onlyA = 0;
+  let onlyB = 0;
+  let both = 0;
+
+  for (const row of rows) {
+    const a = meaningfulMoney(row?.[idxA]) !== null;
+    const b = meaningfulMoney(row?.[idxB]) !== null;
+    if (a && b) both++;
+    else if (a) onlyA++;
+    else if (b) onlyB++;
+  }
+
+  const total = onlyA + onlyB + both;
+  return {
+    onlyA,
+    onlyB,
+    both,
+    total,
+    exclusivity: total ? (onlyA + onlyB) / total : 0,
+  };
+}
+
+/**
+ * Descobre o sentido de cada coluna comparando a variação do saldo entre
+ * linhas consecutivas com o valor lançado — o sinal mais confiável de todos,
+ * porque vem dos dados e não do texto do cabeçalho.
+ */
+function inferPairDirectionFromBalance(rows, idxA, idxB, balanceIdx) {
+  if (balanceIdx == null) return null;
+
+  let previous = null;
+  let votesA = 0;
+  let votesB = 0;
+
+  for (const row of rows) {
+    const balance = parseMoneyValue(row?.[balanceIdx]);
+    const current = balance === null ? null : round2(balance.value);
+    if (current === null) continue;
+
+    if (previous !== null) {
+      const delta = round2(current - previous);
+      const a = meaningfulMoney(row?.[idxA]) || 0;
+      const b = meaningfulMoney(row?.[idxB]) || 0;
+      const tolerance = 0.05;
+
+      if (a > 0 && b === 0) {
+        if (Math.abs(delta - a) <= tolerance) votesA += 1;
+        else if (Math.abs(delta + a) <= tolerance) votesA -= 1;
+      } else if (b > 0 && a === 0) {
+        if (Math.abs(delta - b) <= tolerance) votesB += 1;
+        else if (Math.abs(delta + b) <= tolerance) votesB -= 1;
+      }
+    }
+
+    previous = current;
+  }
+
+  const informative = Math.abs(votesA) + Math.abs(votesB);
+  if (informative < 4) return null;
+
+  // Votos positivos = a coluna aumenta o saldo (entrada/crédito).
+  const aIsCredit = votesA >= 2 && votesB <= -2;
+  const bIsCredit = votesB >= 2 && votesA <= -2;
+  if (!aIsCredit && !bIsCredit) return null;
+
+  return aIsCredit
+    ? { outIdx: idxB, inIdx: idxA, method: 'balance', strength: informative }
+    : { outIdx: idxA, inIdx: idxB, method: 'balance', strength: informative };
+}
+
+function resolvePairDirection(colStats, idxA, idxB, rows, balanceIdx, tokenWeights) {
+  const fromBalance = inferPairDirectionFromBalance(rows, idxA, idxB, balanceIdx);
+  if (fromBalance) return fromBalance;
+
+  const evidenceA = lexicalSignEvidence(colStats[idxA], tokenWeights);
+  const evidenceB = lexicalSignEvidence(colStats[idxB], tokenWeights);
+  const aAsOut = evidenceA.out + evidenceB.in; // A = saída, B = entrada
+  const bAsOut = evidenceA.in + evidenceB.out; // A = entrada, B = saída
+
+  if (Math.abs(aAsOut - bAsOut) >= 0.5) {
+    const strength = Math.abs(aAsOut - bAsOut);
+    return aAsOut > bAsOut
+      ? { outIdx: idxA, inIdx: idxB, method: 'lexical', strength }
+      : { outIdx: idxB, inIdx: idxA, method: 'lexical', strength };
+  }
+
+  // Convenção mais comum nos extratos brasileiros: débito à esquerda.
+  return {
+    outIdx: Math.min(idxA, idxB),
+    inIdx: Math.max(idxA, idxB),
+    method: 'position',
+    strength: 0,
+  };
+}
+
+/**
+ * Encontra pares de colunas que representam entradas e saídas separadamente.
+ * @returns {Array<{outIdx:number,inIdx:number,method:string,exclusivity:number}>}
+ */
+export function detectCreditDebitPairs(mappings, rows, tokenWeights) {
+  const safeMappings = Array.isArray(mappings) ? mappings : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const colStats = safeMappings.map((mapping) => mapping.stats);
+
+  const candidates = safeMappings
+    .filter((mapping) => isPairCandidate(mapping.stats, mapping.role))
+    .map((mapping) => mapping.colIdx);
+  if (candidates.length < 2) return [];
+
+  const balanceCandidates = safeMappings.filter(
+    (mapping) => isBalanceColumn(mapping.stats) && mapping.stats.moneyCount >= 3
+  );
+  balanceCandidates.sort((a, b) => b.stats.nonEmptyRatio - a.stats.nonEmptyRatio);
+  const balanceIdx = balanceCandidates.length > 0 ? balanceCandidates[0].colIdx : null;
+
+  const scored = [];
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = i + 1; j < candidates.length; j++) {
+      const info = pairExclusivity(safeRows, candidates[i], candidates[j]);
+      if (info.total < 6) continue;
+      if (info.onlyA < 2 || info.onlyB < 2) continue;
+      if (info.exclusivity < 0.85) continue;
+      scored.push({ a: candidates[i], b: candidates[j], info });
+    }
+  }
+  if (scored.length === 0) return [];
+
+  scored.sort(
+    (first, second) =>
+      second.info.exclusivity - first.info.exclusivity || second.info.total - first.info.total
+  );
+
+  const used = new Set();
+  const pairs = [];
+  for (const entry of scored) {
+    if (used.has(entry.a) || used.has(entry.b)) continue;
+    const direction = resolvePairDirection(
+      colStats,
+      entry.a,
+      entry.b,
+      safeRows,
+      balanceIdx,
+      tokenWeights
+    );
+    used.add(entry.a);
+    used.add(entry.b);
+    pairs.push({ ...direction, exclusivity: entry.info.exclusivity, coverage: entry.info.total });
+  }
+  return pairs;
+}
+
+const PAIR_REASON = {
+  balance: (other) => `Par entradas/saídas com "${other}" — sinal confirmado pelo saldo`,
+  lexical: (other) => `Par entradas/saídas com "${other}" — reconhecido pelo cabeçalho`,
+  position: (other) => `Par entradas/saídas com "${other}" — sentido presumido pela posição`,
+};
+
+const PAIR_CONFIDENCE = { balance: 93, lexical: 90, position: 70 };
 
 /**
  * Analisa um arquivo extraído (.pdf ou .xlsx) usando a memória da IA.
@@ -693,10 +1011,15 @@ export function analyzeFileLayout(parsedFile, memory) {
       const winner = pickWinner(scores);
       predictedRole = winner.role;
       confidence = Math.max(40, Math.min(97, Math.round(52 + winner.margin * 7)));
-      reason =
-        winner.role === ROLES.IGNORE
-          ? 'Padrão típico de saldo/total'
-          : `Maior evidência semântica (${winner.topScore.toFixed(1)} pts)`;
+      if (winner.role === ROLES.IGNORE) {
+        reason = isIdentifierColumn(stats)
+          ? 'Coluna de identificação (nº/sequência) — não é valor'
+          : isBalanceColumn(stats)
+            ? 'Padrão típico de saldo/total'
+            : 'Sem papel definido — coluna ignorada';
+      } else {
+        reason = `Maior evidência semântica (${winner.topScore.toFixed(1)} pts)`;
+      }
     }
 
     mappings.push({
@@ -740,6 +1063,53 @@ export function analyzeFileLayout(parsedFile, memory) {
       dateMappings[i].reason = 'Data secundária incorporada ao histórico';
     }
     warnings.push('Mais de uma coluna parece data; foi usada apenas a mais evidente.');
+  }
+
+  // 2.1) Colunas separadas de entradas e saídas (débito × crédito): cada linha
+  // traz o valor em uma OU outra. Reconhecer o par evita somar as duas colunas.
+  const creditDebitPairs = detectCreditDebitPairs(mappings, rows, safeMemory.tokenWeights);
+  for (const pair of creditDebitPairs) {
+    const outMapping = mappings.find((mapping) => mapping.colIdx === pair.outIdx);
+    const inMapping = mappings.find((mapping) => mapping.colIdx === pair.inIdx);
+    if (!outMapping || !inMapping) continue;
+
+    const describe = PAIR_REASON[pair.method] || PAIR_REASON.position;
+    const confidence = PAIR_CONFIDENCE[pair.method] || PAIR_CONFIDENCE.position;
+
+    outMapping.role = ROLES.VALUE_OUT;
+    outMapping.reason = describe(inMapping.header);
+    outMapping.confidence = Math.max(outMapping.confidence, confidence);
+
+    inMapping.role = ROLES.VALUE_IN;
+    inMapping.reason = describe(outMapping.header);
+    inMapping.confidence = Math.max(inMapping.confidence, confidence);
+
+    if (pair.method === 'position') {
+      warnings.push(
+        `Não foi possível confirmar qual coluna é entrada e qual é saída (` +
+          `"${outMapping.header}" × "${inMapping.header}"); confira o mapeamento.`
+      );
+    }
+  }
+
+  // 2.2) Somar duas colunas "valor (+/-)" é sempre um erro de leitura: mantém
+  // apenas a de maior evidência e avisa o usuário.
+  const autoValueMappings = mappings.filter((mapping) => mapping.role === ROLES.VALUE_AUTO);
+  if (autoValueMappings.length > 1) {
+    autoValueMappings.sort(
+      (first, second) =>
+        second.scores[ROLES.VALUE_AUTO] - first.scores[ROLES.VALUE_AUTO] ||
+        second.confidence - first.confidence
+    );
+    for (const mapping of autoValueMappings.slice(1)) {
+      mapping.role = ROLES.IGNORE;
+      mapping.reason = 'Segunda coluna de valor — ignorada para não somar';
+      mapping.confidence = Math.min(mapping.confidence, 55);
+      warnings.push(
+        `Mais de uma coluna parecia valor; "${mapping.header}" foi ignorada. ` +
+          'Ajuste o mapeamento se ela também precisar entrar no total.'
+      );
+    }
   }
 
   const hasValue = mappings.some((mapping) => VALUE_ROLES.includes(mapping.role));
