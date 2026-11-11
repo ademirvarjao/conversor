@@ -1,4 +1,4 @@
-# Conversor Custódio
+# Conversor
 
 [![Testes](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/tests.yml)
 [![Deploy](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml/badge.svg)](https://github.com/ademirvarjao/conversor-custodio/actions/workflows/deploy.yml)
@@ -72,7 +72,7 @@ A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitur
    ```bash
    git init
    git add .
-   git commit -m "feat: Conversor Custódio"
+   git commit -m "feat: Conversor"
    git branch -M main
    git remote add origin https://github.com/SEU-USUARIO/conversor-custodio.git
    git push -u origin main
