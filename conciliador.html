@@ -127,18 +127,33 @@
 
       <div class="cp-account-bar">
         <div class="cp-account-main">
-          <label for="cp-account-input" class="cp-account-label">Conta de contrapartida</label>
-          <input
-            id="cp-account-input"
-            class="cp-account-input"
-            type="text"
-            inputmode="numeric"
-            placeholder="Ex.: 500046 ou 5.00.046"
-            autocomplete="off"
-            spellcheck="false"
-            aria-describedby="cp-account-hint"
-          />
-          <button id="btn-cp-account-apply" class="btn btn-sm btn-primary" type="button">Aplicar conta</button>
+          <div class="cp-account-field">
+            <label for="cp-debit-account-input" class="cp-account-label">Débitos vazios</label>
+            <input
+              id="cp-debit-account-input"
+              class="cp-account-input"
+              type="text"
+              inputmode="numeric"
+              placeholder="Ex.: 500046 ou 5.00.046"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="cp-account-hint"
+            />
+          </div>
+          <div class="cp-account-field">
+            <label for="cp-credit-account-input" class="cp-account-label">Créditos vazios</label>
+            <input
+              id="cp-credit-account-input"
+              class="cp-account-input"
+              type="text"
+              inputmode="numeric"
+              placeholder="Ex.: 500046 ou 5.00.046"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="cp-account-hint"
+            />
+          </div>
+          <button id="btn-cp-account-apply" class="btn btn-sm btn-primary" type="button">Aplicar contas</button>
         </div>
 
         <div class="cp-account-scope" role="radiogroup" aria-label="Onde aplicar a conta de contrapartida">
@@ -157,14 +172,15 @@
         </div>
 
         <p id="cp-account-hint" class="cp-account-hint" role="status">
-          A contrapartida completa o <strong>outro lado</strong> do lançamento: em recebimentos (crédito) ela vai para o
-          <strong>débito</strong>; em pagamentos (débito) ela vai para o <strong>crédito</strong>. Deixe o campo vazio e
-          aplique para limpar.
+          Cada campo preenche só a coluna que está vazia: <strong>Débitos vazios</strong> vai para a coluna
+          <strong>debito</strong>; <strong>Créditos vazios</strong>, para a coluna <strong>credito</strong>. A conta que
+          veio do cadastro do contato nunca é substituída. Deixe os dois campos vazios e aplique para limpar o que foi
+          digitado à mão.
         </p>
         <p class="cp-account-hint">
           Nas colunas <strong>debito</strong> e <strong>credito</strong> da tabela, as células vazias aceitam digitação:
-          clique e informe a conta para completar o lançamento. Contas que vieram do cadastro do contato não são
-          substituídas por ali.
+          clique e informe a conta para completar um lançamento específico. Contas que vieram do cadastro do contato não
+          são substituídas por ali.
         </p>
       </div>
 
@@ -255,7 +271,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.9.5</span> — os arquivos nunca saem do navegador;
+        Conversor <span id="app-version" class="footer-version">v1.9.6</span> — os arquivos nunca saem do navegador;
         só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.
       </p>
       <p>Layout da conciliação: <code>data</code> | <code>debito</code> | <code>credito</code> | <code>valor</code> | <code>historico</code>.</p>
