@@ -2052,8 +2052,14 @@ body {
 .cp-account-main {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
+}
+
+.cp-account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .cp-account-label {
@@ -2063,7 +2069,7 @@ body {
 }
 
 .cp-account-input {
-  width: min(260px, 100%);
+  width: min(200px, 100%);
   padding: 8px 12px;
   border: 1.5px solid var(--border-strong);
   border-radius: 9px;

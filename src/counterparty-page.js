@@ -104,7 +104,8 @@ const REQUIRED_IDS = [
   'cp-kpi-value',
   'cp-kpi-review',
   'cp-search',
-  'cp-account-input',
+  'cp-debit-account-input',
+  'cp-credit-account-input',
   'btn-cp-account-apply',
   'cp-selected-count',
   'cp-account-hint',
@@ -756,21 +757,32 @@ function accountTargets(scope) {
 }
 
 function describeScope(scope, count) {
-  if (scope === 'filtered') return `todos os ${count} filtrado(s)`;
-  if (scope === 'empty') return `os ${count} sem contrapartida`;
-  return `os ${count} selecionado(s)`;
+  if (scope === 'filtered') return `nos ${count} filtrados`;
+  if (scope === 'empty') return `nos ${count} sem contrapartida`;
+  return `nos ${count} selecionados`;
 }
 
-/** Aplica a conta de contrapartida em lote, conforme o escopo escolhido. */
+/** Conta digitada num dos campos do lote (débito ou crédito), já sem pontuação. */
+function batchAccount(side) {
+  return contactCode(dom[side === 'credit' ? 'cp-credit-account-input' : 'cp-debit-account-input']?.value ?? '');
+}
+
+/**
+ * Aplica as contas do lote, conforme o escopo escolhido.
+ *
+ * São dois campos independentes: um preenche as **colunas de débito** vazias e
+ * o outro as de **crédito** vazias. Um campo em branco não mexe na coluna do
+ * outro; com os dois em branco, a ação limpa o que foi digitado à mão.
+ */
 function applyAccountBatch() {
   if (state.rows.length === 0) {
-    showToast('Concilie os arquivos antes de informar a contrapartida.', 'warn');
+    showToast('Concilie os arquivos antes de informar as contas.', 'warn');
     return;
   }
 
-  const raw = dom['cp-account-input']?.value ?? '';
-  const account = contactCode(raw);
-  const clearing = !account;
+  const debit = batchAccount('debit');
+  const credit = batchAccount('credit');
+  const clearing = !debit && !credit;
 
   const scope = selectedScope();
   const targets = accountTargets(scope);
@@ -784,22 +796,44 @@ function applyAccountBatch() {
     return;
   }
 
-  for (const row of targets) applyRowAccount(row, account);
+  const parts = [];
+  for (const [side, account] of [
+    ['debit', debit],
+    ['credit', credit],
+  ]) {
+    if (!account && !clearing) continue;
+
+    let changed = 0;
+    for (const row of targets) {
+      const before = side === 'credit' ? row.creditAccount : row.debitAccount;
+      setRowCellAccount(row, side, account);
+      const after = side === 'credit' ? row.creditAccount : row.debitAccount;
+      if (before !== after) changed += 1;
+    }
+
+    const label = side === 'credit' ? 'crédito' : 'débito';
+    if (changed > 0) parts.push(account ? `${label} ${account} em ${changed}` : `limpeza no ${label} em ${changed}`);
+  }
 
   state.stats = summarizeReconciliation(state.rows);
   render();
 
-  if (dom['cp-account-hint']) {
-    dom['cp-account-hint'].textContent = clearing
-      ? `Contrapartida removida de ${describeScope(scope, targets.length)}.`
-      : `Contrapartida ${account} aplicada a ${describeScope(scope, targets.length)} — nos recebimentos foi para débito; nos pagamentos, para crédito.`;
+  if (parts.length === 0) {
+    const message = clearing
+      ? 'Nada para limpar: as células desse escopo vieram do cadastro do contato.'
+      : 'Nenhuma célula vazia nesse escopo — as contas já estão preenchidas.';
+    if (dom['cp-account-hint']) dom['cp-account-hint'].textContent = message;
+    showToast(message, 'warn');
+    return;
   }
 
-  showToast(
-    clearing
-      ? `Contrapartida removida de ${targets.length} lançamento(s).`
-      : `Contrapartida ${account} aplicada a ${targets.length} lançamento(s).`
-  );
+  const summary = parts.join(' • ');
+  if (dom['cp-account-hint']) {
+    dom['cp-account-hint'].textContent = clearing
+      ? `Contas digitadas à mão removidas — ${summary}.`
+      : `Aplicado ${describeScope(scope, targets.length)} — ${summary}.`;
+  }
+  showToast(clearing ? `Contas digitadas à mão removidas — ${summary}.` : `Contas aplicadas — ${summary}.`);
 }
 
 /**
@@ -1099,12 +1133,14 @@ function bindEvents() {
   });
 
   dom['btn-cp-account-apply']?.addEventListener('click', applyAccountBatch);
-  dom['cp-account-input']?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      applyAccountBatch();
-    }
-  });
+  for (const id of ['cp-debit-account-input', 'cp-credit-account-input']) {
+    dom[id]?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyAccountBatch();
+      }
+    });
+  }
 
   dom['btn-cp-link-account']?.addEventListener('click', applyAccountToLinkingRow);
   dom['cp-link-account-input']?.addEventListener('keydown', (event) => {
