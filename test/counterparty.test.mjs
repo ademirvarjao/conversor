@@ -7,6 +7,7 @@ import {
   buildContactsFromLines,
   buildContactsFromTable,
   buildSourceTransactions,
+  contactCode,
   contactSummary,
   historyCore,
   learnFromReconciliation,
@@ -247,6 +248,20 @@ describe('conciliação de clientes e fornecedores', () => {
     assert.equal(rows[1].creditCents, 320000);
     assert.equal(rows[1].debitCents, 0);
     assert.ok(rows.every((row) => row.valueCents > 0));
+
+    // Débito/crédito levam a conta do contato (`contactb`) sem pontuação.
+    assert.equal(rows[0].debitAccount, '5086959');
+    assert.equal(rows[0].creditAccount, '');
+    assert.equal(rows[1].creditAccount, '1000077');
+    assert.equal(rows[1].debitAccount, '');
+  });
+
+  it('remove a pontuação do código do contato', () => {
+    assert.equal(contactCode('5.00.046'), '500046');
+    assert.equal(contactCode('1.000.077'), '1000077');
+    assert.equal(contactCode('5.086.959'), '5086959');
+    assert.equal(contactCode(''), '');
+    assert.equal(contactCode(null), '');
   });
 
   it('não cruza natureza: pagamento não usa cadastro de cliente', () => {

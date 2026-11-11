@@ -18,6 +18,7 @@ import {
   buildContactsFromLines,
   buildContactsFromTable,
   candidatesFor,
+  contactCode,
   contactSummary,
   learnFromReconciliation,
   learnManualLink,
@@ -498,8 +499,8 @@ function renderRows() {
         (row) => `
         <tr data-cp-row="${row.id}">
           <td class="col-date">${escapeHtml(row.date || '')}</td>
-          <td class="col-money">${row.debitCents ? escapeHtml(formatValuePlainBr(row.debitCents / 100)) : '—'}</td>
-          <td class="col-money">${row.creditCents ? escapeHtml(formatValuePlainBr(row.creditCents / 100)) : '—'}</td>
+          <td class="col-account">${escapeHtml(row.debitAccount || '—')}</td>
+          <td class="col-account">${escapeHtml(row.creditAccount || '—')}</td>
           <td class="col-money"><strong>${escapeHtml(formatValuePlainBr(row.valueCents / 100))}</strong></td>
           <td class="col-hist">
             <span class="cp-history">${escapeHtml(row.history)}</span><br />
@@ -662,7 +663,7 @@ function renderCandidates() {
         <span class="cp-candidate-info">
           <span class="cp-candidate-name">${escapeHtml(entry.contact.name)}</span>
           <span class="cp-candidate-meta">
-            ${escapeHtml(entry.contact.code)} • ${escapeHtml(NATUREZA_LABELS[entry.contact.natureza] || entry.contact.natureza)}${
+            ${escapeHtml(contactCode(entry.contact.code))} • ${escapeHtml(NATUREZA_LABELS[entry.contact.natureza] || entry.contact.natureza)}${
               entry.score ? ` • ${Math.round(entry.score * 100)}%` : ''
             }
           </span>
@@ -704,6 +705,10 @@ function applyLink(code) {
   row.score = 1;
   row.learnedAlias = false;
   row.history = linkHistory(row.rawHistory, contact);
+
+  const account = contactCode(contact.code);
+  row.debitAccount = row.direction === DIRECTION.PAYMENT ? account : '';
+  row.creditAccount = row.direction === DIRECTION.PAYMENT ? '' : account;
 
   state.memory.counterparties = learnManualLink(state.memory, { history: row.rawHistory, contact });
   saveAiMemory(state.memory);

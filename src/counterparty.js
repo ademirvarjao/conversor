@@ -347,6 +347,14 @@ export function buildSourceTransactions(records) {
 }
 
 /**
+ * Código do contato como o ERP espera nas colunas de débito/crédito: só dígitos.
+ * `5.00.046` → `500046`.
+ */
+export function contactCode(code) {
+  return String(code ?? '').replace(/[^0-9]/g, '');
+}
+
+/**
  * Converte a tabela do extrato (PDF ou .xlsx) em lançamentos prontos para a
  * conciliação. As colunas são achadas pelo cabeçalho e, quando ele não ajuda,
  * pelas posições clássicas (data | valor | histórico).
@@ -667,6 +675,10 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
     const contact = best.contact;
 
     const amountCents = Math.abs(transaction.amountCents);
+    // Débito/crédito carregam a conta do contato (coluna `contactb` do Questor,
+    // sem pontuação), escolhida pela natureza: pagamento → fornecedor credora
+    // (débito); recebimento → cliente devedora (crédito).
+    const account = contact ? contactCode(contact.code) : '';
     rows.push({
       date: transaction.date,
       dateIso: transaction.dateIso,
@@ -674,6 +686,8 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
       debitCents: isPayment ? amountCents : 0,
       creditCents: isPayment ? 0 : amountCents,
       valueCents: amountCents,
+      debitAccount: isPayment ? account : '',
+      creditAccount: isPayment ? '' : account,
       history: linkHistory(transaction.history, contact),
       rawHistory: transaction.history,
       sourceFile: transaction.sourceFile,

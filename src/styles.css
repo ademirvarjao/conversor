@@ -2025,3 +2025,12 @@ body {
   font-weight: 600;
 }
 
+
+.data-table th.col-account,
+.data-table td.col-account {
+  text-align: center;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
