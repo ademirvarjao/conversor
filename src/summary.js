@@ -1,5 +1,5 @@
 /**
- * Conversor Custódio — Totalizadores da conciliação.
+ * Conversor — Totalizadores da conciliação.
  * Centraliza o cálculo para que tela, PDF e testes usem exatamente a mesma regra.
  */
 

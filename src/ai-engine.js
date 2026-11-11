@@ -1,5 +1,5 @@
 /**
- * Conversor Custódio — Motor de IA Adaptativa para Layouts
+ * Conversor — Motor de IA Adaptativa para Layouts
  *
  * Combina quatro camadas:
  *  1. Classificador semântico multi-sinal (estatística das colunas + pesos léxicos aprendidos)
@@ -27,7 +27,14 @@ import {
   toCents,
 } from './format.js';
 
-export const STORAGE_KEY = 'conversor_custodio_ai_memory_v1';
+export const STORAGE_KEY = 'conversor_ai_memory_v1';
+
+/**
+ * Chaves de memória de versões anteriores do app são adotadas pelo formato do
+ * nome (`*_ai_memory_vN`), sem lista fixa de nomes antigos: assim a memória de
+ * quem já usava o Conversor não se perde ao trocar o nome do produto.
+ */
+const LEGACY_MEMORY_KEY = /(?:^|_)ai_memory_v\d+$/;
 export const MEMORY_VERSION = 2;
 
 /** Limites de segurança para o aprendizado online. */
@@ -347,11 +354,59 @@ export function loadAiMemory() {
   try {
     if (!hasLocalStorage()) return createDefaultMemory();
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createDefaultMemory();
+    if (!raw) return adoptLegacyMemory() || createDefaultMemory();
     return normalizeMemory(JSON.parse(raw));
   } catch {
     return createDefaultMemory();
   }
+}
+
+/** Lista as chaves do armazenamento (Storage nativo ou dublê de teste). */
+function storageKeys(store) {
+  const keys = [];
+  try {
+    if (typeof store.key === 'function' && typeof store.length === 'number') {
+      for (let index = 0; index < store.length; index += 1) {
+        const key = store.key(index);
+        if (typeof key === 'string') keys.push(key);
+      }
+      return keys;
+    }
+  } catch {
+    /* cai no plano B */
+  }
+  try {
+    return Object.keys(store);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Migração silenciosa: se a memória estiver só numa chave antiga, ela é lida,
+ * normalizada e regravada na chave atual — a antiga fica intacta como reserva.
+ */
+function adoptLegacyMemory() {
+  try {
+    if (!hasLocalStorage()) return null;
+    for (const key of storageKeys(localStorage)) {
+      if (key === STORAGE_KEY || !LEGACY_MEMORY_KEY.test(key)) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      const adopted = normalizeMemory(parsed);
+      saveAiMemory(adopted);
+      return adopted;
+    }
+  } catch {
+    /* qualquer falha aqui só significa "começar do zero" */
+  }
+  return null;
 }
 
 /**
