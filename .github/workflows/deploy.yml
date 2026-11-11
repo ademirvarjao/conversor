@@ -40,14 +40,71 @@ jobs:
       - name: Checkout do repositório
         uses: actions/checkout@v4
 
+      # O site do GitHub Pages precisa existir antes do deploy. O GITHUB_TOKEN
+      # não consegue criá-lo (isso exige permissão de administração), por isso
+      # conferimos antes e explicamos o que fazer, em vez de falhar sem motivo
+      # aparente. Quem preferir automatizar pode criar o secret PAGES_TOKEN
+      # (PAT com permissão de Pages).
+      - name: Verificar disponibilidade do GitHub Pages
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_TOKEN: ${{ secrets.PAGES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PAGES_TOKEN:-}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Secret PAGES_TOKEN encontrado: o Pages será habilitado/publicado com ele."
+          elif gh api "repos/${GITHUB_REPOSITORY}/pages" >/dev/null 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages já está habilitado neste repositório."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## ⚠️ GitHub Pages ainda não está habilitado"
+              echo ""
+              echo "O repositório não tem um site do Pages configurado, então não há para onde publicar."
+              echo ""
+              echo "**Para corrigir (leva ~10 segundos):**"
+              echo ""
+              echo "1. Abra [Settings → Pages](https://github.com/${GITHUB_REPOSITORY}/settings/pages)."
+              echo "2. Em **Build and deployment → Source**, escolha **GitHub Actions**."
+              echo "3. Rode este workflow novamente (Actions → *Deploy Conversor Custódio para GitHub Pages* → **Run workflow**)."
+              echo ""
+              echo "Alternativa automatizada: criar um secret \`PAGES_TOKEN\` com um PAT que tenha permissão de Pages;"
+              echo "nesse caso o próprio workflow habilita o site."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=GitHub Pages desabilitado::Ative em Settings > Pages > Source: GitHub Actions e rode o workflow novamente."
+          fi
+
+      # `enablement` só tem efeito com um token diferente do GITHUB_TOKEN.
       - name: Configurar GitHub Pages
+        if: steps.pages.outputs.ready == 'true'
         uses: actions/configure-pages@v5
+        with:
+          enablement: ${{ secrets.PAGES_TOKEN != '' }}
+          token: ${{ secrets.PAGES_TOKEN || github.token }}
+
+      # Publica apenas o que o navegador precisa: nada de testes, scripts de
+      # desenvolvimento, workflows ou metadados do Git.
+      - name: Preparar arquivos estáticos
+        if: steps.pages.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp -R index.html src vendor _site/
+          cp -f README.md LICENSE _site/ 2>/dev/null || true
+          touch _site/.nojekyll
+          echo "Arquivos publicados:"
+          find _site -maxdepth 2 -type f | sort | head -30
 
       - name: Enviar arquivos estáticos
+        if: steps.pages.outputs.ready == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: '_site'
 
       - name: Publicar no GitHub Pages
         id: deployment
+        if: steps.pages.outputs.ready == 'true'
         uses: actions/deploy-pages@v4
