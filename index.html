@@ -30,9 +30,6 @@
       </div>
 
       <div class="topbar-actions">
-        <button id="btn-demo" class="btn btn-ghost" type="button" title="Testar com arquivos simulados de layout variável">
-          Testar Exemplo IA
-        </button>
         <div class="key-access">
           <button
             id="btn-cloud-key"
@@ -59,6 +56,27 @@
           >
             ?
           </button>
+
+          <div class="key-paste">
+            <input
+              id="cloud-key-top-input"
+              class="key-paste-input"
+              type="text"
+              placeholder="Colar chave de outro PC"
+              aria-label="Colar a chave de acesso de outro computador"
+              maxlength="12"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button
+              id="btn-cloud-key-use"
+              class="btn btn-sm btn-key-use"
+              type="button"
+              title="Entrar com a chave colada"
+            >
+              Usar
+            </button>
+          </div>
         </div>
 
         <button id="btn-ai-memory" class="btn btn-outline-light" type="button" aria-haspopup="dialog">
@@ -272,7 +290,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.6.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.7.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>

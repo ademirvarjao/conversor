@@ -42,6 +42,20 @@ describe('index.html x controlador', () => {
     assert.ok(html.includes('type="module"'), 'app.js precisa ser carregado como módulo');
   });
 
+  it('permite colar a chave de outro computador na barra superior', () => {
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    assert.ok(header.includes('id="cloud-key-top-input"'), 'falta o campo para colar a chave');
+    assert.ok(header.includes('id="btn-cloud-key-use"'), 'falta o botão que usa a chave colada');
+    assert.match(header, /Colar chave/i);
+  });
+
+  it('não expõe mais o botão de exemplo simulado', async () => {
+    const app = await readFile(path.join(ROOT, 'src/app.js'), 'utf8');
+    assert.equal(html.includes('btn-demo'), false, 'o botão de demonstração saiu do HTML');
+    assert.equal(app.includes('btn-demo'), false, 'o controlador não deve ligar eventos do botão removido');
+    assert.equal(app.includes('runDemo'), false, 'a função de demonstração foi removida');
+  });
+
   it('mostra a chave de acesso na barra superior, com aviso de uso em outro computador', () => {
     const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
     assert.ok(header.includes('id="btn-cloud-key"'), 'a chave deve ficar visível no topo');
