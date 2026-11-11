@@ -178,7 +178,9 @@ test('o banco embutido no app, quando preenchido, é válido', () => {
 
   assert.equal(hasBuiltInCloudConfig(), true);
   assert.match(builtIn.url, /^https:\/\/[a-z0-9-]+\.supabase\.co$/i);
-  assert.ok(builtIn.anonKey.length >= 100, 'a chave anônima é um JWT longo');
+  // Aceita tanto a chave anônima legada (JWT `eyJ...`) quanto a publishable
+  // key dos projetos novos (`sb_publishable_...`).
+  assert.match(builtIn.anonKey, /^(eyJ|sb_publishable_)/, 'chave pública do Supabase');
   // Sem conexão salva neste navegador, o app usa o banco embutido.
   assert.deepEqual(loadCloudConfig(fakeStorage()), builtIn);
 });
