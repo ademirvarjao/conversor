@@ -419,53 +419,30 @@ export const ROW_STATUS = {
   AMBIGUOUS: 'ambiguous',
   UNMATCHED: 'unmatched',
   MANUAL: 'manual',
-  MANUAL_ACCOUNT: 'manualAccount',
 };
 
-/** Procura no cadastro o contato cuja conta (`contactb`) bate com a digitada. */
-export function findContactByAccount(contacts, account, direction) {
-  const digits = contactCode(account);
-  if (!digits) return null;
-
-  const natureza = direction === DIRECTION.PAYMENT ? NATUREZA.CREDORA : NATUREZA.DEVEDORA;
-  return (
-    (contacts || []).find(
-      (contact) => contactCode(contact.code) === digits && contact.natureza === natureza
-    ) || null
-  );
-}
-
 /**
- * Aplica uma conta de contrapartida digitada à mão numa linha.
+ * Aplica a **conta de contrapartida** digitada à mão numa linha.
  *
- * A coluna usada continua dependendo da direção (pagamento → débito,
- * recebimento → crédito). Se a conta existir no cadastro, o contato é vinculado
- * junto (e o histórico ganha o nome); se não existir, a conta fica só na linha,
- * marcada como manual.
+ * A contrapartida não substitui a conta do contato: ela complementa a coluna
+ * vazia ao lado. O lançamento tem duas pontas —
+ *   - pagamento: débito = fornecedor (credora), então a contrapartida vai no
+ *     **crédito** (banco/caixa);
+ *   - recebimento: crédito = cliente (devedora), então a contrapartida vai no
+ *     **débito**.
+ *
+ * Sem conta informada, a contrapartida da linha é limpa.
  */
-export function applyRowAccount(row, rawAccount, contact = null) {
+export function applyRowAccount(row, rawAccount) {
+  if (!row) return row;
+
   const account = contactCode(rawAccount);
-  if (!row || !account) return row;
-
   const isPayment = row.direction === DIRECTION.PAYMENT;
-  row.debitAccount = isPayment ? account : '';
-  row.creditAccount = isPayment ? '' : account;
 
-  if (contact) {
-    row.contact = {
-      code: contact.code,
-      name: contact.name,
-      natureza: contact.natureza,
-      classification: contact.classification,
-    };
-    row.history = linkHistory(row.rawHistory, contact);
-    row.status = ROW_STATUS.MANUAL;
-  } else if (!row.contact) {
-    row.status = ROW_STATUS.MANUAL_ACCOUNT;
-  }
+  if (isPayment) row.creditAccount = account;
+  else row.debitAccount = account;
 
-  row.score = 1;
-  row.learnedAlias = false;
+  row.counterpartAccount = account;
   return row;
 }
 
@@ -803,6 +780,7 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
       valueCents: amountCents,
       debitAccount: isPayment ? account : '',
       creditAccount: isPayment ? '' : account,
+      counterpartAccount: '',
       history: linkHistory(transaction.history, contact),
       rawHistory: transaction.history,
       sourceFile: transaction.sourceFile,
@@ -867,12 +845,7 @@ export function summarizeReconciliation(rows) {
   };
 
   for (const row of rows) {
-    if (
-      row.status === 'matched' ||
-      row.status === 'manual' ||
-      row.status === 'learned' ||
-      row.status === 'manualAccount'
-    ) {
+    if (row.status === 'matched' || row.status === 'manual' || row.status === 'learned') {
       stats.matched += 1;
     }
     else if (row.status === 'ambiguous') stats.ambiguous += 1;

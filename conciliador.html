@@ -157,7 +157,9 @@
         </div>
 
         <p id="cp-account-hint" class="cp-account-hint" role="status">
-          Marque as linhas na tabela para aplicar em lote — ou clique em <em>Vincular</em> na linha para ajustar um lançamento só.
+          A contrapartida completa o <strong>outro lado</strong> do lançamento: em recebimentos (crédito) ela vai para o
+          <strong>débito</strong>; em pagamentos (débito) ela vai para o <strong>crédito</strong>. Deixe o campo vazio e
+          aplique para limpar.
         </p>
       </div>
 
@@ -209,7 +211,7 @@
         </div>
         <p id="cp-link-history" class="cp-link-history"></p>
         <div class="cp-link-account">
-          <label for="cp-link-account-input">Conta de contrapartida deste lançamento</label>
+          <label for="cp-link-account-input">Conta de contrapartida deste lançamento (coluna oposta)</label>
           <div class="cp-link-account-row">
             <input
               id="cp-link-account-input"
@@ -223,7 +225,7 @@
             <button id="btn-cp-link-account" class="btn btn-sm btn-primary" type="button">Aplicar nesta linha</button>
           </div>
           <p id="cp-link-account-hint" class="cp-hint">
-            Se a conta existir no cadastro, o contato é vinculado junto e a IA memoriza o histórico.
+            Este é um pagamento: o débito tem o fornecedor, então a contrapartida vai para o crédito.
           </p>
         </div>
 
@@ -248,7 +250,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.9.2</span> — os arquivos nunca saem do navegador;
+        Conversor <span id="app-version" class="footer-version">v1.9.3</span> — os arquivos nunca saem do navegador;
         só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.
       </p>
       <p>Layout da conciliação: <code>data</code> | <code>debito</code> | <code>credito</code> | <code>valor</code> | <code>historico</code>.</p>
