@@ -1,5 +1,5 @@
 /**
- * Conversor Custódio — Utilidades de formatação e aritmética monetária.
+ * Conversor — Utilidades de formatação e aritmética monetária.
  *
  * Todos os valores financeiros circulam em "centavos inteiros" para evitar
  * erros de ponto flutuante (0.1 + 0.2 !== 0.3), que são inaceitáveis em
