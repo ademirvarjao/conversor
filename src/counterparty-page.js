@@ -23,7 +23,6 @@ import {
   learnFromReconciliation,
   learnManualLink,
   applyRowAccount,
-  findContactByAccount,
   linkHistory,
   mergeContacts,
   mergeTransactions,
@@ -534,14 +533,9 @@ function visibleRows() {
 
   return state.rows.filter((row) => {
     if (!includeUnmatched && !row.contact) return false;
-    if (
-      state.filter === 'matched' &&
-      !['matched', 'manual', 'manualAccount'].includes(row.status)
-    ) {
-      return false;
-    }
+    if (state.filter === 'matched' && !['matched', 'manual'].includes(row.status)) return false;
     if (state.filter === 'review' && row.status !== 'ambiguous') return false;
-    if (state.filter === 'unmatched' && (row.contact || row.debitAccount || row.creditAccount)) return false;
+    if (state.filter === 'unmatched' && row.contact) return false;
     if (!term) return true;
     return normalizeText(`${row.history} ${row.contact?.name || ''} ${row.date}`).includes(term);
   });
@@ -549,7 +543,6 @@ function visibleRows() {
 
 function statusBadge(row) {
   if (row.status === 'manual') return '<span class="cp-badge">manual</span>';
-  if (row.status === 'manualAccount') return '<span class="cp-badge is-manual">conta manual</span>';
   if (row.learnedAlias) return '<span class="cp-badge">memória</span>';
   if (row.status === 'matched') return '<span class="cp-badge">conciliado</span>';
   if (row.status === 'ambiguous') return '<span class="cp-badge is-review">revisar</span>';
@@ -728,30 +721,27 @@ function selectedScope() {
 function accountTargets(scope) {
   if (scope === 'filtered') return visibleRows();
   if (scope === 'empty') {
-    return visibleRows().filter((row) => !row.debitAccount && !row.creditAccount);
+    return visibleRows().filter((row) => !row.counterpartAccount);
   }
   return state.rows.filter((row) => state.selected.has(row.id));
 }
 
 function describeScope(scope, count) {
   if (scope === 'filtered') return `todos os ${count} filtrado(s)`;
-  if (scope === 'empty') return `os ${count} sem conta`;
+  if (scope === 'empty') return `os ${count} sem contrapartida`;
   return `os ${count} selecionado(s)`;
 }
 
-/** Aplica a conta digitada em lote, conforme o escopo escolhido. */
+/** Aplica a conta de contrapartida em lote, conforme o escopo escolhido. */
 function applyAccountBatch() {
   if (state.rows.length === 0) {
-    showToast('Concilie os arquivos antes de informar a conta.', 'warn');
+    showToast('Concilie os arquivos antes de informar a contrapartida.', 'warn');
     return;
   }
 
-  const account = contactCode(dom['cp-account-input']?.value);
-  if (!account) {
-    showToast('Digite a conta de contrapartida (somente números).', 'warn');
-    dom['cp-account-input']?.focus();
-    return;
-  }
+  const raw = dom['cp-account-input']?.value ?? '';
+  const account = contactCode(raw);
+  const clearing = !account;
 
   const scope = selectedScope();
   const targets = accountTargets(scope);
@@ -765,65 +755,44 @@ function applyAccountBatch() {
     return;
   }
 
-  let linked = 0;
-  for (const row of targets) {
-    const contact = findContactByAccount(state.contacts, account, row.direction);
-    applyRowAccount(row, account, contact);
-    if (contact) {
-      state.memory.counterparties = learnManualLink(state.memory, {
-        history: row.rawHistory,
-        contact,
-      });
-      linked += 1;
-    }
-  }
-
-  saveAiMemory(state.memory);
-  scheduleCloudPush();
+  for (const row of targets) applyRowAccount(row, account);
 
   state.stats = summarizeReconciliation(state.rows);
   render();
+
   if (dom['cp-account-hint']) {
-    dom['cp-account-hint'].textContent = `Conta ${account} aplicada a ${describeScope(scope, targets.length)}${
-      linked ? ` (${linked} vinculado(s) ao cadastro e memorizado(s))` : ' (conta não encontrada no cadastro)'
-    }.`;
+    dom['cp-account-hint'].textContent = clearing
+      ? `Contrapartida removida de ${describeScope(scope, targets.length)}.`
+      : `Contrapartida ${account} aplicada a ${describeScope(scope, targets.length)} — nos recebimentos foi para débito; nos pagamentos, para crédito.`;
   }
+
   showToast(
-    `Conta ${account} aplicada a ${targets.length} lançamento(s)${
-      linked ? ` • ${linked} vinculado(s) ao cadastro` : ''
-    }.`
+    clearing
+      ? `Contrapartida removida de ${targets.length} lançamento(s).`
+      : `Contrapartida ${account} aplicada a ${targets.length} lançamento(s).`
   );
 }
 
-/** Aplica a conta digitada em um único lançamento (painel de vínculo). */
+/** Aplica a conta de contrapartida em um único lançamento (painel de vínculo). */
 function applyAccountToLinkingRow() {
   const row = currentLinkingRow();
   if (!row) return;
 
-  const account = contactCode(dom['cp-link-account-input']?.value);
-  if (!account) {
-    showToast('Digite a conta de contrapartida deste lançamento.', 'warn');
-    dom['cp-link-account-input']?.focus();
-    return;
-  }
+  const raw = dom['cp-link-account-input']?.value ?? '';
+  const account = contactCode(raw);
 
-  const contact = findContactByAccount(state.contacts, account, row.direction);
-  applyRowAccount(row, account, contact);
-
-  if (contact) {
-    state.memory.counterparties = learnManualLink(state.memory, { history: row.rawHistory, contact });
-    saveAiMemory(state.memory);
-    scheduleCloudPush();
-  }
-
+  applyRowAccount(row, account);
   state.stats = summarizeReconciliation(state.rows);
   state.linkingId = null;
   dom['cp-link-panel']?.classList.add('hidden');
   render();
+
   showToast(
-    contact
-      ? `Conta ${account} aplicada e histórico memorizado para ${contact.name}.`
-      : `Conta ${account} aplicada ao lançamento (fora do cadastro).`
+    account
+      ? `Contrapartida ${account} aplicada — ${
+          row.direction === DIRECTION.PAYMENT ? 'no crédito' : 'no débito'
+        } deste lançamento.`
+      : 'Contrapartida removida deste lançamento.'
   );
 }
 
@@ -894,11 +863,13 @@ function openLinkPanel(rowId) {
   if (dom['cp-link-search']) dom['cp-link-search'].value = '';
   if (dom['cp-link-history']) dom['cp-link-history'].textContent = row.rawHistory;
   if (dom['cp-link-account-input']) {
-    dom['cp-link-account-input'].value = row.debitAccount || row.creditAccount || '';
+    dom['cp-link-account-input'].value = row.counterpartAccount || '';
   }
   if (dom['cp-link-account-hint']) {
-    const natureza = row.direction === DIRECTION.PAYMENT ? 'débito (fornecedor credora)' : 'crédito (cliente devedora)';
-    dom['cp-link-account-hint'].textContent = `Este lançamento usa a coluna ${natureza}.`;
+    const isPayment = row.direction === DIRECTION.PAYMENT;
+    dom['cp-link-account-hint'].textContent = isPayment
+      ? 'Este é um pagamento: o débito tem o fornecedor, então a contrapartida vai para o crédito.'
+      : 'Este é um recebimento: o crédito tem o cliente, então a contrapartida vai para o débito.';
   }
   panel.classList.remove('hidden');
   renderCandidates();
@@ -924,8 +895,10 @@ function applyLink(code) {
   row.history = linkHistory(row.rawHistory, contact);
 
   const account = contactCode(contact.code);
-  row.debitAccount = row.direction === DIRECTION.PAYMENT ? account : '';
-  row.creditAccount = row.direction === DIRECTION.PAYMENT ? '' : account;
+  // A conta do contato ocupa a coluna da direção; a contrapartida do outro
+  // lado (se já existir) é preservada.
+  if (row.direction === DIRECTION.PAYMENT) row.debitAccount = account;
+  else row.creditAccount = account;
 
   state.memory.counterparties = learnManualLink(state.memory, { history: row.rawHistory, contact });
   saveAiMemory(state.memory);

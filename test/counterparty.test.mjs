@@ -5,7 +5,6 @@ import {
   DIRECTION,
   NATUREZA,
   applyRowAccount,
-  findContactByAccount,
   buildContactsFromLines,
   buildContactsFromTable,
   buildSourceTransactions,
@@ -395,75 +394,87 @@ describe('conciliação de clientes e fornecedores', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('conta de contrapartida digitada à mão', () => {
-  const contacts = buildContactsFromLines(questorLines()).contacts;
-
-  it('encontra o contato pela conta, respeitando a natureza da direção', () => {
-    const fornecedor = findContactByAccount(contacts, '5.000.046', DIRECTION.PAYMENT);
-    assert.equal(fornecedor.name, 'LIGHT SERVICO DE ELETRICIDADE S/A');
-
-    // conta de cliente não serve para pagamento (e vice-versa)
-    assert.equal(findContactByAccount(contacts, '1.000.077', DIRECTION.PAYMENT), null);
-    assert.equal(findContactByAccount(contacts, '1.000.077', DIRECTION.RECEIPT).name, 'CEREAIS BRAMIL LTDA');
-
-    // aceita com ou sem pontuação
-    assert.equal(findContactByAccount(contacts, '5000046', DIRECTION.PAYMENT).code, '5.000.046');
-    assert.equal(findContactByAccount(contacts, '', DIRECTION.PAYMENT), null);
-  });
-
-  it('aplica a conta no débito (pagamento) e no crédito (recebimento)', () => {
-    const pagamento = { direction: DIRECTION.PAYMENT, rawHistory: 'NF 10', history: 'NF 10' };
-    applyRowAccount(pagamento, '5.000.046');
-    assert.equal(pagamento.debitAccount, '5000046');
-    assert.equal(pagamento.creditAccount, '');
-    assert.equal(pagamento.status, 'manualAccount');
-
-    const recebimento = { direction: DIRECTION.RECEIPT, rawHistory: 'PV 20', history: 'PV 20' };
-    applyRowAccount(recebimento, '1.000.077');
-    assert.equal(recebimento.creditAccount, '1000077');
-    assert.equal(recebimento.debitAccount, '');
-  });
-
-  it('vincula o contato e junta o nome ao histórico quando a conta existe no cadastro', () => {
-    const contact = findContactByAccount(contacts, '5.000.046', DIRECTION.PAYMENT);
-    const row = { direction: DIRECTION.PAYMENT, rawHistory: 'NF 10', history: 'NF 10' };
-
-    applyRowAccount(row, '5.000.046', contact);
-    assert.equal(row.status, 'manual');
-    assert.equal(row.contact.code, '5.000.046');
-    assert.equal(row.history, 'LIGHT SERVICO DE ELETRICIDADE S/A — NF 10');
-    assert.equal(row.debitAccount, '5000046');
-  });
-
-  it('não apaga o contato já vinculado quando a conta é de fora do cadastro', () => {
-    const row = {
+  it('completa a coluna oposta: pagamento preenche o crédito, recebimento o débito', () => {
+    const pagamento = {
       direction: DIRECTION.PAYMENT,
+      debitAccount: '5086959',
+      creditAccount: '',
       rawHistory: 'NF 10',
       history: 'PLASTTOTAL — NF 10',
-      status: 'matched',
-      contact: { code: '5.086.959', name: 'PLASTTOTAL', natureza: NATUREZA.CREDORA },
-      debitAccount: '5086959',
     };
+    applyRowAccount(pagamento, '1.234-5');
+    assert.equal(pagamento.debitAccount, '5086959', 'a conta do fornecedor continua no débito');
+    assert.equal(pagamento.creditAccount, '12345', 'a contrapartida entra no crédito');
+    assert.equal(pagamento.counterpartAccount, '12345');
 
-    applyRowAccount(row, '999999');
-    assert.equal(row.debitAccount, '999999');
-    assert.equal(row.contact.code, '5.086.959');
-    assert.equal(row.status, 'matched');
+    const recebimento = {
+      direction: DIRECTION.RECEIPT,
+      debitAccount: '',
+      creditAccount: '1000077',
+      rawHistory: 'PV 20',
+      history: 'CEREAIS BRAMIL — PV 20',
+    };
+    applyRowAccount(recebimento, '12345');
+    assert.equal(recebimento.creditAccount, '1000077', 'a conta do cliente continua no crédito');
+    assert.equal(recebimento.debitAccount, '12345', 'a contrapartida entra no débito');
   });
 
-  it('conta manual conta como conciliada no resumo', () => {
-    const stats = summarizeReconciliation([
-      {
-        status: 'manualAccount',
-        direction: DIRECTION.RECEIPT,
-        debitCents: 0,
-        creditCents: 15000,
-        contact: null,
-      },
-    ]);
-    assert.equal(stats.matched, 1);
-    assert.equal(stats.unmatched, 0);
-    assert.equal(stats.customers, 0);
-    assert.equal(stats.creditCents, 15000);
+  it('não mexe no contato, no histórico nem no status da linha', () => {
+    const row = {
+      direction: DIRECTION.PAYMENT,
+      status: 'matched',
+      score: 0.812,
+      contact: { code: '5.086.959', name: 'PLASTTOTAL', natureza: NATUREZA.CREDORA },
+      rawHistory: 'NF 10',
+      history: 'PLASTTOTAL — NF 10',
+      debitAccount: '5086959',
+      creditAccount: '',
+    };
+
+    applyRowAccount(row, '777');
+    assert.equal(row.debitAccount, '5086959');
+    assert.equal(row.creditAccount, '777');
+    assert.equal(row.status, 'matched');
+    assert.equal(row.score, 0.812);
+    assert.equal(row.contact.code, '5.086.959');
+    assert.equal(row.history, 'PLASTTOTAL — NF 10');
+  });
+
+  it('funciona em linha sem contato, preenchendo só a contrapartida', () => {
+    const row = { direction: DIRECTION.RECEIPT, contact: null, status: 'unmatched', debitAccount: '', creditAccount: '' };
+    applyRowAccount(row, '12345');
+    assert.equal(row.debitAccount, '12345');
+    assert.equal(row.creditAccount, '');
+    assert.equal(row.status, 'unmatched');
+    assert.equal(row.contact, null);
+  });
+
+  it('com a conta vazia, limpa a contrapartida', () => {
+    const row = {
+      direction: DIRECTION.PAYMENT,
+      debitAccount: '5086959',
+      creditAccount: '12345',
+      counterpartAccount: '12345',
+    };
+    applyRowAccount(row, '');
+    assert.equal(row.creditAccount, '');
+    assert.equal(row.debitAccount, '5086959');
+    assert.equal(row.counterpartAccount, '');
+  });
+
+  it('a conta do contato não é apagada quando a linha recebe contrapartida', () => {
+    const rows = [
+      { direction: DIRECTION.PAYMENT, debitAccount: '5086959', creditAccount: '' },
+      { direction: DIRECTION.RECEIPT, debitAccount: '', creditAccount: '1000077' },
+    ];
+    for (const row of rows) applyRowAccount(row, '999');
+    assert.deepEqual(
+      rows.map((row) => [row.debitAccount, row.creditAccount]),
+      [
+        ['5086959', '999'],
+        ['999', '1000077'],
+      ]
+    );
   });
 });
 
