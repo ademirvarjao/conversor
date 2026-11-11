@@ -1907,6 +1907,10 @@ async function pullNow({ silent = false } = {}) {
 }
 
 async function cloudPush({ silent = false } = {}) {
+  if (cloud.locked) {
+    if (!silent) showToast(CLOUD_LOCKED_MESSAGE, 'warn');
+    return;
+  }
   if (!cloud.config) {
     if (!silent) showToast('Configure o banco compartilhado primeiro.', 'warn');
     return;
@@ -1924,6 +1928,10 @@ async function cloudPush({ silent = false } = {}) {
 }
 
 async function cloudPull({ silent = false } = {}) {
+  if (cloud.locked) {
+    if (!silent) showToast(CLOUD_LOCKED_MESSAGE, 'warn');
+    return;
+  }
   if (!cloud.config || !cloud.identity) {
     if (!silent) showToast('Configure o banco e a chave de acesso primeiro.', 'warn');
     return;
@@ -1938,11 +1946,16 @@ async function cloudPull({ silent = false } = {}) {
 /** Envia em segundo plano depois de treinar (sem travar a interface). */
 let cloudPushTimer = null;
 
+/** Mensagem única para qualquer tentativa de sincronizar com a aba bloqueada. */
+const CLOUD_LOCKED_MESSAGE = 'Nuvem bloqueada: entre com login e senha na aba Nuvem para sincronizar.';
+
 /**
  * Envia em segundo plano depois de treinar (sem travar a interface). O timer é
  * único: várias alterações seguidas geram **um** envio, não um por alteração.
  */
 function scheduleCloudPush() {
+  // Trava fechada = nada sai deste navegador para a nuvem, nem em segundo plano.
+  if (cloud.locked) return;
   if (!cloud.config || !cloud.identity) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => {
