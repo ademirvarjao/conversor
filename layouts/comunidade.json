@@ -1,60 +1,135 @@
 {
   "schema": 1,
-  "generatedAt": "2026-11-11T00:00:00.000Z",
-  "about": "Catálogo PÚBLICO de layouts de extrato. Contém apenas nomes de banco, nomes de coluna e o papel de cada coluna. Nenhum dado de cliente entra aqui (nem valor, nem data, nem histórico). Para contribuir, abra um PR acrescentando um layout.",
+  "generatedAt": "2026-11-11T18:00:00.000Z",
+  "about": "Catálogo PÚBLICO de layouts de extrato. Contém apenas nome do banco, nomes de coluna e o papel de cada coluna. Nenhum dado de cliente entra aqui (nem valor, nem data, nem histórico). O app baixa este arquivo na abertura, revalida de hora em hora e nunca depende dele para funcionar (os bancos principais são embutidos). Atualizar este arquivo já atualiza todos os usuários, sem publicar versão nova do app. `updatedAt` decide qual versão de um layout vale.",
   "layouts": [
     {
       "id": "banco-do-nordeste",
       "name": "Banco do Nordeste (BNB)",
+      "updatedAt": "2026-11-11T18:00:00.000Z",
       "kind": "conta-corrente-pj",
       "columns": [
-        { "match": "^data", "role": "date" },
-        { "match": "historico|lancamento|descricao", "role": "history" },
-        { "match": "documento|dcto|doc|origem", "role": "ignore" },
-        { "match": "valor", "role": "value_auto" },
-        { "match": "saldo", "role": "ignore" }
+        {
+          "match": "^data",
+          "role": "date"
+        },
+        {
+          "match": "historico|lancamento|descricao",
+          "role": "history"
+        },
+        {
+          "match": "documento|dcto|doc|origem",
+          "role": "ignore"
+        },
+        {
+          "match": "valor",
+          "role": "value_auto"
+        },
+        {
+          "match": "saldo",
+          "role": "ignore"
+        }
       ],
-      "quirks": { "saldo": "corrente" }
+      "quirks": {
+        "saldo": "corrente"
+      }
     },
     {
       "id": "banestes",
       "name": "Banestes",
+      "updatedAt": "2026-11-11T18:00:00.000Z",
       "kind": "conta-corrente-pj",
       "columns": [
-        { "match": "^data", "role": "date" },
-        { "match": "historico|descricao|lancamento", "role": "history" },
-        { "match": "documento|dcto|doc", "role": "ignore" },
-        { "match": "credito|entrada", "role": "value_in" },
-        { "match": "debito|saida", "role": "value_out" },
-        { "match": "saldo", "role": "ignore" }
+        {
+          "match": "^data",
+          "role": "date"
+        },
+        {
+          "match": "historico|descricao|lancamento",
+          "role": "history"
+        },
+        {
+          "match": "documento|dcto|doc",
+          "role": "ignore"
+        },
+        {
+          "match": "credito|entrada",
+          "role": "value_in"
+        },
+        {
+          "match": "debito|saida",
+          "role": "value_out"
+        },
+        {
+          "match": "saldo",
+          "role": "ignore"
+        }
       ],
-      "quirks": { "saldo": "corrente" }
+      "quirks": {
+        "saldo": "corrente"
+      }
     },
     {
       "id": "banco-da-amazonia",
       "name": "Banco da Amazônia (Basa)",
+      "updatedAt": "2026-11-11T18:00:00.000Z",
       "kind": "conta-corrente-pj",
       "columns": [
-        { "match": "^data", "role": "date" },
-        { "match": "historico|descricao|lancamento", "role": "history" },
-        { "match": "documento|dcto|doc", "role": "ignore" },
-        { "match": "valor", "role": "value_auto" },
-        { "match": "saldo", "role": "ignore" }
+        {
+          "match": "^data",
+          "role": "date"
+        },
+        {
+          "match": "historico|descricao|lancamento",
+          "role": "history"
+        },
+        {
+          "match": "documento|dcto|doc",
+          "role": "ignore"
+        },
+        {
+          "match": "valor",
+          "role": "value_auto"
+        },
+        {
+          "match": "saldo",
+          "role": "ignore"
+        }
       ],
-      "quirks": { "saldo": "corrente" }
+      "quirks": {
+        "saldo": "corrente"
+      }
     },
     {
       "id": "parana-banco",
       "name": "Paraná Banco",
+      "updatedAt": "2026-11-11T18:00:00.000Z",
       "kind": "conta-corrente-pj",
       "columns": [
-        { "match": "^data", "role": "date" },
-        { "match": "historico|descricao|lancamento", "role": "history" },
-        { "match": "documento|dcto|doc", "role": "ignore" },
-        { "match": "valor", "role": "value_auto" },
-        { "match": "saldo", "role": "ignore" }
+        {
+          "match": "^data",
+          "role": "date"
+        },
+        {
+          "match": "historico|descricao|lancamento",
+          "role": "history"
+        },
+        {
+          "match": "documento|dcto|doc",
+          "role": "ignore"
+        },
+        {
+          "match": "valor",
+          "role": "value_auto"
+        },
+        {
+          "match": "saldo",
+          "role": "ignore"
+        }
       ],
-      "quirks": { "saldo": "corrente" }
+      "quirks": {
+        "saldo": "corrente"
+      }
     }
   ]
 }
