@@ -1,17 +1,20 @@
 /**
- * Conversor — Trava de acesso à aba "Nuvem"
+ * Conversor — Trava da CONEXÃO DO BANCO (área administrativa da aba "Nuvem")
  *
- * A aba Nuvem mexe na sincronização dos modelos (criar/entrar com a chave de
- * acesso, enviar, baixar e trocar o banco). Aqui fica o portão de entrada:
- * login + senha conferidos **no navegador** contra um hash PBKDF2-SHA256.
+ * O que esta trava protege é uma coisa só: **quem manda o app falar com qual
+ * banco** — a Project URL e a chave pública do Supabase (e, com elas, o SQL de
+ * instalação). É o único ponto que poderia desviar os cofres de todo mundo para
+ * outro projeto. Essa área abre com login + senha conferidos **no navegador**
+ * contra um hash PBKDF2-SHA256.
+ *
+ * O resto da nuvem é livre para qualquer usuário: ver a chave de acesso (na
+ * barra superior e na aba), criar/recuperar chave, enviar e baixar modelos,
+ * usar conta própria do Supabase Auth.
  *
  * ── O que esta trava é e o que ela não é ──────────────────────────────────
- * Ela impede que qualquer pessoa que use este computador abra a aba, veja a
- * chave de acesso ou envie/baixe modelos. Não é autenticação de servidor: o
- * app é estático (GitHub Pages), então quem souber programar pode burlar a
- * tela — e as chaves públicas do Supabase estão no código de qualquer forma.
- * O sigilo dos modelos continua vindo da criptografia (a chave de acesso),
- * que é o que importa: o banco só guarda texto cifrado.
+ * Não é autenticação de servidor: o app é estático (GitHub Pages), então quem
+ * souber programar pode burlar a tela. O sigilo dos modelos vem da criptografia
+ * (chave de acesso) e do RLS por dono (Supabase Auth) — não desta tela.
  *
  * A senha em texto puro **não** existe no repositório: ficam apenas o salt
  * aleatório, o número de iterações e o hash.

@@ -76,24 +76,23 @@ Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**
 - **Envio automático** depois de cada treinamento, mais botões de **Enviar modelos** e **Baixar modelos**.
 - **O LLM continua local:** ao baixar, a chave do conector já configurada nesta máquina é preservada.
 
-#### Trava de acesso à Nuvem (v1.11.0)
-A aba **Nuvem** — criar/entrar com a chave de acesso, enviar/baixar modelos e trocar o banco —
-fica atrás de **login e senha** ([`src/cloud-lock.js`](src/cloud-lock.js)):
+#### Trava da conexão do banco (v1.11.0 · reescopada na v1.13.0)
+A aba **Nuvem** é aberta para todo mundo: consultar a chave de acesso, criar/recuperar chave,
+enviar e baixar modelos não pede senha nenhuma. O que fica atrás de **login e senha**
+([`src/cloud-lock.js`](src/cloud-lock.js)) é só a **conexão do banco** — a *Project URL* e a
+chave pública do Supabase, o único ponto capaz de desviar os dados de todos os usuários:
 
 - a senha **não existe em texto puro no repositório**: ficam só o `salt` aleatório, 210.000
   iterações de **PBKDF2-SHA256** e o hash; a conferência roda no navegador (WebCrypto);
 - a liberação vale para **aquela aba do navegador** e expira em **1 hora** (ou ao clicar em
-  *Bloquear acesso agora*); fechar o navegador volta a bloquear;
-- **5 tentativas erradas** → 30 segundos de espera; a mensagem de erro conta as tentativas;
-- com a aba bloqueada a **chave de acesso aparece mascarada** (`••••-••••`) na barra superior, e
-  os botões de enviar/baixar da **conciliação** (`conciliador.html`) ficam desativados — inclusive
-  o envio automático, para ninguém usar a nuvem por essa página.
+  *Bloquear conexão agora*); fechar o navegador volta a bloquear;
+- **5 tentativas erradas** → 30 segundos de espera; a mensagem de erro conta as tentativas.
 
 > **Alcance real:** o Conversor é um site estático, então a trava é um **deterrente local** (protege
 > contra quem usa o computador/navegador, não contra alguém que altere o JavaScript). A barreira de
 > **servidor** é a conta na nuvem (Supabase Auth + RLS), descrita abaixo.
 
-#### Conta na nuvem — Supabase Auth + RLS (v1.12.1)
+#### Conta na nuvem — Supabase Auth + RLS (v1.12.0)
 A chave de acesso protege o **conteúdo**; a conta protege o **acesso**. Com uma conta do
 Supabase Auth ([`src/cloud-auth.js`](src/cloud-auth.js)), cada consulta ao banco vai com o
 `Authorization: Bearer <token do usuário>` e o **Row Level Security** passa a valer por dono:
