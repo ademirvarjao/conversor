@@ -90,7 +90,9 @@ SQLs (era o que deixava a tabela ausente). No painel: **Project Settings → Int
 
 Se a tabela ainda não existir, o próprio app resolve em dois cliques: a aba **Nuvem** detecta o
 erro do PostgREST (`PGRST205`), mostra **Copiar SQL de instalação** (o mesmo SQL da migração,
-embarcado em [`src/sql-setup.js`](src/sql-setup.js)) e **Abrir SQL Editor** já no projeto certo.
+embarcado em [`src/sql-setup.js`](src/sql-setup.js)), **Abrir SQL Editor** já no projeto certo e
+**Verificar de novo** — que recheca o banco sem recarregar a página. Instruções e diagnóstico
+completo ficam em [`supabase/README.md`](supabase/README.md).
 
 A conexão do cliente (Project URL + chave **anon public**/**publishable**) é pública por natureza
 e fica embutida em [`src/sync-config.js`](src/sync-config.js): o app já abre conectado e a tela
