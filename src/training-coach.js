@@ -19,6 +19,7 @@
  */
 
 import { transformRowsWithConfig, ROLES } from './ai-engine.js';
+import { diffRoles, recognizeLayout } from './bank-layouts.js';
 import { fromCents, toCents } from './format.js';
 import { cleanWhitespace, normalizeText, parseMoneyValue } from './parsers.js';
 
@@ -438,12 +439,42 @@ function skippedByReason(skipped) {
  * @param {object} analysis   saída de `analyzeFileLayout`
  * @returns {object} relatório pronto para renderizar/serializar
  */
-export function buildCoachReport(parsedFile, analysis, transform = null) {
+export function buildCoachReport(parsedFile, analysis, transform = null, options = {}) {
   const rows = Array.isArray(parsedFile?.rows) ? parsedFile.rows : [];
   const headers = Array.isArray(parsedFile?.headers) ? parsedFile.headers : [];
   const { records, skipped } = transform || transformRowsWithConfig(parsedFile, analysis || {});
   const balance = reconcileBalances(parsedFile, analysis, transform);
+
+  // Reconhecimento do layout: catálogo de bancos → assinaturas aprendidas →
+  // sinônimos genéricos. As divergências viram correções propostas.
+  const recognition = recognizeLayout(parsedFile, {
+    layouts: options.layouts || null,
+    learnedSignatures: options.learnedSignatures || [],
+  });
+
   const fixes = proposeFixes(parsedFile, analysis, balance, transform);
+
+  for (const diff of diffRoles(analysis, recognition)) {
+    const id = `layout-${diff.colIdx}-${diff.to}`;
+    const sameColumn = fixes.find((fix) => fix.kind === 'set_role' && fix.colIdx === diff.colIdx);
+    if (sameColumn) {
+      // Já havia uma correção para a coluna: acrescenta o motivo do banco.
+      if (sameColumn.to === diff.to && !sameColumn.reason.includes(diff.reason)) {
+        sameColumn.reason = `${sameColumn.reason} ${diff.reason}`;
+      }
+      continue;
+    }
+    fixes.push({
+      id,
+      kind: 'set_role',
+      colIdx: diff.colIdx,
+      header: diff.header,
+      from: diff.from,
+      to: diff.to,
+      label: `“${diff.header}”: ${diff.from} → ${diff.to}`,
+      reason: diff.reason,
+    });
+  }
 
   const mappings = Array.isArray(analysis?.mappings) ? analysis.mappings : [];
   const dateMappings = mappings.filter((mapping) => mapping.role === ROLES.DATE);
@@ -494,6 +525,25 @@ export function buildCoachReport(parsedFile, analysis, transform = null) {
   };
 
   const checks = [];
+
+  const bankName = recognition.bank?.name || '';
+  const layoutDetail =
+    recognition.source === 'catalog'
+      ? `Extrato do ${bankName} reconhecido no catálogo de bancos (${Math.round(
+          recognition.confidence * 100
+        )}%).`
+      : recognition.source === 'learned'
+        ? `Layout reaproveitado de um treino anterior: ${recognition.evidence[0]}.`
+        : 'Banco não está no catálogo: o mapeamento vem dos sinônimos das colunas (data, histórico, documento, saldo, crédito/débito).';
+
+  checks.push({
+    id: 'layout',
+    label: 'Banco e layout',
+    status: recognition.source === 'catalog' || recognition.source === 'learned' ? CHECK_STATUS.OK : CHECK_STATUS.WARN,
+    detail: [layoutDetail, ...(recognition.evidence || []).filter((item) => !layoutDetail.includes(item))]
+      .slice(0, 3)
+      .join(' '),
+  });
 
   checks.push({
     id: 'colunas',
@@ -634,6 +684,13 @@ export function buildCoachReport(parsedFile, analysis, transform = null) {
     balance,
     duplicates,
     fixes,
+    layout: {
+      source: recognition.source,
+      bank: recognition.bank,
+      confidence: recognition.confidence,
+      evidence: recognition.evidence,
+      quirks: recognition.quirks || {},
+    },
     score: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
   };
 }

@@ -27,6 +27,8 @@ import {
   formatCoachReport,
 } from './training-coach.js';
 import { describeExportScope, resolveExportRows } from './export-scope.js';
+import { applyRecognition, recognizeLayout } from './bank-layouts.js';
+import { fetchCommunityLayouts, isCatalogFresh, loadCatalog } from './layout-registry.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
   applyVaultPayload,
@@ -94,6 +96,10 @@ const state = {
   processing: false,
   /** Relatório do treinador automático do arquivo aberto no painel de treino. */
   coachReport: null,
+  /** Layouts baixados do catálogo público da comunidade (comparados no navegador). */
+  catalogLayouts: [],
+  catalogFetchedAt: 0,
+  catalogBusy: false,
 };
 
 /**
@@ -252,7 +258,7 @@ function rebuildUnifiedOutput({ resetPage = true } = {}) {
     file.result = result;
     // Treinador automático: o mesmo diagnóstico que um analista faria à mão —
     // inclui a conferência do saldo linha a linha. Aproveita o transform acima.
-    file.coach = buildCoachReport(file.parsedFile, file.analysis, result);
+    file.coach = buildCoachReport(file.parsedFile, file.analysis, result, coachOptions());
     allRecords.push(...result.records);
     skippedCount += result.skipped.length;
   }
@@ -343,6 +349,15 @@ function analysisStatusPill(analysis) {
     return `<span class="ai-status-pill status-matched" title="Layout reconhecido na memória da IA">IA reconheceu: ${escapeHtml(
       analysis.matchedProfileName || 'perfil salvo'
     )} (${analysis.matchSimilarity}%)</span>`;
+  }
+  // Catálogo de bancos / assinatura aprendida: layout entra mapeado sem treino.
+  if (analysis.layoutSource === 'catalog' && analysis.detectedBank && analysis.status !== 'matched') {
+    return `<span class="ai-status-pill status-matched" title="Layout identificado pelo catálogo de bancos — confira no painel da IA">Layout do ${
+      escapeHtml(analysis.detectedBank.name)
+    } reconhecido (${Math.round((analysis.layoutConfidence || 0) * 100)}%)</span>`;
+  }
+  if (analysis.layoutSource === 'learned' && analysis.status !== 'matched') {
+    return `<span class="ai-status-pill status-matched" title="Layout parecido com um que você já treinou">Layout reaproveitado de um treino anterior</span>`;
   }
   if (analysis.status === 'evolved') {
     return `<span class="ai-status-pill status-evolved" title="Mudança estrutural em relação ao perfil memorizado">Mudança de layout (${analysis.matchSimilarity}% similar)</span>`;
@@ -603,6 +618,43 @@ function renderMappingRows(file) {
 /*                        Treinador automático (painel)                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Catálogo de bancos que o reconhecimento enxerga: os embutidos (dentro de
+ * `bank-layouts.js`) mais os baixados da comunidade, mais as assinaturas que o
+ * usuário já treinou.
+ */
+function coachOptions() {
+  return {
+    layouts: state.catalogLayouts,
+    learnedSignatures: Array.isArray(state.memory?.layoutSignatures) ? state.memory.layoutSignatures : [],
+  };
+}
+
+/**
+ * Reconhece o layout de um arquivo recém-importado e, quando o banco é
+ * identificado com segurança, já aplica os papéis de coluna do catálogo —
+ * é o que faz um extrato de banco novo entrar certo na primeira importação.
+ */
+function applyLayoutRecognition(parsedFile, analysis) {
+  const recognition = recognizeLayout(parsedFile, coachOptions());
+
+  const confident =
+    recognition.source !== 'generic' && Number(recognition.confidence) >= 0.55;
+
+  // Layout já reconhecido na memória não é sobrescrito pelo catálogo.
+  if (!confident || analysis.status === 'matched') {
+    return { analysis, recognition, applied: false };
+  }
+
+  const next = applyRecognition(analysis, recognition);
+  const nome = recognition.bank?.name || 'assinatura aprendida';
+  next.warnings = [
+    ...(analysis.warnings || []),
+    `Layout reconhecido automaticamente: ${nome} (${Math.round(recognition.confidence * 100)}%). Revise no painel da IA se algum valor não bater.`,
+  ];
+  return { analysis: next, recognition, applied: true };
+}
+
 /** Selo do diagnóstico no cartão do arquivo (sem abrir o painel). */
 function coachChipHtml(coach) {
   if (!coach) return '';
@@ -623,7 +675,8 @@ function renderCoachPanel(file) {
     return;
   }
 
-  const report = file.coach || buildCoachReport(file.parsedFile, file.analysis, file.result);
+  const report =
+    file.coach || buildCoachReport(file.parsedFile, file.analysis, file.result, coachOptions());
   file.coach = report;
   state.coachReport = report;
 
@@ -664,9 +717,125 @@ function renderCoachPanel(file) {
 function reanalyzeFileWithCoach(file) {
   if (!file) return null;
   file.result = transformRowsWithConfig(file.parsedFile, file.analysis);
-  file.coach = buildCoachReport(file.parsedFile, file.analysis, file.result);
+  file.coach = buildCoachReport(file.parsedFile, file.analysis, file.result, coachOptions());
   renderCoachPanel(file);
   return file.coach;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Catálogo público de layouts                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Atualiza o texto de status do catálogo no painel do treinador.
+ * @param {'idle'|'ok'|'warn'|'busy'} tone
+ */
+function renderCatalogStatus(message, tone = 'idle') {
+  const el = dom['coach-registry-status'];
+  if (!el) return;
+
+  const total = state.catalogLayouts.length;
+  const text =
+    message ||
+    (total > 0
+      ? `${total} layout(s) da comunidade carregados${
+          state.catalogFetchedAt
+            ? ` • atualizado em ${formatLocalDateTime(new Date(state.catalogFetchedAt))}`
+            : ''
+        }. Só a lista é baixada: nada do seu arquivo sai do navegador.`
+      : 'Catálogo público ainda não baixado. Só a lista de layouts é baixada: nada do seu arquivo sai do navegador.');
+
+  el.textContent = text;
+  el.className = `coach-registry-status${tone === 'ok' ? ' status-ok' : tone === 'warn' ? ' status-warn' : ''}`;
+}
+
+/** Baixa (ou relê do cache) o catálogo público e reavalia os arquivos abertos. */
+async function refreshCommunityCatalog({ silent = false } = {}) {
+  if (state.catalogBusy) return state.catalogLayouts;
+  state.catalogBusy = true;
+
+  const button = dom['btn-coach-registry'];
+  const originalLabel = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Buscando…';
+  }
+  renderCatalogStatus('Buscando o catálogo público de layouts…', 'busy');
+
+  try {
+    const result = await fetchCommunityLayouts();
+    state.catalogLayouts = result.layouts || [];
+    state.catalogFetchedAt = result.fetchedAt || 0;
+
+    if (result.ok) {
+      renderCatalogStatus(
+        `${state.catalogLayouts.length} layout(s) da comunidade carregados. Só a lista foi baixada: nada do seu arquivo saiu do navegador.`,
+        'ok'
+      );
+      if (!silent) {
+        showToast(`Catálogo público atualizado: ${state.catalogLayouts.length} layout(s) de banco.`);
+      }
+      reapplyCatalogToFiles();
+    } else {
+      renderCatalogStatus(
+        `Não foi possível atualizar o catálogo (${result.error}). ${
+          state.catalogLayouts.length
+            ? 'Seguimos com os layouts já baixados e os embutidos no app.'
+            : 'Seguimos com os layouts embutidos no app.'
+        }`,
+        'warn'
+      );
+      if (!silent) showToast(`Catálogo público indisponível: ${result.error}`, 'warn');
+    }
+    return state.catalogLayouts;
+  } finally {
+    state.catalogBusy = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel || 'Buscar layouts na comunidade';
+    }
+  }
+}
+
+/**
+ * Depois de baixar o catálogo, tenta reconhecer de novo os arquivos que ficaram
+ * sem banco identificado. Só mexe em quem ainda não foi treinado à mão.
+ */
+function reapplyCatalogToFiles() {
+  let changed = 0;
+
+  for (const file of state.files) {
+    if (file.analysis?.status === 'matched' || file.analysis?.source === 'manual') continue;
+    if (file.recognition?.recognition?.source !== 'generic') continue;
+
+    const attempt = applyLayoutRecognition(file.parsedFile, file.analysis);
+    file.recognition = attempt;
+    if (!attempt.applied) continue;
+
+    file.analysis = attempt.analysis;
+    file.coach = null;
+    changed += 1;
+  }
+
+  if (changed > 0) {
+    rebuildUnifiedOutput();
+    showToast(
+      `${changed} arquivo(s) reconhecido(s) com o catálogo público. Confira o painel da IA.`,
+      'success'
+    );
+  }
+}
+
+/** Baixa o catálogo sozinho quando aparece um banco desconhecido (se ligado). */
+function maybeRefreshCatalog(unknownFileIds = []) {
+  if (state.memory?.settings?.communityCatalog === false) return;
+  if (unknownFileIds.length === 0) return;
+
+  const cached = loadCatalog();
+  if (isCatalogFresh(cached) && state.catalogLayouts.length > 0) return;
+
+  renderCatalogStatus('Banco não identificado — buscando o catálogo público de layouts…', 'warn');
+  refreshCommunityCatalog({ silent: true });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -935,6 +1104,8 @@ async function processUploadedFiles(fileList) {
   let added = 0;
   let duplicates = 0;
   let firstNeedingReview = null;
+  /** Arquivos em que o banco não foi identificado (dispara o catálogo público). */
+  const unknownLayouts = [];
 
   try {
     for (const file of incoming) {
@@ -960,7 +1131,12 @@ async function processUploadedFiles(fileList) {
 
       try {
         const parsedFile = await parseUploadedFile(file);
-        const analysis = analyzeFileLayout(parsedFile, state.memory);
+        const rawAnalysis = analyzeFileLayout(parsedFile, state.memory);
+
+        // Treinador automático: catálogo de bancos + assinaturas aprendidas.
+        // Se o banco é identificado com segurança, o layout já entra mapeado.
+        const recognition = applyLayoutRecognition(parsedFile, rawAnalysis);
+        const analysis = recognition.analysis;
 
         state.memory.stats.totalFilesProcessed =
           (state.memory.stats.totalFilesProcessed || 0) + 1;
@@ -973,11 +1149,15 @@ async function processUploadedFiles(fileList) {
         state.files.push({
           id,
           parsedFile,
+          coach: null,
           analysis,
           result: { records: [], skipped: [] },
           meta: { size: file.size, uploadedAt: new Date().toISOString() },
+          recognition,
         });
         added++;
+
+        if (recognition.recognition.source === 'generic') unknownLayouts.push(id);
 
         if (!firstNeedingReview && analysis.status !== 'matched') {
           firstNeedingReview = id;
@@ -1028,6 +1208,8 @@ async function processUploadedFiles(fileList) {
         `${added} arquivo(s) processado(s) com sucesso${duplicates ? ` • ${duplicates} duplicado(s) ignorado(s)` : ''}.`
       );
     }
+    if (unknownLayouts.length > 0) maybeRefreshCatalog(unknownLayouts);
+
     for (const failure of failures.slice(0, 3)) showToast(failure, 'error');
     if (failures.length > 3) {
       showToast(`Mais ${failures.length - 3} arquivo(s) falharam ao ser lidos.`, 'error');
@@ -1233,7 +1415,13 @@ function bindFilesListEvents() {
     file.parsedFile.headers = sheet.headers;
     file.parsedFile.rows = sheet.rows;
     file.parsedFile.bannerLines = sheet.bannerLines;
-    file.analysis = analyzeFileLayout(file.parsedFile, state.memory);
+    const attempt = applyLayoutRecognition(
+      file.parsedFile,
+      analyzeFileLayout(file.parsedFile, state.memory)
+    );
+    file.analysis = attempt.analysis;
+    file.recognition = attempt;
+    file.coach = null; // o diagnóstico anterior não vale mais para esta aba
 
     rebuildUnifiedOutput();
     if (state.selectedFileId === file.id) openTrainerForFile(file.id);
@@ -1385,6 +1573,20 @@ function bindTrainerEvents() {
       saved ? 'success' : 'warn'
     );
     if (saved) scheduleCloudPush();
+  });
+
+  dom['btn-coach-registry']?.addEventListener('click', () => {
+    refreshCommunityCatalog();
+  });
+
+  dom['coach-registry-auto']?.addEventListener('change', (event) => {
+    state.memory = {
+      ...state.memory,
+      settings: { ...(state.memory.settings || {}), communityCatalog: Boolean(event.target.checked) },
+    };
+    if (!saveAiMemory(state.memory)) {
+      showToast('O navegador bloqueou o salvamento da preferência.', 'warn');
+    }
   });
 
   dom['btn-coach-copy']?.addEventListener('click', async () => {
@@ -2585,6 +2787,17 @@ function init() {
   if (dom['preview-page-size']) dom['preview-page-size'].value = String(state.pageSize);
 
   if (dom['app-version']) dom['app-version'].textContent = `v${APP_VERSION}`;
+
+  // Catálogo público: usa o que já está no navegador (sem rede na abertura).
+  const cachedCatalog = loadCatalog();
+  if (cachedCatalog?.layouts?.length) {
+    state.catalogLayouts = cachedCatalog.layouts;
+    state.catalogFetchedAt = cachedCatalog.fetchedAt || 0;
+  }
+  if (dom['coach-registry-auto']) {
+    dom['coach-registry-auto'].checked = state.memory?.settings?.communityCatalog !== false;
+  }
+  renderCatalogStatus();
 
   bindUploadEvents();
   bindFilesListEvents();
