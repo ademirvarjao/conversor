@@ -55,21 +55,6 @@
       <span id="processing-text">Processando…</span>
     </div>
 
-    <section class="cp-hero">
-      <div>
-        <span class="step-tag">CONCILIAÇÃO DE CLIENTES / FORNECEDORES</span>
-        <h2 class="cp-hero-title">Ligue cada lançamento ao fornecedor ou cliente certo</h2>
-        <p class="cp-hero-sub">
-          Pagamento (saída) procura fornecedor de natureza <strong>credora</strong> e vai para
-          <strong>débito</strong>; recebimento (entrada) procura cliente de natureza
-          <strong>devedora</strong> e vai para <strong>crédito</strong>. As colunas de débito e
-          crédito mostram a <strong>conta do contato</strong> (coluna <code>contactb</code> do
-          Questor), <strong>sem pontos</strong> — <code>5.00.046</code> vira <code>500046</code>.
-          O valor sai sempre positivo, na coluna <code>valor</code>.
-        </p>
-      </div>
-    </section>
-
     <section class="card cp-files-card" aria-labelledby="cp-files-title">
       <div class="section-header">
         <div>
@@ -82,16 +67,16 @@
     <label class="cp-file" for="cp-contacts-input">
       <span class="cp-file-step">1</span>
       <span class="cp-file-title">Cadastro de contatos</span>
-      <span class="cp-file-hint">PDF ou .xlsx exportado do Questor (<code>contactb</code>, <code>nomepessoa</code>, <code>natureza</code>)</span>
-      <input id="cp-contacts-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" />
+      <span class="cp-file-hint">Um ou mais PDF/.xlsx do Questor (<code>contactb</code>, <code>nomepessoa</code>, <code>natureza</code>) — pode juntar vários cadastros</span>
+      <input id="cp-contacts-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-contacts-status" class="cp-file-status">Nenhum arquivo selecionado</span>
     </label>
 
     <label class="cp-file" for="cp-ledger-input">
       <span class="cp-file-step">2</span>
       <span class="cp-file-title">Extrato / conciliação bancária</span>
-      <span class="cp-file-hint">PDF ou .xlsx com data, valor (com sinal) e histórico</span>
-      <input id="cp-ledger-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" />
+      <span class="cp-file-hint">Um ou mais PDF/.xlsx com data, valor (com sinal) e histórico — pode juntar vários extratos</span>
+      <input id="cp-ledger-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-ledger-status" class="cp-file-status">Nenhum arquivo selecionado</span>
     </label>
     </div>
@@ -205,7 +190,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.9.0</span> — os arquivos nunca saem do navegador;
+        Conversor <span id="app-version" class="footer-version">v1.9.1</span> — os arquivos nunca saem do navegador;
         só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.
       </p>
       <p>Layout da conciliação: <code>data</code> | <code>debito</code> | <code>credito</code> | <code>valor</code> | <code>historico</code>.</p>
