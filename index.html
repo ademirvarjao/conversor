@@ -100,6 +100,29 @@
       <span id="processing-text">Processando arquivos…</span>
     </div>
 
+    <!-- Atalho: conciliação de clientes e fornecedores (cadastro Questor) -->
+    <section class="card action-card" aria-labelledby="cp-entry-title">
+      <button id="btn-counterparty" class="action-tile" type="button" aria-haspopup="dialog" aria-controls="cp-modal">
+        <span class="action-icon" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 6h9v9H6zM17 17h9v9h-9z" />
+            <path d="M15 10.5h4a2 2 0 0 1 2 2v4" />
+            <path d="M12 12.5l3 3" />
+          </svg>
+        </span>
+        <span class="action-body">
+          <span class="action-tag">NOVO</span>
+          <span id="cp-entry-title" class="action-title">Conciliar clientes/fornecedores</span>
+          <span class="action-sub">
+            Cruza o cadastro do Questor (<code>contactb</code>, <code>nomepessoa</code>,
+            <code>natureza</code>) com o extrato e devolve o layout
+            <strong>data | débito | crédito | valor | histórico</strong>, sem sinais negativos.
+          </span>
+        </span>
+        <span class="action-cta">Abrir</span>
+      </button>
+    </section>
+
     <!-- Passo 1: Upload -->
     <section class="card upload-section" aria-labelledby="step-upload-title">
       <div class="section-header">
@@ -290,7 +313,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.7.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.8.0</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
       <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
     </div>
   </footer>
@@ -461,6 +484,137 @@
               <button id="btn-cloud-test" class="btn btn-sm btn-ghost-dark" type="button">Testar conexão</button>
             </div>
           </details>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Conciliação de clientes/fornecedores (Questor) -->
+  <div id="cp-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="cp-modal-title" aria-hidden="true">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <div>
+          <h2 id="cp-modal-title">Conciliar clientes/fornecedores</h2>
+          <p class="modal-sub">
+            Pagamento (saída) procura fornecedor de natureza <strong>credora</strong>; recebimento
+            (entrada) procura cliente de natureza <strong>devedora</strong>.
+          </p>
+        </div>
+        <button id="btn-close-cp" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="cp-files">
+          <label class="cp-file" for="cp-contacts-input">
+            <span class="cp-file-step">1</span>
+            <span class="cp-file-title">Cadastro de contatos</span>
+            <span class="cp-file-hint">PDF ou .xlsx exportado do Questor (<code>contactb</code>, <code>nomepessoa</code>, <code>natureza</code>)</span>
+            <input id="cp-contacts-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" />
+            <span id="cp-contacts-status" class="cp-file-status">Nenhum arquivo selecionado</span>
+          </label>
+
+          <label class="cp-file" for="cp-ledger-input">
+            <span class="cp-file-step">2</span>
+            <span class="cp-file-title">Extrato / conciliação bancária</span>
+            <span class="cp-file-hint">PDF ou .xlsx com data, valor (com sinal) e histórico</span>
+            <input id="cp-ledger-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" />
+            <span id="cp-ledger-status" class="cp-file-status">Nenhum arquivo selecionado</span>
+          </label>
+        </div>
+
+        <div class="cp-run-row">
+          <button id="btn-cp-run" class="btn btn-primary" type="button" disabled>Conciliar agora</button>
+          <label class="checkbox-label">
+            <input id="cp-include-unmatched" type="checkbox" checked />
+            <span>Mostrar também os lançamentos sem correspondência</span>
+          </label>
+        </div>
+
+        <div id="cp-alert" class="ai-alert hidden" role="status"></div>
+
+        <div id="cp-result" class="hidden">
+          <div class="kpi-grid cp-kpis">
+            <div class="kpi-card">
+              <span class="kpi-label">Lançamentos</span>
+              <strong id="cp-kpi-count" class="kpi-value">0</strong>
+              <span id="cp-kpi-matched" class="kpi-sub">0 conciliados</span>
+            </div>
+            <div class="kpi-card kpi-out">
+              <span class="kpi-label">Débitos (pagamentos)</span>
+              <strong id="cp-kpi-debit" class="kpi-value">0,00</strong>
+              <span id="cp-kpi-suppliers" class="kpi-sub">0 fornecedores</span>
+            </div>
+            <div class="kpi-card kpi-in">
+              <span class="kpi-label">Créditos (recebimentos)</span>
+              <strong id="cp-kpi-credit" class="kpi-value">0,00</strong>
+              <span id="cp-kpi-customers" class="kpi-sub">0 clientes</span>
+            </div>
+            <div class="kpi-card kpi-net">
+              <span class="kpi-label">Valor total</span>
+              <strong id="cp-kpi-value" class="kpi-value">0,00</strong>
+              <span id="cp-kpi-review" class="kpi-sub">0 para revisar</span>
+            </div>
+          </div>
+
+          <div class="toolbar cp-toolbar">
+            <div class="search-box">
+              <label for="cp-search" class="sr-only">Buscar no histórico conciliado</label>
+              <input id="cp-search" type="search" placeholder="Filtrar por histórico, contato ou data…" />
+            </div>
+            <div class="filter-pills" role="group" aria-label="Filtrar conciliação">
+              <button class="pill active" data-cp-filter="all" type="button" aria-pressed="true">Todos</button>
+              <button class="pill" data-cp-filter="matched" type="button" aria-pressed="false">Conciliados</button>
+              <button class="pill" data-cp-filter="review" type="button" aria-pressed="false">Revisar</button>
+              <button class="pill" data-cp-filter="unmatched" type="button" aria-pressed="false">Sem contato</button>
+            </div>
+          </div>
+
+          <div class="table-wrap output-table-wrap">
+            <table class="data-table cp-table">
+              <caption class="sr-only">Conciliação no layout data, débito, crédito, valor e histórico</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="col-date">data</th>
+                  <th scope="col" class="col-money">debito</th>
+                  <th scope="col" class="col-money">credito</th>
+                  <th scope="col" class="col-money">valor</th>
+                  <th scope="col" class="col-hist">historico</th>
+                  <th scope="col" class="col-cp-link">vínculo</th>
+                </tr>
+              </thead>
+              <tbody id="cp-tbody"></tbody>
+            </table>
+          </div>
+
+          <div class="pagination-bar">
+            <span id="cp-pagination-info" class="pagination-info" aria-live="polite">Exibindo 0 de 0</span>
+            <div class="pagination-btns">
+              <button id="cp-btn-prev" class="btn btn-sm btn-ghost-dark" type="button">Anterior</button>
+              <button id="cp-btn-next" class="btn btn-sm btn-ghost-dark" type="button">Próxima</button>
+            </div>
+          </div>
+
+          <div id="cp-link-panel" class="cp-link-panel hidden" role="group" aria-labelledby="cp-link-title">
+            <div class="cp-link-head">
+              <h3 id="cp-link-title">Vincular lançamento a um contato</h3>
+              <button id="btn-cp-link-close" class="icon-btn" type="button" aria-label="Fechar correção">✕</button>
+            </div>
+            <p id="cp-link-history" class="cp-link-history"></p>
+            <div class="search-box">
+              <label for="cp-link-search" class="sr-only">Buscar contato no cadastro</label>
+              <input id="cp-link-search" type="search" placeholder="Buscar fornecedor/cliente pelo nome, código ou CPF/CNPJ…" />
+            </div>
+            <ul id="cp-link-candidates" class="cp-candidates"></ul>
+          </div>
+
+          <div class="cp-export-row">
+            <p id="cp-learned" class="cp-learned" role="status"></p>
+            <div class="export-actions">
+              <button id="btn-cp-export-xlsx" class="btn btn-emerald" type="button">Exportar .xlsx</button>
+              <button id="btn-cp-export-pdf" class="btn btn-navy" type="button">Exportar .pdf</button>
+              <button id="btn-cp-export-csv" class="btn btn-outline-dark" type="button">Exportar .csv</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

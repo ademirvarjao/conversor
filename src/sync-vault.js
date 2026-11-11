@@ -148,6 +148,7 @@ export function buildVaultPayload(memory, options = {}) {
     learnedProfiles: safe.learnedProfiles,
     learningLog: safe.learningLog,
     stats: safe.stats,
+    counterparties: safe.counterparties,
   };
 }
 
@@ -165,6 +166,7 @@ export function applyVaultPayload(currentMemory, payload) {
     learnedProfiles: payload.learnedProfiles,
     learningLog: payload.learningLog,
     stats: payload.stats,
+    counterparties: payload.counterparties,
   });
 
   const localLlm = currentMemory?.optionalLlm;

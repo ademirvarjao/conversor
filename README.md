@@ -45,6 +45,19 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Memória persistente** em `localStorage`, com exportação/importação de `conversor-ia-memoria.json` para versionar no repositório ou compartilhar entre máquinas. Backups inválidos são normalizados/descartados sem quebrar a aplicação.
 - **Conector LLM opcional** (OpenAI ou Gemini, com chave do próprio usuário) para layouts inéditos, com timeout, validação da resposta e fallback para a IA local.
 
+### Conciliação de clientes/fornecedores (v1.8.0)
+Um cartão clicável no topo da página (**“Conciliar clientes/fornecedores”**) abre um fluxo próprio, separado da conciliação unificada, para cruzar o **cadastro de contatos do Questor** com o extrato bancário.
+
+- **Duas entradas, dois arquivos**: (1) o cadastro `Questor_Exportacao` (`.pdf` ou `.xlsx`) com as colunas `contactb`, `nomepessoa` e `natureza`; (2) o extrato/conciliação com data, valor assinado e histórico.
+- **Fornecedores × clientes pelo cadastro**: natureza **Credora** (contas `2.x`) são fornecedores; natureza **Devedora** (contas `1.x`) são clientes. Quando a coluna `natureza` vem vazia, o plano de contas decide. Grafias diferentes do mesmo `contactb` são unificadas.
+- **Regra de vínculo**: **pagamento** (saída de caixa) casa com fornecedor de natureza **credora** e vai para a coluna **débito**; **recebimento** (entrada) casa com cliente de natureza **devedora** e vai para **crédito**.
+- **Layout de saída**: `data | debito | credito | valor | historico`, com **valores sempre positivos** — o sinal fica implícito na coluna usada (só nesta função; o restante do app continua com valores assinados).
+- **Casamento tolerante, mas conservador**: compara o nome do contato com o histórico ignorando acentos, sufixos societários (`LTDA`, `S/A`, `EIRELI`, `ME`…) e conectivos; aceita plural, abreviação em 3–4 letras (`Com.`, `Ind.`, `Mat.`) e um erro de digitação em palavras longas. Para evitar vínculo errado, exige uma palavra “cheia” (6+ letras) do cadastro no histórico, usa pesos de raridade do cadastro e trata empates como **revisar** em vez de chutar.
+- **Aprendizado a cada uso**: cada vínculo aceito vira um **apelido** (histórico → `contactb`) e reforça os pesos dos tokens daquele contato. Na rodada seguinte os mesmos históricos são reconhecidos mesmo truncados — medido nos arquivos reais: 1ª passada **312 conciliados / 35 para revisar**; 2ª passada com memória **347 conciliados / 0 para revisar** (mesmos 132 sem cadastro correspondente).
+- **Correção manual que ensina**: cada linha tem o botão **Vincular/Trocar**, que sugere candidatos (com %) e permite buscar no cadastro por nome, código ou CPF/CNPJ. Ao escolher, o vínculo é aplicado e memorizado na hora.
+- **Exportação ao concluir**: **`.xlsx`**, **`.pdf`** e **`.csv`** no mesmo layout de cinco colunas, com linha de `TOTAIS`. O CSV usa `;` como separador e vírgula decimal (abre direto no Excel em português), com BOM UTF-8 para preservar acentos.
+- **Tudo local**: os contatos e os lançamentos ficam no navegador. Só os modelos aprendidos (apelidos/pesos dessa conciliação) entram no pacote cifrado da nuvem, junto com o restante da memória da IA.
+
 ### Nuvem dos modelos aprendidos (v1.5.0)
 Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**:
 
@@ -119,7 +132,8 @@ conversor/
 │   ├── app.js                    # Controlador de UI, upload, filtros, modal
 │   ├── parsers.js                # PDF (extração + geometria) e XLSX
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
-│   ├── exporters.js              # Exportação .xlsx e .pdf
+│   ├── counterparty.js           # Conciliação clientes/fornecedores (cadastro Questor)
+│   ├── exporters.js              # Exportação .xlsx, .pdf e .csv
 │   ├── format.js                 # Formatação e aritmética em centavos
 │   ├── summary.js                # Totalizadores (KPIs)
 │   ├── ui-contract.js            # IDs exigidos pelo controlador + versão

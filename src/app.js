@@ -1,5 +1,5 @@
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
-import { cleanWhitespace, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
+import { cleanWhitespace, extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import {
   ROLES,
   ROLE_LABELS,
@@ -14,7 +14,30 @@ import {
 } from './ai-engine.js';
 import { formatLocalDateTime, formatValuePlainBr, sumValues } from './format.js';
 import { summarizeRecords } from './summary.js';
-import { exportToPdf, exportToXlsx } from './exporters.js';
+import {
+  exportCounterpartiesCsv,
+  exportCounterpartiesPdf,
+  exportCounterpartiesXlsx,
+  exportToPdf,
+  exportToXlsx,
+} from './exporters.js';
+import {
+  DIRECTION,
+  NATUREZA,
+  NATUREZA_LABELS,
+  buildContactsFromLines,
+  buildContactsFromTable,
+  candidatesFor,
+  contactSummary,
+  learnFromReconciliation,
+  learnManualLink,
+  linkHistory,
+  reconcileCounterparties,
+  sanitizeCounterparties,
+  scoreCandidates,
+  summarizeReconciliation,
+  transactionsFromTable,
+} from './counterparty.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
   applyVaultPayload,
@@ -1735,9 +1758,592 @@ function bindCloudEvents() {
   dom['btn-cloud-pull']?.addEventListener('click', () => cloudPull());
 }
 
+/* -------------------------------------------------------------------------- */
+/*          Conciliação de clientes/fornecedores (cadastro Questor)           */
+/* -------------------------------------------------------------------------- */
+
+const CP_PAGE_SIZE = 40;
+
+/** Estado do modal de conciliação (independente da conciliação unificada). */
+const counterparty = {
+  contacts: [],
+  contactFile: '',
+  contactRejected: 0,
+  transactions: [],
+  ledgerFile: '',
+  rows: [],
+  stats: summarizeReconciliation([]),
+  filter: 'all',
+  search: '',
+  page: 1,
+  linkingId: null,
+  linkSearch: '',
+  learnedCount: 0,
+  busy: false,
+};
+
+function counterpartyMemory() {
+  if (!state.memory.counterparties) {
+    state.memory.counterparties = sanitizeCounterparties(null);
+  }
+  return state.memory.counterparties;
+}
+
+function cpAlert(message, tone = 'info') {
+  const box = dom['cp-alert'];
+  if (!box) return;
+  if (!message) {
+    box.classList.add('hidden');
+    box.textContent = '';
+    return;
+  }
+  box.classList.remove('hidden');
+  box.className = `ai-alert ${tone === 'error' ? 'is-error' : tone === 'warn' ? 'is-warn' : ''}`.trim();
+  box.innerHTML = message;
+}
+
+function openCounterpartyModal() {
+  const modal = dom['cp-modal'];
+  if (!modal) return;
+  lastFocusedElement = document.activeElement;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  renderCounterparty();
+  dom['btn-cp-run']?.focus();
+}
+
+function closeCounterpartyModal() {
+  const modal = dom['cp-modal'];
+  if (!modal || modal.classList.contains('hidden')) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  counterparty.linkingId = null;
+  dom['cp-link-panel']?.classList.add('hidden');
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    lastFocusedElement.focus();
+  }
+}
+
+/** Lê o cadastro Questor (.pdf com colunas ou .xlsx) e guarda os contatos. */
+async function loadCounterpartyContacts(file) {
+  const statusEl = dom['cp-contacts-status'];
+  if (statusEl) statusEl.textContent = `Lendo ${file.name}…`;
+
+  const extension = fileExtension(file.name);
+  const buffer = await file.arrayBuffer();
+  let contacts = [];
+  let rejected = 0;
+
+  if (extension === 'pdf') {
+    const { lines } = await extractPdfLines(new Uint8Array(buffer), pdfjsLib, {
+      onProgress: (page, total) => {
+        if (statusEl) statusEl.textContent = `Lendo ${file.name} — página ${page} de ${total}…`;
+      },
+    });
+    const parsed = buildContactsFromLines(lines);
+    contacts = parsed.contacts;
+    rejected = parsed.rejected;
+  } else {
+    const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
+    if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
+    const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
+    const built = buildContactsFromTable(parsed.headers, parsed.rows);
+    contacts = built.contacts;
+    rejected = built.rejected;
+  }
+
+  if (contacts.length === 0) {
+    throw new Error(
+      `Nenhum contato reconhecido em "${file.name}". Confira se o arquivo tem as colunas contactb, nomepessoa e natureza.`
+    );
+  }
+
+  counterparty.contacts = contacts;
+  counterparty.contactFile = file.name;
+  counterparty.contactRejected = rejected;
+  counterparty.rows = [];
+  counterparty.stats = summarizeReconciliation([]);
+  counterparty.page = 1;
+
+  const summary = contactSummary(contacts);
+  if (statusEl) {
+    statusEl.textContent = `${contacts.length} contatos • ${summary.suppliers} credora • ${summary.customers} devedora`;
+  }
+  const label = dom['cp-contacts-status']?.closest('.cp-file');
+  if (label) label.classList.add('is-loaded');
+
+  updateCounterpartyRunButton();
+  cpAlert(
+    `Cadastro lido: <strong>${contacts.length}</strong> contatos (${summary.suppliers} fornecedores credora, ${summary.customers} clientes devedora)${
+      rejected ? ` • ${rejected} linha(s) ignorada(s)` : ''
+    }.`
+  );
+}
+
+/** Lê o extrato (.pdf ou .xlsx) e monta os lançamentos com sinal. */
+async function loadCounterpartyLedger(file) {
+  const statusEl = dom['cp-ledger-status'];
+  if (statusEl) statusEl.textContent = `Lendo ${file.name}…`;
+
+  const extension = fileExtension(file.name);
+  const buffer = await file.arrayBuffer();
+  let transactions = [];
+
+  if (extension === 'pdf') {
+    const parsed = await parsePdfFile(buffer, file.name, pdfjsLib, {
+      onProgress: (page, total) => {
+        if (statusEl) statusEl.textContent = `Lendo ${file.name} — página ${page} de ${total}…`;
+      },
+    });
+    transactions = transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
+  } else {
+    const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
+    if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
+    const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
+    transactions = transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
+  }
+
+  if (transactions.length === 0) {
+    throw new Error(`Nenhum lançamento com data e valor foi reconhecido em "${file.name}".`);
+  }
+
+  const payments = transactions.filter((item) => item.direction === DIRECTION.PAYMENT).length;
+  const receipts = transactions.length - payments;
+
+  counterparty.transactions = transactions;
+  counterparty.ledgerFile = file.name;
+  counterparty.rows = [];
+  counterparty.stats = summarizeReconciliation([]);
+  counterparty.page = 1;
+
+  if (statusEl) statusEl.textContent = `${transactions.length} lançamentos • ${payments} pagamentos • ${receipts} recebimentos`;
+  const label = dom['cp-ledger-status']?.closest('.cp-file');
+  if (label) label.classList.add('is-loaded');
+
+  cpAlert(
+    `Extrato lido: <strong>${transactions.length}</strong> lançamentos (${payments} pagamentos, ${receipts} recebimentos). Clique em <em>Conciliar agora</em>.`
+  );
+  updateCounterpartyRunButton();
+}
+
+function updateCounterpartyRunButton() {
+  const button = dom['btn-cp-run'];
+  if (!button) return;
+  button.disabled =
+    counterparty.busy || counterparty.contacts.length === 0 || counterparty.transactions.length === 0;
+}
+
+/** Executa a conciliação, aprende com o resultado e mostra a tabela. */
+async function runCounterpartyReconciliation() {
+  if (counterparty.busy) return;
+  if (counterparty.contacts.length === 0 || counterparty.transactions.length === 0) {
+    showToast('Carregue o cadastro e o extrato antes de conciliar.', 'warn');
+    return;
+  }
+
+  counterparty.busy = true;
+  updateCounterpartyRunButton();
+  setProcessing(true, 'Conciliando clientes e fornecedores…');
+
+  try {
+    const { rows, stats } = reconcileCounterparties(counterparty.transactions, counterparty.contacts, {
+      memory: state.memory,
+    });
+    rows.forEach((row, index) => {
+      row.id = index;
+    });
+
+    counterparty.rows = rows;
+    counterparty.stats = stats;
+    counterparty.page = 1;
+    counterparty.filter = 'all';
+    counterparty.search = '';
+    counterparty.linkSearch = '';
+    counterparty.linkingId = null;
+    if (dom['cp-search']) dom['cp-search'].value = '';
+    if (dom['cp-link-search']) dom['cp-link-search'].value = '';
+    dom['cp-link-panel']?.classList.add('hidden');
+
+    // A IA aprende a cada uso: os vínculos aceitos viram apelidos persistentes.
+    const learned = learnFromReconciliation(state.memory, rows);
+    state.memory.counterparties = learned.counterparties;
+    counterparty.learnedCount = learned.learnedCount;
+    state.memory.stats.correctionsLearned = (state.memory.stats.correctionsLearned || 0) + learned.learnedCount;
+    saveAiMemory(state.memory);
+    updateAiBadge();
+    renderAiModal();
+    scheduleCloudPush();
+
+    renderCounterparty();
+    cpAlert('');
+    showToast(
+      `Conciliação concluída: ${stats.matched} de ${stats.total} lançamentos vinculados (${stats.ambiguous} para revisar).`
+    );
+  } catch (error) {
+    console.error(error);
+    cpAlert(`<strong>Não foi possível conciliar.</strong> ${escapeHtml(error.message)}`, 'error');
+    showToast(`Falha na conciliação: ${error.message}`, 'error');
+  } finally {
+    counterparty.busy = false;
+    updateCounterpartyRunButton();
+    setProcessing(false);
+  }
+}
+
+function cpVisibleRows() {
+  const term = normalizeText(counterparty.search);
+  const includeUnmatched = dom['cp-include-unmatched']?.checked !== false;
+
+  return counterparty.rows.filter((row) => {
+    if (!includeUnmatched && !row.contact) return false;
+    if (counterparty.filter === 'matched' && !(row.status === 'matched' || row.status === 'manual')) return false;
+    if (counterparty.filter === 'review' && row.status !== 'ambiguous') return false;
+    if (counterparty.filter === 'unmatched' && row.contact) return false;
+    if (!term) return true;
+    return normalizeText(`${row.history} ${row.contact?.name || ''} ${row.date}`).includes(term);
+  });
+}
+
+function cpStatusBadge(row) {
+  if (row.status === 'manual') return '<span class="cp-badge">manual</span>';
+  if (row.learnedAlias) return '<span class="cp-badge">memória</span>';
+  if (row.status === 'matched') return '<span class="cp-badge">conciliado</span>';
+  if (row.status === 'ambiguous') return '<span class="cp-badge is-review">revisar</span>';
+  return '<span class="cp-badge is-none">sem contato</span>';
+}
+
+function renderCounterpartyRows() {
+  const tbody = dom['cp-tbody'];
+  if (!tbody) return;
+
+  const rows = cpVisibleRows();
+  const totalPages = Math.max(1, Math.ceil(rows.length / CP_PAGE_SIZE));
+  counterparty.page = Math.min(Math.max(1, counterparty.page), totalPages);
+  const start = (counterparty.page - 1) * CP_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + CP_PAGE_SIZE);
+
+  if (pageRows.length === 0) {
+    tbody.innerHTML =
+      '<tr><td colspan="6" class="empty-cell">Nenhum lançamento para este filtro.</td></tr>';
+  } else {
+    tbody.innerHTML = pageRows
+      .map(
+        (row) => `
+        <tr data-cp-row="${row.id}">
+          <td class="col-date">${escapeHtml(row.date || '')}</td>
+          <td class="col-money">${row.debitCents ? escapeHtml(formatValuePlainBr(row.debitCents / 100)) : '—'}</td>
+          <td class="col-money">${row.creditCents ? escapeHtml(formatValuePlainBr(row.creditCents / 100)) : '—'}</td>
+          <td class="col-money"><strong>${escapeHtml(formatValuePlainBr(row.valueCents / 100))}</strong></td>
+          <td class="col-hist">
+            <span class="cp-history">${escapeHtml(row.history)}</span><br />
+            ${cpStatusBadge(row)}
+            ${row.contact ? `<span class="cp-contact">${escapeHtml(row.contact.name)}</span>` : ''}
+          </td>
+          <td class="col-cp-link">
+            <button class="cp-link-btn" type="button" data-cp-link="${row.id}" title="Vincular este lançamento a outro contato">
+              ${row.contact ? 'Trocar' : 'Vincular'}
+            </button>
+          </td>
+        </tr>`
+      )
+      .join('');
+  }
+
+  const info = dom['cp-pagination-info'];
+  if (info) {
+    info.textContent = rows.length
+      ? `Exibindo ${start + 1}–${Math.min(start + CP_PAGE_SIZE, rows.length)} de ${rows.length}`
+      : 'Exibindo 0 de 0';
+  }
+  if (dom['cp-btn-prev']) dom['cp-btn-prev'].disabled = counterparty.page <= 1;
+  if (dom['cp-btn-next']) dom['cp-btn-next'].disabled = counterparty.page >= totalPages;
+}
+
+function renderCounterparty() {
+  const hasResult = counterparty.rows.length > 0;
+  dom['cp-result']?.classList.toggle('hidden', !hasResult);
+  updateCounterpartyRunButton();
+  if (!hasResult) return;
+
+  const stats = counterparty.stats;
+  const set = (id, value) => {
+    const element = dom[id];
+    if (element) element.textContent = value;
+  };
+
+  set('cp-kpi-count', String(stats.total));
+  set('cp-kpi-matched', `${stats.matched} conciliados • ${stats.ambiguous} para revisar`);
+  set('cp-kpi-debit', formatValuePlainBr(stats.debitCents / 100));
+  set('cp-kpi-suppliers', `${stats.suppliers} fornecedores`);
+  set('cp-kpi-credit', formatValuePlainBr(stats.creditCents / 100));
+  set('cp-kpi-customers', `${stats.customers} clientes`);
+  set('cp-kpi-value', formatValuePlainBr(stats.valueCents / 100));
+  set('cp-kpi-review', `${stats.unmatched} sem contato`);
+
+  if (dom['cp-learned']) {
+    dom['cp-learned'].textContent = counterparty.learnedCount
+      ? `A IA memorizou ${counterparty.learnedCount} vínculo(s). Na próxima conciliação esses históricos serão reconhecidos automaticamente.`
+      : 'Nenhum vínculo novo para memorizar nesta rodada.';
+  }
+
+  document.querySelectorAll('.pill[data-cp-filter]').forEach((button) => {
+    const active = button.dataset.cpFilter === counterparty.filter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+
+  renderCounterpartyRows();
+}
+
+function cpExportRows() {
+  return cpVisibleRows();
+}
+
+function cpExportName(extension) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `Conciliacao_Clientes_Fornecedores_${stamp}.${extension}`;
+}
+
+function cpGuardExport() {
+  if (counterparty.rows.length === 0) {
+    showToast('Concilie os arquivos antes de exportar.', 'warn');
+    return false;
+  }
+  if (cpExportRows().length === 0) {
+    showToast('O filtro atual não tem lançamentos para exportar.', 'warn');
+    return false;
+  }
+  return true;
+}
+
+async function cpExportXlsx() {
+  if (!cpGuardExport()) return;
+  try {
+    await exportCounterpartiesXlsx(cpExportRows(), cpExportName('xlsx'), window.ExcelJS);
+    showToast('Planilha .xlsx gerada com o layout data | débito | crédito | valor | histórico.');
+  } catch (error) {
+    showToast(`Falha ao gerar .xlsx: ${error.message}`, 'error');
+  }
+}
+
+function cpExportPdf() {
+  if (!cpGuardExport()) return;
+  try {
+    const rows = cpExportRows();
+    const stats = summarizeReconciliation(rows);
+    exportCounterpartiesPdf(rows, stats, cpExportName('pdf'));
+    showToast('PDF gerado com o layout data | débito | crédito | valor | histórico.');
+  } catch (error) {
+    showToast(`Falha ao gerar .pdf: ${error.message}`, 'error');
+  }
+}
+
+function cpExportCsv() {
+  if (!cpGuardExport()) return;
+  try {
+    exportCounterpartiesCsv(cpExportRows(), cpExportName('csv'));
+    showToast('CSV gerado (separador ";" e vírgula decimal) para abrir no Excel.');
+  } catch (error) {
+    showToast(`Falha ao gerar .csv: ${error.message}`, 'error');
+  }
+}
+
+function currentLinkingRow() {
+  return counterparty.rows.find((row) => row.id === counterparty.linkingId) || null;
+}
+
+function renderCounterpartyCandidates() {
+  const list = dom['cp-link-candidates'];
+  const row = currentLinkingRow();
+  if (!list || !row) return;
+
+  const pool = candidatesFor(counterparty.contacts, row.direction);
+  const term = normalizeText(counterparty.linkSearch);
+  const filtered = term
+    ? pool.filter((contact) =>
+        normalizeText(`${contact.name} ${contact.code} ${contact.document || ''}`).includes(term)
+      )
+    : pool;
+
+  const scored = scoreCandidates(row.rawHistory, filtered, {
+    memory: state.memory,
+    natureza: row.direction === DIRECTION.PAYMENT ? NATUREZA.CREDORA : NATUREZA.DEVEDORA,
+    limit: 12,
+  });
+
+  const entries = scored.length
+    ? scored
+    : term
+      ? filtered.slice(0, 12).map((contact) => ({ contact, score: 0 }))
+      : [];
+
+  if (entries.length === 0) {
+    list.innerHTML = `<li class="cp-candidate"><span class="cp-candidate-info"><span class="cp-candidate-name">Nenhum contato encontrado</span><span class="cp-candidate-meta">Tente parte do nome, do código ou do CPF/CNPJ.</span></span></li>`;
+    return;
+  }
+
+  list.innerHTML = entries
+    .map(
+      (entry) => `
+      <li class="cp-candidate">
+        <span class="cp-candidate-info">
+          <span class="cp-candidate-name">${escapeHtml(entry.contact.name)}</span>
+          <span class="cp-candidate-meta">
+            ${escapeHtml(entry.contact.code)} • ${escapeHtml(NATUREZA_LABELS[entry.contact.natureza] || entry.contact.natureza)}${
+              entry.score ? ` • ${Math.round(entry.score * 100)}%` : ''
+            }
+          </span>
+        </span>
+        <button class="btn btn-sm btn-primary" type="button" data-cp-pick="${escapeHtml(entry.contact.code)}">Vincular</button>
+      </li>`
+    )
+    .join('');
+}
+
+function openCounterpartyLinkPanel(rowId) {
+  const row = counterparty.rows.find((item) => item.id === rowId);
+  const panel = dom['cp-link-panel'];
+  if (!row || !panel) return;
+
+  counterparty.linkingId = rowId;
+  counterparty.linkSearch = '';
+  if (dom['cp-link-search']) dom['cp-link-search'].value = '';
+  if (dom['cp-link-history']) dom['cp-link-history'].textContent = row.rawHistory;
+  panel.classList.remove('hidden');
+  renderCounterpartyCandidates();
+  dom['cp-link-search']?.focus();
+}
+
+function applyCounterpartyLink(code) {
+  const row = currentLinkingRow();
+  if (!row) return;
+  const contact = counterparty.contacts.find((item) => item.code === code);
+  if (!contact) return;
+
+  row.contact = {
+    code: contact.code,
+    name: contact.name,
+    natureza: contact.natureza,
+    classification: contact.classification,
+  };
+  row.status = 'manual';
+  row.score = 1;
+  row.learnedAlias = false;
+  row.history = linkHistory(row.rawHistory, contact);
+
+  state.memory.counterparties = learnManualLink(state.memory, { history: row.rawHistory, contact });
+  saveAiMemory(state.memory);
+  updateAiBadge();
+  renderAiModal();
+  scheduleCloudPush();
+
+  counterparty.stats = summarizeReconciliation(counterparty.rows);
+  counterparty.linkingId = null;
+  dom['cp-link-panel']?.classList.add('hidden');
+  renderCounterparty();
+  showToast(`Vínculo memorizado: este histórico passa a apontar para ${contact.name}.`);
+}
+
+function bindCounterpartyEvents() {
+  dom['btn-counterparty']?.addEventListener('click', openCounterpartyModal);
+  dom['btn-close-cp']?.addEventListener('click', closeCounterpartyModal);
+  dom['cp-modal']?.addEventListener('click', (event) => {
+    if (event.target === dom['cp-modal']) closeCounterpartyModal();
+  });
+
+  dom['cp-contacts-input']?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      await loadCounterpartyContacts(file);
+    } catch (error) {
+      console.error(error);
+      cpAlert(`<strong>Cadastro não lido.</strong> ${escapeHtml(error.message)}`, 'error');
+      if (dom['cp-contacts-status']) dom['cp-contacts-status'].textContent = 'Falha ao ler o arquivo';
+    }
+  });
+
+  dom['cp-ledger-input']?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      await loadCounterpartyLedger(file);
+    } catch (error) {
+      console.error(error);
+      cpAlert(`<strong>Extrato não lido.</strong> ${escapeHtml(error.message)}`, 'error');
+      if (dom['cp-ledger-status']) dom['cp-ledger-status'].textContent = 'Falha ao ler o arquivo';
+    }
+  });
+
+  dom['btn-cp-run']?.addEventListener('click', runCounterpartyReconciliation);
+  dom['cp-include-unmatched']?.addEventListener('change', () => {
+    counterparty.page = 1;
+    renderCounterpartyRows();
+  });
+
+  dom['cp-search']?.addEventListener(
+    'input',
+    debounce((event) => {
+      counterparty.search = event.target.value;
+      counterparty.page = 1;
+      renderCounterpartyRows();
+    }, SEARCH_DEBOUNCE_MS)
+  );
+
+  document.querySelectorAll('.pill[data-cp-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      counterparty.filter = button.dataset.cpFilter || 'all';
+      counterparty.page = 1;
+      renderCounterparty();
+    });
+  });
+
+  dom['cp-btn-prev']?.addEventListener('click', () => {
+    counterparty.page -= 1;
+    renderCounterpartyRows();
+  });
+  dom['cp-btn-next']?.addEventListener('click', () => {
+    counterparty.page += 1;
+    renderCounterpartyRows();
+  });
+
+  dom['cp-tbody']?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-cp-link]');
+    if (!button) return;
+    openCounterpartyLinkPanel(Number(button.dataset.cpLink));
+  });
+
+  dom['btn-cp-link-close']?.addEventListener('click', () => {
+    counterparty.linkingId = null;
+    dom['cp-link-panel']?.classList.add('hidden');
+  });
+
+  dom['cp-link-search']?.addEventListener(
+    'input',
+    debounce((event) => {
+      counterparty.linkSearch = event.target.value;
+      renderCounterpartyCandidates();
+    }, SEARCH_DEBOUNCE_MS)
+  );
+
+  dom['cp-link-candidates']?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-cp-pick]');
+    if (!button) return;
+    applyCounterpartyLink(button.dataset.cpPick);
+  });
+
+  dom['btn-cp-export-xlsx']?.addEventListener('click', () => void cpExportXlsx());
+  dom['btn-cp-export-pdf']?.addEventListener('click', cpExportPdf);
+  dom['btn-cp-export-csv']?.addEventListener('click', cpExportCsv);
+}
+
 function bindGlobalEvents() {
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (dom['cp-modal'] && !dom['cp-modal'].classList.contains('hidden')) {
+      closeCounterpartyModal();
+      return;
+    }
     if (dom['ai-modal'] && !dom['ai-modal'].classList.contains('hidden')) {
       closeAiModal();
       return;
@@ -1779,6 +2385,7 @@ function init() {
   bindOutputEvents();
   bindModalEvents();
   bindCloudEvents();
+  bindCounterpartyEvents();
   bindGlobalEvents();
 
 
