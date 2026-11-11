@@ -78,13 +78,18 @@ async function request(config, url, init, fetchImpl) {
     throw new Error('Chave anônima recusada pelo Supabase. Confira a configuração.');
   }
   if (response.status === 404) {
-    throw new Error(
-      `A tabela "${TABLE_NAME}" ainda não existe no projeto Supabase. A migração ` +
-        'supabase/migrations/20261111120000_conversor_models.sql é aplicada automaticamente ' +
-        'pela integração Supabase + GitHub a cada push; se o projeto foi criado agora, ' +
-        'aguarde alguns segundos e recarregue. Para aplicar à mão, rode o SQL de ' +
-        'supabase/schema.sql no SQL Editor.'
+    // PostgREST responde 404 (PGRST205) quando a tabela ainda não existe — caso
+    // da migração do repositório que ainda não rodou no projeto. A UI usa o
+    // `code` para oferecer o SQL de instalação ao usuário.
+    const error = new Error(
+      `A tabela "${TABLE_NAME}" ainda não existe no projeto Supabase. ` +
+        'A migração de supabase/migrations/ é aplicada pela integração Supabase + GitHub ' +
+        '(com supabase/config.toml no repositório); se ela ainda não rodou, use o SQL de ' +
+        'instalação que o app oferece na aba Nuvem.'
     );
+    error.code = 'TABLE_MISSING';
+    error.status = 404;
+    throw error;
   }
   if (response.status === 429) {
     throw new Error('Muitas tentativas em pouco tempo. Aguarde alguns segundos.');

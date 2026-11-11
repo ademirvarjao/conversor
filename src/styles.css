@@ -811,6 +811,27 @@ body {
   flex: 1 1 220px;
 }
 
+/* Aviso de tabela ausente: só aparece quando o banco responde mas a migração
+   do repositório ainda não rodou no projeto. */
+.cloud-setup-hint {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #f0c36b;
+  background: #fff8e6;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.cloud-setup-hint p {
+  margin: 0 0 10px;
+}
+
+.cloud-setup-hint .btn-row {
+  margin-bottom: 8px;
+}
+
 .cloud-config summary {
   cursor: pointer;
   font-weight: 700;
