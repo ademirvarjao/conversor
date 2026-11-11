@@ -195,6 +195,137 @@ describe('analyzeFileLayout', () => {
   });
 });
 
+describe('colunas de entradas e saídas (débito × crédito)', () => {
+  // Layout de extrato bancário: o valor de cada linha aparece em UMA das duas
+  // colunas (Pagto. ou Recbto.), nunca nas duas, e existe uma coluna de saldo.
+  const extratoBancario = {
+    fileName: 'Extrato - Conta Corrente.pdf',
+    fileType: 'pdf',
+    headers: ['Lancto', 'Data', 'Beneficiário', 'Histórico', 'Pagto.', 'Recbto.', 'Saldo'],
+    rows: [
+      ['0', '31/05/2026', '', 'SALDO ANTERIOR', '', '', '10.000,00'],
+      ['87564', '01/06/2026', 'FORNECEDOR ALFA', 'LINK DE PGT', '2.357,98', '', '7.642,02'],
+      ['87565', '01/06/2026', 'CLIENTE BETA', 'VALOR RECEBIDO', '', '836,40', '8.478,42'],
+      ['87566', '02/06/2026', 'CLIENTE GAMA', 'VALOR RECEBIDO', '', '27.639,00', '36.117,42'],
+      ['87567', '03/06/2026', 'FORNECEDOR DELTA', 'PAGAMENTO', '1.500,00', '', '34.617,42'],
+      ['87568', '04/06/2026', 'CLIENTE EPSILON', 'VALOR RECEBIDO', '', '320,55', '34.937,97'],
+      ['87569', '05/06/2026', 'TARIFA', 'ITAÚ SUL', '45,90', '', '34.892,07'],
+      ['99999999', '30/06/2026', '', 'SALDO FINAL', '', '', '34.892,07'],
+    ],
+    bannerLines: ['EMPRESA EXEMPLO LTDA'],
+    skippedRows: 0,
+  };
+
+  const copiaComCabecalhos = (headers) => ({ ...extratoBancario, headers });
+
+  it('reconhece o par Pagto./Recbto. e confirma o sentido pelo saldo', () => {
+    const analysis = analyzeFileLayout(extratoBancario, loadAiMemory());
+
+    assert.deepEqual(rolesOf(analysis), {
+      Lancto: ROLES.IGNORE,
+      Data: ROLES.DATE,
+      Beneficiário: ROLES.HISTORY,
+      Histórico: ROLES.HISTORY,
+      'Pagto.': ROLES.VALUE_OUT,
+      'Recbto.': ROLES.VALUE_IN,
+      Saldo: ROLES.IGNORE,
+    });
+
+    const pagto = analysis.mappings.find((mapping) => mapping.header === 'Pagto.');
+    const recbto = analysis.mappings.find((mapping) => mapping.header === 'Recbto.');
+    assert.match(pagto.reason, /par entradas\/saídas/i);
+    assert.match(recbto.reason, /par entradas\/saídas/i);
+    assert.ok(pagto.confidence >= 90);
+    assert.deepEqual(analysis.warnings, []);
+  });
+
+  it('transforma cada linha em um único lançamento com o sinal correto', () => {
+    const analysis = analyzeFileLayout(extratoBancario, loadAiMemory());
+    const { records, skipped } = transformRowsWithConfig(extratoBancario, {
+      mappings: analysis.mappings,
+      rules: analysis.rules,
+    });
+
+    assert.deepEqual(
+      records.map((record) => record.value),
+      [-2357.98, 836.4, 27639, -1500, 320.55, -45.9]
+    );
+    assert.equal(skipped.length, 2); // saldo anterior e saldo final não têm valor
+  });
+
+  it('decide o sentido pelo saldo quando os cabeçalhos não ajudam', () => {
+    const anonimo = copiaComCabecalhos([
+      'Lancto',
+      'Data',
+      'Beneficiário',
+      'Histórico',
+      'Valor 1',
+      'Valor 2',
+      'Saldo',
+    ]);
+    const analysis = analyzeFileLayout(anonimo, loadAiMemory());
+    const roles = rolesOf(analysis);
+
+    assert.equal(roles['Valor 1'], ROLES.VALUE_OUT);
+    assert.equal(roles['Valor 2'], ROLES.VALUE_IN);
+  });
+
+  it('usa o cabeçalho Entradas/Saídas quando não existe coluna de saldo', () => {
+    const semSaldo = {
+      fileName: 'Movimento.xlsx',
+      fileType: 'xlsx',
+      headers: ['Data', 'Histórico', 'Entradas', 'Saídas'],
+      rows: [
+        ['01/06/2026', 'VENDA', '1.000,00', ''],
+        ['02/06/2026', 'FORNECEDOR', '', '400,00'],
+        ['03/06/2026', 'SERVICO', '250,00', ''],
+        ['04/06/2026', 'ALUGUEL', '', '1.200,00'],
+        ['05/06/2026', 'JUROS', '12,30', ''],
+        ['06/06/2026', 'TARIFA', '', '45,90'],
+      ],
+      bannerLines: [],
+      skippedRows: 0,
+    };
+
+    const analysis = analyzeFileLayout(semSaldo, loadAiMemory());
+    assert.deepEqual(rolesOf(analysis), {
+      Data: ROLES.DATE,
+      Histórico: ROLES.HISTORY,
+      Entradas: ROLES.VALUE_IN,
+      Saídas: ROLES.VALUE_OUT,
+    });
+
+    const { records } = transformRowsWithConfig(semSaldo, {
+      mappings: analysis.mappings,
+      rules: analysis.rules,
+    });
+    assert.deepEqual(
+      records.map((record) => record.value),
+      [1000, -400, 250, -1200, 12.3, -45.9]
+    );
+  });
+
+  it('não soma duas colunas de valor independentes', () => {
+    const duasColunas = {
+      fileName: 'Vendas.xlsx',
+      fileType: 'xlsx',
+      headers: ['Data', 'Histórico', 'Valor Bruto', 'Valor Líquido'],
+      rows: [
+        ['01/06/2026', 'VENDA A', '1.000,00', '950,00'],
+        ['02/06/2026', 'VENDA B', '2.000,00', '1.900,00'],
+        ['03/06/2026', 'VENDA C', '3.000,00', '2.850,00'],
+      ],
+      bannerLines: [],
+      skippedRows: 0,
+    };
+
+    const analysis = analyzeFileLayout(duasColunas, loadAiMemory());
+    const auto = analysis.mappings.filter((mapping) => mapping.role === ROLES.VALUE_AUTO);
+    assert.equal(auto.length, 1, 'apenas uma coluna pode ser valor automático');
+    assert.ok(analysis.warnings.some((warning) => /mais de uma coluna parecia valor/i.test(warning)));
+  });
+});
+
 describe('transformRowsWithConfig', () => {
   it('converte entrada/saída separadas em valores assinados', () => {
     const analysis = analyzeFileLayout(statementFile, loadAiMemory());
