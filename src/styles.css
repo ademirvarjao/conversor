@@ -1919,6 +1919,12 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
+.site-footer .footer-privacy {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  opacity: 0.72;
+}
+
 .site-footer p {
   margin: 0;
 }
@@ -2089,19 +2095,6 @@ body {
   align-items: center;
   justify-content: center;
   box-shadow: 0 0 0 2px #0f2744;
-}
-
-.brand-hint {
-  display: none;
-  margin: 3px 0 0;
-  font-size: 0.7rem;
-  color: #7dd3fc;
-}
-
-@media (min-width: 900px) {
-  .brand-hint {
-    display: block;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
