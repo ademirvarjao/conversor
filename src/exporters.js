@@ -540,6 +540,19 @@ export function exportCounterpartiesPdf(
 }
 
 /**
+ * Neutraliza texto que o Excel/Sheets interpretaria como fórmula ao abrir o CSV.
+ *
+ * Um histórico começando com `=`, `+`, `@`, tabulação ou CR (ou com `-` seguido
+ * de algo que não é número) vira fórmula na planilha. O prefixo com apóstrofo é
+ * a mitigação recomendada: a célula fica como texto e o apóstrofo não aparece.
+ */
+function neutralizeCsvText(text) {
+  const value = String(text ?? '');
+  if (/^[=+@\t\r]/.test(value) || /^-\D/.test(value)) return `'${value}`;
+  return value;
+}
+
+/**
  * Monta o CSV (separador ";" com vírgula decimal) do layout de conciliação.
  * Valores sempre positivos, sem separador de milhar — pronto para o Excel.
  */
@@ -548,7 +561,9 @@ export function buildCounterpartiesCsv(rows) {
   const lines = ['data;debito;credito;valor;historico'];
 
   for (const record of records) {
-    const history = record.history.replace(/[\r\n;]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const history = neutralizeCsvText(
+      record.history.replace(/[\r\n;]+/g, ' ').replace(/\s+/g, ' ').trim()
+    );
     lines.push(
       [record.dateBr, record.debit, record.credit, formatValuePlainBr(record.value), history].join(';')
     );
