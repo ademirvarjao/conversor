@@ -87,6 +87,19 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 
 **Quirks por banco** que o reconhecimento já carrega: valor com sufixo `D`/`C` grudado no número (Banco do Brasil, Caixa), extrato do Itaú em **blocos de 3 linhas** com saldo só no fechamento do dia, seções de saldo que não entram na conferência (`SALDO INVEST FÁCIL`, `SALDO TOTAL DISPONÍVEL DIA`) e o Nubank sem coluna de saldo.
 
+### Treinador automático no fundo, interface mais limpa (v1.20.0)
+
+- O **treinador automático** continua conferindo cada arquivo (colunas, sinais, datas, descartes e
+  saldo), mas o relatório deixou de ocupar espaço: fica numa **barra de uma linha** com o placar
+  (`8/8 conferências ✓`) e o resumo, e o detalhamento abre em **“Detalhes”**.
+- O painel abre **sozinho** só quando há o que decidir: conferência com **falha** ou **correção
+  sugerida**. Avisos (`duplicados`, banco fora do catálogo) ficam na barra — era isso que empurrava
+  o conteúdo para baixo em todo arquivo.
+- Botões de catálogo (atualizar/importar/exportar), “Reanalisar” e “Copiar diagnóstico” passaram para
+  dentro do detalhamento.
+- Correção de estrutura: o `#toast-container` e os `<script>` estavam **dentro** do modal de opções
+  (faltava um `</div>`), então os avisos de rodapé não apareciam. Agora o modal fecha no lugar certo.
+
 ### Mais três extratos reais: Caixa, SISPAG e o extrato mensal do Itaú (v1.19.0)
 
 - **Cabeçalho quebrado em várias linhas** (SISPAG: `referência da` / `empresa`, `data do` / `pagamento`)

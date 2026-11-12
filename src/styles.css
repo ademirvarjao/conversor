@@ -1037,28 +1037,40 @@ body {
 /* Treinador automático (diagnóstico do arquivo) */
 .coach-panel {
   margin-top: 18px;
-  padding: 16px;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-alt);
 }
 
-.coach-head {
+/* Barra do treinador: uma linha só. O relatório completo abre em "Detalhes". */
+.coach-bar {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.coach-head h3 {
-  margin: 0 0 4px;
-  font-size: 1rem;
-  color: var(--navy);
+.coach-bar-text {
+  margin: 0;
+  flex: 1 1 240px;
+  font-size: 0.82rem;
+  color: var(--text-light);
+}
+
+.coach-toggle {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.coach-body {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
 }
 
 .coach-sub {
-  margin: 0;
+  margin: 0 0 10px;
   font-size: 0.8rem;
   color: var(--text-light);
   max-width: 62ch;
