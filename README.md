@@ -92,9 +92,9 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 - O **treinador automático** continua conferindo cada arquivo (colunas, sinais, datas, descartes e
   saldo), mas o relatório deixou de ocupar espaço: fica numa **barra de uma linha** com o placar
   (`8/8 conferências ✓`) e o resumo, e o detalhamento abre em **“Detalhes”**.
-- O painel abre **sozinho** só quando há o que decidir: conferência com **falha** ou **correção
-  sugerida**. Avisos (`duplicados`, banco fora do catálogo) ficam na barra — era isso que empurrava
-  o conteúdo para baixo em todo arquivo.
+- O painel **não abre sozinho em nenhuma situação** (v1.20.1): fica recolhido em todo arquivo e só
+  abre pelo botão. Quando há correção esperando decisão, o próprio botão avisa
+  (`Detalhes • 1 correção`); trocar de arquivo recolhe de novo.
 - Botões de catálogo (atualizar/importar/exportar), “Reanalisar” e “Copiar diagnóstico” passaram para
   dentro do detalhamento.
 - Correção de estrutura: o `#toast-container` e os `<script>` estavam **dentro** do modal de opções

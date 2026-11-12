@@ -679,6 +679,10 @@ function coachChipHtml(coach) {
 
 /** Painel do treinador aberto/fechado (nasce fechado: menos poluição). */
 let coachOpen = false;
+/** Arquivo a que o estado acima se refere — trocar de arquivo recolhe de novo. */
+let coachFileKey = null;
+/** Texto do botão fechado (muda quando há correção sugerida). */
+let coachToggleLabel = 'Detalhes';
 
 /**
  * Abre/fecha o detalhamento do treinador. A conferência roda sempre — isto
@@ -692,7 +696,7 @@ function setCoachOpen(open, { force = false } = {}) {
   const button = dom['btn-coach-toggle'];
   if (body) body.classList.toggle('hidden', !coachOpen);
   if (button) {
-    button.textContent = coachOpen ? 'Ocultar detalhes' : 'Detalhes';
+    button.textContent = coachOpen ? 'Ocultar detalhes' : coachToggleLabel;
     button.setAttribute('aria-expanded', coachOpen ? 'true' : 'false');
   }
 }
@@ -746,14 +750,22 @@ function renderCoachPanel(file) {
 
   if (dom['coach-bar-text']) dom['coach-bar-text'].textContent = coachBarText(report);
 
-  // Só abre sozinho quando há algo para o usuário DECIDIR (falha ou correção
-  // sugerida). Avisos — duplicados, banco fora do catálogo — ficam na barra:
-  // abrir o painel inteiro por causa deles era justamente a poluição.
-  const precisaAtencao =
-    Number(report?.score?.fail || 0) > 0 ||
-    (Array.isArray(report?.fixes) && report.fixes.length > 0);
-  if (precisaAtencao) setCoachOpen(true, { force: true });
-  else setCoachOpen(coachOpen, { force: true });
+  // O botão avisa quando há correção esperando decisão — é o único caminho
+  // para o botão de aplicar, já que o painel não abre sozinho.
+  const pendentes = Array.isArray(report?.fixes) ? report.fixes.length : 0;
+  coachToggleLabel = pendentes
+    ? `Detalhes • ${pendentes} correção${pendentes > 1 ? 'ões' : ''}`
+    : 'Detalhes';
+
+  // NUNCA abre sozinho: o detalhamento nasce recolhido em todo arquivo e só
+  // abre quando o usuário clica em "Detalhes". Se ele já abriu, continua aberto
+  // enquanto o mesmo arquivo estiver em edição; ao trocar de arquivo, recolhe.
+  const fileKey = file.id ?? file.parsedFile?.fileName ?? '';
+  if (fileKey !== coachFileKey) {
+    coachFileKey = fileKey;
+    coachOpen = false;
+  }
+  setCoachOpen(coachOpen, { force: true });
 
   if (dom['coach-summary']) dom['coach-summary'].innerHTML = coachSummaryHtml(report);
   if (dom['coach-checks']) dom['coach-checks'].innerHTML = coachChecksHtml(report);
