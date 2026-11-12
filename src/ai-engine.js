@@ -192,6 +192,10 @@ const BASE_TOKEN_WEIGHTS = {
   lcto: { history: 1.2, ignore: 1.2 },
   numero: { ignore: 1.8 },
   nro: { ignore: 1.8 },
+  // CPF/CNPJ do favorecido é identificador, não histórico (SISPAG do Itaú).
+  cpf: { ignore: 3.2 },
+  cnpj: { ignore: 3.2 },
+  status: { ignore: 2.6 },
   sequencia: { ignore: 2.0 },
   seq: { ignore: 2.0 },
   fornecedor: { history: 4.2 },
@@ -1675,7 +1679,11 @@ export function transformRowsWithConfig(parsedFile, config) {
     const textCells = row.filter(
       (cell) => cleanWhitespace(cell) && parseMoneyValue(cell) === null && parseDateValue(cell) === null
     );
-    if (textCells.length > 0 && /^saldo\b/.test(normalizeText(textCells.join(' ')))) {
+    // O rótulo pode não ser a primeira célula de texto: o extrato da Caixa
+    // imprime "000000 | SALDO DIA | 0,00 C" e a linha de saldo entrava como
+    // lançamento de R$ 0,00. Basta uma célula de texto começar por "saldo".
+    const isSaldoRow = textCells.some((cell) => /^saldo\b/.test(normalizeText(cell)));
+    if (isSaldoRow && row.some((cell) => parseMoneyValue(cell) !== null)) {
       skipped.push({
         rowIdx: rowIndex + 1,
         reason: 'Linha de saldo (âncora de conferência)',

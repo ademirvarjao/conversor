@@ -31,8 +31,7 @@
         </a>
         <div>
           <h1 class="brand-title">Conversor</h1>
-          <p class="brand-sub">Unificação de conciliações (.pdf e .xlsx) com IA Adaptativa de Layouts</p>
-          <p class="brand-hint">Ícone abre o conciliador de clientes/fornecedores</p>
+          <p class="brand-sub">Conciliação de extratos (.pdf e .xlsx)</p>
         </div>
       </div>
 
@@ -129,7 +128,7 @@
           </svg>
         </div>
         <p class="dropzone-title">Arraste seus arquivos <strong>.pdf</strong> e <strong>.xlsx</strong> aqui ou <span class="link-like">clique para selecionar</span></p>
-        <p id="dropzone-hint" class="dropzone-hint">Você pode enviar vários arquivos juntos (ex.: Pagamentos + Recebimentos). Tudo é processado localmente no navegador; nada é enviado a servidores.</p>
+        <p id="dropzone-hint" class="dropzone-hint">Pode enviar vários de uma vez (ex.: Pagamentos + Recebimentos). Tudo é processado aqui no navegador.</p>
       </div>
 
       <div id="files-list" class="files-grid hidden" aria-live="polite"></div>
@@ -183,11 +182,9 @@
       </div>
 
       <p class="trainer-hint">
-        Colunas separadas de <strong>entradas e saídas</strong> (ex.: <code>Pagto.</code> e
-        <code>Recbto.</code>, <code>Débito</code> e <code>Crédito</code>)? A IA identifica o par e
-        define o sinal de cada lançamento automaticamente. Para ajustar na mão, basta marcar uma
-        coluna como <em>Valor Recebido / Crédito (+)</em> e a outra como
-        <em>Valor Pago / Débito (-)</em>.
+        Entradas e saídas em colunas separadas (<code>Pagto.</code>/<code>Recbto.</code>)? A IA acha o
+        par e define o sinal. Na mão: uma coluna como <em>Valor Recebido (+)</em> e a outra como
+        <em>Valor Pago (-)</em>.
       </p>
 
       <div class="rules-bar">
@@ -211,10 +208,7 @@
         <div class="coach-head">
           <div>
             <h3>Treinador automático</h3>
-            <p class="coach-sub">
-              A mesma análise que um especialista faria à mão: confere colunas, sinais, datas,
-              descartes e <strong>fecha o saldo linha a linha</strong> antes de memorizar o layout.
-            </p>
+            <p class="coach-sub">Confere colunas, sinais, datas, descartes e o saldo antes de memorizar o layout.</p>
           </div>
           <span id="coach-score" class="coach-score"></span>
         </div>
@@ -241,9 +235,7 @@
             <input id="coach-registry-auto" type="checkbox" checked />
             <span>Manter o catálogo atualizado sozinho</span>
           </label>
-          <p id="coach-registry-status" class="coach-registry-status">
-            Catálogo de bancos: revalida sozinho ao abrir. Só a lista é baixada — nada do seu arquivo sai do navegador.
-          </p>
+          <p id="coach-registry-status" class="coach-registry-status">Catálogo de bancos: revalida sozinho ao abrir. Nada do seu arquivo sai do navegador.</p>
         </div>
 
         <div class="coach-actions">
@@ -260,7 +252,7 @@
       </div>
 
       <div class="trainer-footer">
-        <p class="trainer-tip">Ao confirmar, a IA atualiza os pesos semânticos das colunas e memoriza este perfil para reconhecer automaticamente variações futuras. O <strong>treinador automático</strong> acima já conferiu colunas, sinais, datas e o saldo linha a linha.</p>
+        <p class="trainer-tip">A IA memoriza este perfil para reconhecer variações futuras.</p>
         <button id="btn-train-apply" class="btn btn-primary" type="button">
           Treinar IA e Aplicar Layout
         </button>
@@ -385,8 +377,8 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.18.1</span> — seus arquivos nunca saem do navegador; só os modelos aprendidos podem ir para a nuvem, cifrados com a sua chave.</p>
-      <p>Conciliação padronizada em <code>data</code> | <code>valor</code> | <code>historico</code>.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.19.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
+      <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>
   </footer>
 
