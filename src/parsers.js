@@ -153,6 +153,12 @@ export function parseDateValue(value, { allowExcelSerial = false } = {}) {
 const CURRENCY_SYMBOLS = /R\$|US\$|BRL|USD|EUR|GBP|\$|€|£/gi;
 const D_C_SUFFIX = /\s*[([]?\s*([DCdc])\s*[)\]]?$/;
 
+// Relatórios de pagamento (SISPAG do Itaú, consulta de Pix) imprimem o status
+// colado no valor — "749,60 efetuado". O status não é valor, mas se ficar no
+// texto a leitura falha e o relatório inteiro sai vazio.
+const STATUS_TAIL_RE =
+  /\s+(?:efetuado|efetivado|agendado|processado|processando|pendente|cancelado|liquidado|realizado|baixado|aprovado|rejeitado|devolvido|em\s+aberto)$/i;
+
 /**
  * Interpreta valores monetários nos formatos:
  *   -R$ 2.000,00 | R$ 8.002,12 | 1234,56 | -1234.56 | (1.234,56)
@@ -170,6 +176,10 @@ export function parseMoneyValue(raw) {
 
   let text = cleanWhitespace(raw).replace(/[\u2212\u2013\u2014]/g, '-');
   if (!text || text.length > 40) return null;
+
+  // "749,60 efetuado" / "1.200,00 agendado": o status vem depois do número.
+  text = text.replace(STATUS_TAIL_RE, '').trim();
+  if (!text) return null;
 
   // Datas e códigos com barras não são valores monetários.
   if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$/.test(text) && /[/]/.test(text)) return null;
@@ -831,7 +841,7 @@ function mergeHeaderItems(items) {
  * @returns {{line:object, items:Array<{str:string,x:number,w:number}>, score:number}|null}
  */
 export function findHeaderRow(allPageLines) {
-  let best = null;
+  const candidates = [];
 
   for (const line of allPageLines) {
     const items = mergeHeaderItems(line.items);
@@ -850,7 +860,28 @@ export function findHeaderRow(allPageLines) {
     const hasValueOrBalance = /\b(valor|saldo|credito|debito|entrada|saida)\b/.test(norm);
     const score = labels.length * 2 + items.length + (hasValueOrBalance ? 3 : 0);
 
-    if (!best || score > best.score) best = { line, items, score };
+    candidates.push({ line, items, score, signature: norm });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // O cabeçalho da tabela principal é o que o banco REPETE em cada página.
+  // Num extrato mensal do Itaú há também a tabela de CDB ("data | data | valor |
+  // saldo bruto | saldo líquido"), que tem mais rótulos numa única página e
+  // ganhava a disputa: o extrato inteiro era lido com as colunas da tabela de
+  // investimentos e saía vazio. Repetição quebra esse empate.
+  const pagesBySignature = new Map();
+  for (const candidate of candidates) {
+    const pages = pagesBySignature.get(candidate.signature) || new Set();
+    pages.add(candidate.line.page);
+    pagesBySignature.set(candidate.signature, pages);
+  }
+
+  let best = null;
+  for (const candidate of candidates) {
+    const pages = pagesBySignature.get(candidate.signature).size;
+    const total = candidate.score + Math.max(0, pages - 1) * 8;
+    if (!best || total > best.score) best = { line: candidate.line, items: candidate.items, score: total };
   }
 
   return best;
@@ -864,26 +895,91 @@ export function findHeaderRow(allPageLines) {
  * numérica costumam ficar bem à esquerda dos números (alinhados à direita).
  */
 export function buildColumnsFromHeaderRow(headerRow) {
-  const items = headerRow.items;
+  const items = headerRow?.items;
   if (!items || items.length < 3) return null;
+  return boundsFromHeaderItems(
+    items.map((item) => ({ x: item.x, right: item.x + (item.w || 0), label: item.str }))
+  );
+}
 
-  const bounds = items.map((item, idx) => ({
+/** Fronteiras das colunas a partir dos rótulos já agrupados (esquerda → direita). */
+function boundsFromHeaderItems(items) {
+  const ordered = [...items].sort((a, b) => a.x - b.x);
+  if (ordered.length < 3) return null;
+
+  const bounds = ordered.map((item, idx) => ({
     idx,
-    anchor: (item.x + (item.x + (item.w || 0))) / 2,
+    anchor: (item.x + item.right) / 2,
     start: -Infinity,
     end: Infinity,
-    label: item.str,
+    label: item.label,
   }));
 
-  for (let i = 0; i < items.length - 1; i++) {
-    const right = items[i].x + (items[i].w || 0);
-    const nextStart = items[i + 1].x;
-    const boundary = right <= nextStart ? (right + nextStart) / 2 : (items[i].x + nextStart) / 2;
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const right = ordered[i].right;
+    const nextStart = ordered[i + 1].x;
+    const boundary = right <= nextStart ? (right + nextStart) / 2 : (ordered[i].x + nextStart) / 2;
     bounds[i].end = boundary;
     bounds[i + 1].start = boundary;
   }
 
   return bounds;
+}
+
+// Rótulos que são legenda, não coluna: no extrato mensal do Itaú a mesma linha
+// do cabeçalho traz "A = agendamento", "B = ações movimentadas"… à margem.
+const HEADER_LEGEND_RE = /^[A-Za-zÀ-ÿ]\s*=\s*\S/;
+
+/**
+ * Colunas de um cabeçalho quebrado em várias linhas (SISPAG do Itaú:
+ * "referência da" / "empresa" embaixo de "tipo de pagamento"; Caixa:
+ * "Valor" + "(R$)"). Junta os rótulos que estão na MESMA posição
+ * horizontal, de cima para baixo, em vez de escolher uma única linha — antes a
+ * linha do meio virava o cabeçalho inteiro e as outras 2 eram espremidas nas
+ * colunas vizinhas, trocando a coluna de data com a de valor.
+ */
+export function buildColumnsFromHeaderRows(headerLines) {
+  const entries = [];
+  for (const line of headerLines || []) {
+    for (const item of line.items) {
+      if (HEADER_LEGEND_RE.test(item.str.trim())) continue;
+      entries.push({
+        str: item.str,
+        x: item.x,
+        right: item.x + (item.w || 0),
+        y: line.y,
+      });
+    }
+  }
+  if (entries.length < 3) return null;
+
+  entries.sort((a, b) => a.x - b.x);
+
+  const groups = [];
+  for (const entry of entries) {
+    const last = groups[groups.length - 1];
+    // Mesma coluna: rótulos praticamente na mesma abcissa (a 2ª/3ª linha do
+    // cabeçalho repete a posição do rótulo de cima).
+    if (last && entry.x - last.x <= 12) {
+      last.items.push(entry);
+      last.right = Math.max(last.right, entry.right);
+      continue;
+    }
+    groups.push({ x: entry.x, right: entry.right, items: [entry] });
+  }
+
+  const items = groups.map((group) => ({
+    x: group.x,
+    right: group.right,
+    label: cleanWhitespace(
+      [...group.items]
+        .sort((a, b) => b.y - a.y)
+        .map((entry) => entry.str)
+        .join(' ')
+    ),
+  }));
+
+  return boundsFromHeaderItems(items);
 }
 
 /**
@@ -912,8 +1008,12 @@ export function headerColumnsLookSane(bounds, dataLines) {
     }
   }
 
-  const vazias = stats.filter((stat) => stat.items === 0).length;
-  if (vazias > 0) return false;
+  // Uma coluna pode ser esparsa e continuar legítima: no extrato mensal do Itaú
+  // a coluna "saldo R$" só aparece nas linhas de saldo, que não são candidatas
+  // a dado. Antes, uma coluna vazia derrubava o cabeçalho inteiro e o extrato
+  // caía no agrupamento por posição — com 5 colunas estimadas às cegas.
+  const comDados = stats.filter((stat) => stat.items > 0).length;
+  if (comDados < Math.max(3, Math.ceil(stats.length * 0.6))) return false;
   if (!stats.some((stat) => stat.dates >= 1)) return false;
   if (!stats.some((stat) => stat.money >= 1)) return false;
   return true;
@@ -1061,15 +1161,194 @@ function boundsFromClusters(colClusters) {
  * @param {Array<{page:number,y:number,h:number,items:Array}>} allPageLines
  * @returns {{headers:string[],rows:string[][],bannerLines:string[],skippedRows:number,columnCount:number}}
  */
+/**
+ * Data de referência do documento (a que aparece com mais frequência), usada
+ * para completar datas sem ano.
+ */
+function findReferenceDate(allPageLines) {
+  const votes = new Map();
+  for (const line of allPageLines) {
+    for (const item of line.items) {
+      const iso = parseDateValue(item.str);
+      if (!iso) continue;
+      votes.set(iso, (votes.get(iso) || 0) + 1);
+    }
+  }
+  if (votes.size === 0) return null;
+  let best = null;
+  for (const [iso, count] of votes) {
+    if (!best || count > best.count || (count === best.count && iso > best.iso)) best = { iso, count };
+  }
+  const [year, month] = best.iso.split('-').map(Number);
+  return { year, month };
+}
+
+/**
+ * Blocos de cabeçalho do documento, em ordem de leitura.
+ *
+ * Um PDF pode trazer MAIS DE UMA tabela (extrato mensal do Itaú: movimentação
+ * da conta, aplicações automáticas, CDB…). Cada bloco de cabeçalho — a linha e
+ * as vizinhas que formam o mesmo rótulo — marca onde começa uma tabela nova.
+ * As linhas de uma tabela que não é a principal são descartadas, senão os
+ * números do CDB entravam como "entradas" da conta corrente.
+ */
+function collectHeaderBlocks(allPageLines) {
+  const candidates = [];
+
+  for (const line of allPageLines) {
+    const items = mergeHeaderItems(line.items);
+    if (items.length < 2) continue;
+    const allText = items.every(
+      (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
+    );
+    if (!allText) continue;
+    const labels = items.filter((item) => COLUMN_LABEL_RE.test(normalizeText(item.str)));
+    if (labels.length < 2) continue;
+    candidates.push({ line, labelCount: labels.length });
+  }
+
+  candidates.sort((a, b) => a.line.page - b.line.page || b.line.y - a.line.y);
+
+  const blocks = [];
+  for (const candidate of candidates) {
+    const last = blocks[blocks.length - 1];
+    if (
+      last &&
+      last.page === candidate.line.page &&
+      Math.abs(last.y - candidate.line.y) <= 12
+    ) {
+      last.lines.push(candidate.line);
+      last.labelCount = Math.max(last.labelCount, candidate.labelCount);
+      continue;
+    }
+    blocks.push({
+      page: candidate.line.page,
+      y: candidate.line.y,
+      lines: [candidate.line],
+      labelCount: candidate.labelCount,
+    });
+  }
+
+  // Assinatura do bloco: o mesmo cabeçalho repetido em cada página tem a mesma
+  // assinatura (é o que diferencia "continuação da tabela principal" de
+  // "começou outra tabela").
+  for (const block of blocks) {
+    const texts = [];
+    for (const line of block.lines) {
+      for (const item of line.items) {
+        if (HEADER_LEGEND_RE.test(item.str.trim())) continue;
+        texts.push(item.str);
+      }
+    }
+    block.signature = normalizeText(texts.join(' '));
+  }
+
+  return blocks;
+}
+
+/**
+ * Completa datas sem ano ("01/10") nas próprias linhas do PDF.
+ *
+ * O extrato mensal do Itaú imprime dia/mês na tabela e o ano só no título. Sem
+ * completar isso NENHUMA linha tem data válida — o arquivo inteiro saía vazio
+ * (0 lançamentos em 466 linhas) porque a coluna de data nunca era detectada.
+ * O ano vem da data completa mais frequente do documento e é ajustado na
+ * virada (dez → jan).
+ */
+function completeShortDates(allPageLines) {
+  const SHORT_DATE_RE = /^(\d{1,2})\/(\d{1,2})$/;
+  const entries = [];
+
+  for (const line of allPageLines) {
+    for (const item of line.items) {
+      const match = SHORT_DATE_RE.exec(cleanWhitespace(item.str));
+      if (!match) continue;
+      const day = Number(match[1]);
+      const month = Number(match[2]);
+      if (day < 1 || day > 31 || month < 1 || month > 12) continue;
+      entries.push({ item, day, month, page: line.page, y: line.y });
+    }
+  }
+
+  if (entries.length < 3) return 0;
+
+  // Documento que já imprime datas completas não precisa de ajuda: no SISPAG
+  // do Itaú uma referência de nota solta como "03/03" virava 03/03/2027.
+  let fullDates = 0;
+  for (const line of allPageLines) {
+    for (const item of line.items) {
+      if (parseDateValue(item.str) !== null) fullDates += 1;
+    }
+  }
+  if (fullDates >= entries.length * 2) return 0;
+
+  const reference = findReferenceDate(allPageLines);
+  let year = reference ? reference.year : new Date().getFullYear();
+  let previousMonth = reference ? reference.month : entries[0].month;
+
+  // Ordem do documento: página e, dentro dela, de cima para baixo.
+  entries.sort((a, b) => a.page - b.page || b.y - a.y);
+
+  let completed = 0;
+  for (const entry of entries) {
+    if (entry.month < previousMonth - 6) year += 1;
+    else if (entry.month > previousMonth + 6) year -= 1;
+    previousMonth = entry.month;
+    entry.item.str = `${pad(entry.day)}/${pad(entry.month)}/${year}`;
+    completed += 1;
+  }
+
+  return completed;
+}
+
 export function buildTableFromTextLines(allPageLines) {
   if (!Array.isArray(allPageLines) || allPageLines.length === 0) {
     throw new Error('Nenhum texto extraível encontrado no PDF (pode ser um documento digitalizado).');
   }
 
+  // 0a. Datas "dd/mm" ganham o ano do documento (extrato mensal do Itaú).
+  completeShortDates(allPageLines);
+
   // 0. Cabeçalho da tabela (âncora de tudo): só o que está ABAIXO dele é dado.
   const headerRow = findHeaderRow(allPageLines);
   const headerPage = headerRow ? headerRow.line.page : null;
   const headerY = headerRow ? headerRow.line.y : null;
+
+  // Zona de cada tabela: linhas abaixo de um cabeçalho que NÃO é o principal
+  // pertencem a outra tabela do mesmo PDF e não entram no resultado.
+  const headerBlocks = collectHeaderBlocks(allPageLines);
+  const mainBlock = headerRow
+    ? headerBlocks.find((block) => block.lines.includes(headerRow.line))
+    : null;
+  const isHeaderBlockOfMain = (block) =>
+    mainBlock ? block.signature === mainBlock.signature : true;
+  const otherTableKeys = new Set();
+  if (headerRow && headerBlocks.length > 1) {
+    for (const block of headerBlocks) {
+      if (isHeaderBlockOfMain(block)) continue;
+      // Só uma tabela de verdade: precisa de pelo menos 2 rótulos e de estar
+      // abaixo de um cabeçalho principal já visto (senão é legenda/texto).
+      for (const line of block.lines) otherTableKeys.add(`${line.page}:${line.y}`);
+    }
+  }
+
+  const foreignRowKeys = new Set();
+  if (otherTableKeys.size > 0) {
+    const starts = headerBlocks
+      .filter((block) => !isHeaderBlockOfMain(block))
+      .map((block) => ({ page: block.page, y: block.y }));
+    for (const line of allPageLines) {
+      const owner = starts.find(
+        (start) => line.page === start.page && line.y <= start.y + 0.5
+      );
+      if (!owner) continue;
+      const mainAfter = headerBlocks
+        .filter((block) => isHeaderBlockOfMain(block))
+        .find((block) => block.page === line.page && block.y < owner.y);
+      if (mainAfter && line.y <= mainAfter.y + 0.5) continue;
+      foreignRowKeys.add(`${line.page}:${line.y}`);
+    }
+  }
 
   // 1. Linhas candidatas a dados: contêm data + valor, ou data e 3+ colunas.
   const candidateDataLines = allPageLines.filter((line) => {
@@ -1084,6 +1363,14 @@ export function buildTableFromTextLines(allPageLines) {
     if (isPeriodBanner(lineText(line))) return false;
     return (hasDate && hasMoney) || (hasDate && line.items.length >= 3);
   });
+
+  // As linhas de outra tabela do mesmo PDF não podem influenciar as colunas da
+  // principal (na página 8 do extrato mensal a tabela de aplicações imprime
+  // datas em x=58 e puxava a 1ª coluna para a margem).
+  for (let index = candidateDataLines.length - 1; index >= 0; index--) {
+    const line = candidateDataLines[index];
+    if (foreignRowKeys.has(`${line.page}:${line.y}`)) candidateDataLines.splice(index, 1);
+  }
 
   if (candidateDataLines.length === 0) {
     throw new Error(
@@ -1101,7 +1388,23 @@ export function buildTableFromTextLines(allPageLines) {
   // ("- STR") começa 45 pt à direita do rótulo: pelo agrupamento de posições
   // isso virava uma coluna fantasma ("Coluna 5") e jogava o valor para a
   // coluna errada.
-  const headerColumns = headerRow ? buildColumnsFromHeaderRow(headerRow) : null;
+  // Linhas que compõem o cabeçalho: a do cabeçalho e as vizinhas (±12 pt) que
+  // também são texto puro. Cabeçalho quebrado em várias linhas (SISPAG) precisa
+  // das três para saber onde começa cada coluna.
+  const labelLines = headerRow
+    ? allPageLines.filter(
+        (line) =>
+          line.page === headerRow.line.page &&
+          Math.abs(line.y - headerRow.line.y) <= 12 &&
+          line.items.every(
+            (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
+          )
+      )
+    : [];
+
+  const headerColumnsFromLines = headerRow ? buildColumnsFromHeaderRows(labelLines) : null;
+  const headerColumns = headerColumnsFromLines || (headerRow ? buildColumnsFromHeaderRow(headerRow) : null);
+  const headerModelFromLines = Boolean(headerColumnsFromLines);
   const headerModel =
     headerColumns && headerColumns.length >= 3 && headerColumnsLookSane(headerColumns, candidateDataLines)
       ? headerColumns
@@ -1261,18 +1564,9 @@ export function buildTableFromTextLines(allPageLines) {
 
   // Se o cabeçalho foi reconhecido semanticamente, ele manda: linhas vizinhas
   // ("COOP.: 4327 - 3 SICOOB EMPRESAS RJ") não entram como nome de coluna.
-  const labelLines = headerRow
-    ? allPageLines.filter(
-        (line) =>
-          line.page === headerRow.line.page &&
-          Math.abs(line.y - headerRow.line.y) <= 12 &&
-          line.items.every(
-            (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
-          )
-      )
-    : headerLines;
+  const partLines = headerRow ? labelLines : headerLines;
 
-  for (const headerLine of labelLines) {
+  for (const headerLine of partLines) {
     // Uma coluna costuma ter um rótulo por linha de cabeçalho; quando o rótulo
     // flutua entre duas colunas (caso de coluna numérica alinhada à direita) ele
     // não deve repetir a coluna do rótulo anterior da mesma linha.
@@ -1312,7 +1606,13 @@ export function buildTableFromTextLines(allPageLines) {
     }
   }
 
-  const headers = headerParts.map((parts, idx) => cleanWhitespace(parts.join(' ')) || `Coluna ${idx + 1}`);
+  // O rótulo vem do cabeçalho já agrupado por posição (que descarta legendas do
+  // tipo "A = agendamento"); \`headerParts\` só completa quando ele falta.
+  const headers = headerModelFromLines && headerModel
+    ? headerModel.map((column, idx) =>
+        cleanWhitespace(column.label || headerParts[idx].join(' ')) || `Coluna ${idx + 1}`
+      )
+    : headerParts.map((parts, idx) => cleanWhitespace(parts.join(' ')) || `Coluna ${idx + 1}`);
 
   // 6. Montar as linhas de dados de todas as páginas.
   const headerSignatures = new Set(headerLines.map((line) => normalizeText(lineText(line))));
@@ -1353,6 +1653,27 @@ export function buildTableFromTextLines(allPageLines) {
     considerTopLine(line);
   }
 
+  // Abcissa em que a 1ª coluna imprime DADO (dinheiro ou data). Serve para
+  // reconhecer texto de legenda na margem esquerda: no extrato mensal do Itaú
+  // as siglas ("D = débito a compensar") ficam ~95 pt à esquerda da data,
+  // enquanto num relatório agrupado por cliente o nome do cliente está na
+  // própria coluna de dados (e precisa continuar sendo título de grupo).
+  let typedFirstColX = Infinity;
+  for (const line of candidateDataLines) {
+    for (const item of line.items) {
+      if (assignItemToColumn(item) !== 0) continue;
+      if (parseMoneyValue(item.str) === null && parseDateValue(item.str) === null) continue;
+      typedFirstColX = Math.min(typedFirstColX, item.x);
+    }
+  }
+
+  const dataYByPage = new Map();
+  for (const line of candidateDataLines) {
+    const list = dataYByPage.get(line.page);
+    if (list) list.push(line.y);
+    else dataYByPage.set(line.page, [line.y]);
+  }
+
   const rows = [];
   const skipped = [];
   const entries = [];
@@ -1366,6 +1687,11 @@ export function buildTableFromTextLines(allPageLines) {
   for (const line of allPageLines) {
     const norm = normalizeText(lineText(line));
     if (!norm) continue;
+
+    if (foreignRowKeys.has(`${line.page}:${line.y}`)) {
+      skipped.push(norm);
+      continue;
+    }
 
     // Rodapé/hyperlink: só é descartado quando a linha não tem data nem valor
     // (um lançamento de verdade com "0800" no histórico continua valendo).
@@ -1414,6 +1740,21 @@ export function buildTableFromTextLines(allPageLines) {
       continue;
     }
 
+    // Legenda/rodapé na margem: no extrato mensal do Itaú a coluna da esquerda
+    // traz "D = débito a compensar", "Para demais siglas…", "Explicativas no
+    // final do extrato" e o rodapé da página ("Este material está disponível
+    // na Internet…"). Nada disso é lançamento nem título de grupo — antes
+    // grudava no histórico do lançamento seguinte.
+    const isMarginNote =
+      typedFirstColX !== Infinity &&
+      line.items.every((item) => item.x <= typedFirstColX - 45) &&
+      !line.items.some((item) => parseMoneyValue(item.str) !== null || parseDateValue(item.str) !== null);
+    const isPageFooter = line.y <= 24 && !line.items.some((item) => parseMoneyValue(item.str) !== null);
+    if (isMarginNote || isPageFooter) {
+      skipped.push(norm);
+      continue;
+    }
+
     // Cabeçalho de grupo de um relatório agrupado por cliente/fornecedor:
     // texto único, encostado na margem esquerda (à esquerda da 1ª coluna de
     // dados) e colado nas linhas de dados. Vira uma linha própria, usada pelo
@@ -1421,21 +1762,40 @@ export function buildTableFromTextLines(allPageLines) {
     const pageTopDataY = firstDataYByPage.get(line.page);
     // Positivo = a linha está acima da primeira linha de dados da página.
     const distanceAboveData = pageTopDataY === undefined ? 0 : line.y - pageTopDataY;
+    // Título de grupo fica com folga em relação às linhas de dados. No SISPAG
+    // do Itaú sobram fragmentos de nome sozinhos a 3 pt da linha do valor —
+    // eles viravam "título de grupo" e eram colados no histórico seguinte.
+    const nearestDataY = (dataYByPage.get(line.page) || []).reduce(
+      (best, y) => (Math.abs(y - line.y) < Math.abs(best - line.y) ? y : best),
+      Number.POSITIVE_INFINITY
+    );
     const isSectionHeader =
       nonEmptyCount === 1 &&
       !hasDate &&
       text.length >= 3 &&
       text.length <= 120 &&
+      Math.abs(nearestDataY - line.y) >= 6 &&
       !isBannerOrSummary(text) &&
       // No topo da página só aceitamos a seção colada na tabela; mais acima é
       // cabeçalho/razão social repetido pelo sistema emissor.
       (distanceAboveData <= 0 || distanceAboveData <= 40) &&
       line.items.every((item) => item.x <= colClusters[0].anchor + 6);
 
+    // Abaixo da linha de cabeçalho da tabela é ZONA DE DADOS: uma linha daqui
+    // não pode ser confundida com o cabeçalho só porque o texto é parecido. No
+    // SISPAG do Itaú a primeira linha de um pagamento ("ESPECIFARMA COM DE |
+    // Boleto outros | NF286536-") era capturada como "cabeçalho" pela região
+    // acima da 1ª linha de dados e o nome do fornecedor desaparecia.
+    const abaixoDoCabecalho =
+      headerRow !== null &&
+      (line.page > headerRow.line.page ||
+        (line.page === headerRow.line.page && line.y < headerRow.line.y));
+    const isKnownHeaderLine = !abaixoDoCabecalho && headerSignatures.has(norm);
+
     // Linhas acima da primeira linha de dados da página são cabeçalho/banner.
     if (!isSectionHeader) {
       if (pageTopDataY !== undefined && line.y > pageTopDataY + PAGE_TOP_SLACK) continue;
-      if (headerSignatures.has(norm)) {
+      if (isKnownHeaderLine) {
         skipped.push(norm);
         continue;
       }
@@ -1443,7 +1803,7 @@ export function buildTableFromTextLines(allPageLines) {
 
     // Linhas de total/resumo só são descartadas quando não têm data própria:
     // um lançamento cujo histórico começa por "TOTAL ..." continua válido.
-    if (headerSignatures.has(norm) || (isBannerOrSummary(text) && (!hasDate || nonEmptyCount <= 2))) {
+    if (isKnownHeaderLine || (isBannerOrSummary(text) && (!hasDate || nonEmptyCount <= 2))) {
       skipped.push(norm);
       continue;
     }
@@ -1507,7 +1867,10 @@ export function buildTableFromTextLines(allPageLines) {
 
   for (const entry of entries) {
     if (entry.hasDate || entry.isSectionHeader || isCarryCandidate(entry)) continue;
-    if (entry.nonEmptyCount === 0 || entry.nonEmptyCount > 2 || entry.hasMoney) {
+    // Linhas de continuação podem preencher até 3 colunas (SISPAG do Itaú:
+    // "ESPECIFARMA COM DE | Boleto outros | NF286536-"); antes o limite era 2
+    // e o nome do favorecido se perdia.
+    if (entry.nonEmptyCount === 0 || entry.nonEmptyCount > 3 || entry.hasMoney) {
       skipped.push(entry.norm);
       continue;
     }
