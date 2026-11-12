@@ -5,6 +5,7 @@ import {
   buildTableFromTextLines,
   clusterPositions,
   groupItemsIntoLines,
+  parsePdfFile,
 } from '../src/parsers.js';
 
 /** Monta uma "linha visual" do PDF: [texto, x, largura]. */
@@ -577,5 +578,58 @@ describe('buildTableFromTextLines — casos especiais', () => {
 
   it('lança erro quando não há linhas', () => {
     assert.throws(() => buildTableFromTextLines([]), /Nenhum texto extraível/);
+  });
+});
+
+describe('PDF escaneado: mensagem que explica o problema', () => {
+  /** PDF.js falso: devolve as linhas pedidas, como o getTextContent faria. */
+  function fakePdfjs(linhasPorPagina) {
+    return {
+      getDocument: () => ({
+        promise: Promise.resolve({
+          numPages: linhasPorPagina.length,
+          getPage: async (numero) => ({
+            getTextContent: async () => ({
+              items: (linhasPorPagina[numero - 1] || []).map(([str, x, y]) => ({
+                str,
+                transform: [9, 0, 0, 9, x, y],
+                width: str.length * 5,
+                height: 9,
+              })),
+            }),
+            cleanup() {},
+          }),
+          destroy: async () => {},
+        }),
+      }),
+    };
+  }
+
+  it('aponta documento escaneado quando há quase nenhum texto', async () => {
+    const pdfjs = fakePdfjs([[['BANCO X', 10, 700]], [['Página 2', 10, 700]]]);
+    await assert.rejects(
+      () => parsePdfFile(new Uint8Array([1, 2, 3]), 'extrato-escaneado.pdf', pdfjs),
+      (error) => {
+        assert.match(error.message, /escaneado/);
+        assert.match(error.message, /\.xlsx\/\.csv/);
+        assert.match(error.message, /extrato-escaneado\.pdf/);
+        return true;
+      }
+    );
+  });
+
+  it('não inventa a explicação quando o PDF tem texto de verdade', async () => {
+    const linhas = [];
+    for (let i = 0; i < 12; i++) {
+      linhas.push([`Movimentação do período, lançamento número ${i} com descrição longa`, 10, 700 - i * 12]);
+    }
+    const pdfjs = fakePdfjs([linhas]);
+    await assert.rejects(
+      () => parsePdfFile(new Uint8Array([1, 2, 3]), 'relatorio.pdf', pdfjs),
+      (error) => {
+        assert.equal(/escaneado/.test(error.message), false);
+        return true;
+      }
+    );
   });
 });
