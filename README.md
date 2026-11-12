@@ -87,6 +87,27 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 
 **Quirks por banco** que o reconhecimento já carrega: valor com sufixo `D`/`C` grudado no número (Banco do Brasil, Caixa), extrato do Itaú em **blocos de 3 linhas** com saldo só no fechamento do dia, seções de saldo que não entram na conferência (`SALDO INVEST FÁCIL`, `SALDO TOTAL DISPONÍVEL DIA`) e o Nubank sem coluna de saldo.
 
+### Mais três extratos reais: Caixa, SISPAG e o extrato mensal do Itaú (v1.19.0)
+
+- **Cabeçalho quebrado em várias linhas** (SISPAG: `referência da` / `empresa`, `data do` / `pagamento`)
+  agora monta as colunas pela posição dos rótulos em todas as linhas do cabeçalho, não só na do meio.
+- **Valor com o status colado** (`749,60 efetuado`, `1.200,00 agendado`) é lido normalmente — antes o
+  relatório inteiro saía vazio.
+- **Favorecido quebrado em duas linhas** em volta da linha do valor volta a ser montado inteiro.
+- **CPF/CNPJ** do favorecido deixou de entrar no histórico: é identificador, não descrição.
+- **Extrato mensal do Itaú**: data só com dia/mês (`01/10`) — o ano é completado pela data do documento,
+  com ajuste na virada dez → jan; colunas separadas de `entradas R$` / `saídas R$`; e o PDF traz
+  **várias tabelas** (movimentação, aplicações automáticas, CDB): só a principal vira lançamento.
+- **Legendas na margem** (`D = débito a compensar`, `Explicativas no final do extrato`) e o rodapé da
+  página não se colam mais no histórico.
+- **Caixa**: a linha `000000 | SALDO DIA | 0,00 C` deixou de virar lançamento de R$ 0,00.
+- **Conferência de saldo honesta**: quando a coluna de saldo é de aplicação (15 valores soltos em 326
+  linhas) ou o saldo impresso é de investimento, o treinador diz que não se aplica em vez de acusar
+  divergência falsa.
+
+Resultado nos 10 PDFs de referência: Caixa 51 lançamentos, SISPAG 45, extrato mensal 324 — e os quatro
+bancos que já funcionavam (Itaú ICS 567, Itaú Sul 294, Bradesco 71, Sicoob 8) seguem com saldo fechando.
+
 ### Extratos “em lista”: qualquer banco, qualquer layout (v1.18.0)
 O extrato do **Sicoob** derrubou a v1.17: o PDF vem num formato “em lista” — 4 colunas (`DATA | DOCUMENTO | HISTÓRICO | VALOR`), valor com `C`/`D` colado no número, **descrição quebrada em várias linhas depois do valor** e o saldo em linhas próprias (`SALDO ANTERIOR`, `SALDO DO DIA ===== >`), não em coluna. O app montava 6 colunas fantasma, jogava o valor na coluna errada e transformava resumo/rodapé em lançamento. O que mudou:
 

@@ -133,6 +133,39 @@ export function reconcileBalances(parsedFile, analysis, transform = null) {
   const { records } = transform || transformRowsWithConfig(parsedFile, analysis);
   const recordByRow = new Map(records.map((record) => [Number(record.sourceRow) - 1, record]));
 
+  // A coluna existe, mas é saldo de outra coisa? No extrato mensal do Itaú a
+  // coluna "saldo R$" só aparece em algumas linhas (saldo da aplicação
+  // automática), nunca como saldo corrente da conta. Conferir contra ela gera
+  // divergência falsa em tudo.
+  let saldoCells = 0;
+  let labelledSaldoCells = 0;
+  for (const row of rows) {
+    if (parseMoneyValue(row?.[mapping.colIdx]) === null) continue;
+    saldoCells += 1;
+    if (row.some((cell) => SALDO_RE.test(normalizeText(cell)))) labelledSaldoCells += 1;
+  }
+  // Quando a coluna de saldo não é o saldo corrente da conta:
+  //  - extrato de verdade tem saldo em quase toda linha (Itaú Sul: 295 de 296;
+  //    Caixa: 65 de 68) ou, quando é só o saldo do dia, no mínimo todo valor
+  //    vem rotulado (Itaú ICS: 21 de 21 “SALDO TOTAL DISPONÍVEL DIA”);
+  //  - no extrato mensal do Itaú são 15 valores soltos em 326 linhas, nenhum
+  //    com rótulo de saldo — é o saldo da aplicação automática.
+  const saldoEsparso = saldoCells < rows.length * 0.3;
+  const saldoSemRotulo = labelledSaldoCells < saldoCells / 2;
+  if (saldoCells >= 3 && saldoEsparso && saldoSemRotulo) {
+    return {
+      available: false,
+      reason: `A coluna “${mapping.header}” não é o saldo corrente da conta (os valores aparecem soltos, como saldo de aplicação) — a conferência de saldo fica de fora.`,
+      columnHeader: mapping.header,
+      checked: 0,
+      matched: 0,
+      divergences: [],
+      anchors: [],
+      firstSaldoCents: null,
+      lastSaldoCents: null,
+    };
+  }
+
   const divergences = [];
   const anchors = [];
   const otherSeries = [];
@@ -155,6 +188,16 @@ export function reconcileBalances(parsedFile, analysis, transform = null) {
     const saldoCell = row.find((cell) => SALDO_RE.test(normalizeText(cell)));
     const label = saldoCell ? normalizeText(saldoCell) : '';
     const isBalanceSummary = !record && Boolean(label);
+
+    // Saldo de APLICAÇÃO/INVESTIMENTO não é o saldo da conta: no extrato mensal
+    // do Itaú a coluna "saldo R$" traz quase sempre "SALDO APLIC AUT MAIS" e,
+    // conferindo contra ele, 4 de 14 linhas davam divergência falsa.
+    if (saldoMoney !== null && label && OUTRA_CONTA_RE.test(label) && !OUTRA_CONTA_RE.test(principalLabel || '')) {
+      otherSeries.push({ rowIdx: rowIdx + 1, label: cleanWhitespace(saldoCell || ''), saldoCents: toCents(saldoMoney.value) });
+      if (firstSaldoCents === null) firstSaldoCents = toCents(saldoMoney.value);
+      lastSaldoCents = toCents(saldoMoney.value);
+      continue;
+    }
 
     if (record) {
       pendingCents += toCents(record.value);
@@ -246,12 +289,39 @@ export function reconcileBalances(parsedFile, analysis, transform = null) {
  * Soma os lançamentos entre dois saldos impressos e compara com a diferença:
  * `saldo(checkpoint N) - saldo(checkpoint N-1) = soma dos lançamentos no meio`.
  */
+/**
+ * Rótulos de saldo que pertencem a outra conta/série (aplicação, investimento,
+ * poupança, bloqueado, limite): não podem ser conferidos contra os lançamentos
+ * da conta corrente.
+ */
+const OUTRA_CONTA_RE = /\b(aplic|aplicacao|invest|investimento|poupanc|bloquead|limite|cdb|resgat)\b/;
+
 function reconcileCheckpoints(parsedFile, checkpoints, transform = null, analysis = null) {
   const { records } = transform || transformRowsWithConfig(parsedFile, analysis);
   const sorted = [...checkpoints].sort((a, b) => (a.rowIdx ?? 0) - (b.rowIdx ?? 0));
 
-  const anchora = sorted.find((checkpoint) => /^saldo\s+anterior\b/.test(normalizeText(checkpoint.label)));
-  const serie = anchora ? sorted.slice(sorted.indexOf(anchora)) : sorted;
+  // Saldo de aplicação/investimento não é o saldo da conta corrente: somar os
+  // lançamentos da conta contra ele nunca fecha.
+  const daConta = sorted.filter((checkpoint) => !OUTRA_CONTA_RE.test(normalizeText(checkpoint.label || '')));
+
+  if (daConta.length < 2 && sorted.length >= 2) {
+    return {
+      available: false,
+      reason:
+        'Os saldos impressos neste arquivo são de aplicação/investimento, não da conta corrente — ' +
+        'a conferência de saldo não se aplica.',
+      checked: 0,
+      matched: 0,
+      divergences: [],
+      anchors: [],
+      firstSaldoCents: null,
+      lastSaldoCents: null,
+    };
+  }
+
+  const usable = daConta.length >= 2 ? daConta : sorted;
+  const anchora = usable.find((checkpoint) => /^saldo\s+anterior\b/.test(normalizeText(checkpoint.label)));
+  const serie = anchora ? usable.slice(usable.indexOf(anchora)) : usable;
 
   if (serie.length < 2) {
     return {
