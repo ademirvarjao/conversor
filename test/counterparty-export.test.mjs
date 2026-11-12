@@ -71,6 +71,23 @@ describe('exportação da conciliação de clientes/fornecedores', () => {
     assert.equal(lines[3], '03/10/2026;;;5,00;sem contato');
   });
 
+  it('neutraliza histórico que o Excel trataria como fórmula', () => {
+    const csv = buildCounterpartiesCsv([
+      { dateIso: '2026-10-01', debitCents: 1000, creditCents: 0, history: '=SOMA(A1:A9)' },
+      { dateIso: '2026-10-02', debitCents: 2000, creditCents: 0, history: '+55 11 99999-0000 fornecedor' },
+      { dateIso: '2026-10-03', debitCents: 3000, creditCents: 0, history: '@PIX recebido' },
+      { dateIso: '2026-10-04', debitCents: 4000, creditCents: 0, history: '- transferência' },
+    ]);
+    const lines = csv.replace(/^\uFEFF/, '').trim().split('\r\n');
+
+    assert.equal(lines[1], "01/10/2026;;;10,00;'=SOMA(A1:A9)");
+    assert.equal(lines[2], "02/10/2026;;;20,00;'+55 11 99999-0000 fornecedor");
+    assert.equal(lines[3], "03/10/2026;;;30,00;'@PIX recebido");
+    assert.equal(lines[4], "04/10/2026;;;40,00;'- transferência");
+    // Histórico normal continua intacto.
+    assert.equal(buildCounterpartiesCsv([{ dateIso: '2026-10-05', debitCents: 500, history: 'PAGAMENTO NF 12' }]).includes(';PAGAMENTO NF 12'), true);
+  });
+
   it('recusa exportar quando não há lançamentos', () => {
     assert.throws(() => exportCounterpartiesPdf([], {}, 'x.pdf'), /jsPDF|lançamentos/i);
     assert.rejects(() => exportCounterpartiesXlsx([], 'x.xlsx', {}), /ExcelJS|lançamentos/i);

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { applyRowEdits, recordKey, setHistoryOverride } from '../src/row-edits.js';
+import { applyRowEdits, forgetFileEdits, recordKey, setHistoryOverride } from '../src/row-edits.js';
 
 const record = (row, { file = 'extrato.pdf', history = `Histórico ${row}`, value = -10 } = {}) => ({
   sourceFile: file,
@@ -21,10 +21,17 @@ const record = (row, { file = 'extrato.pdf', history = `Histórico ${row}`, valu
 const newState = () => ({ historyOverrides: new Map(), removedKeys: new Set() });
 
 describe('edição manual das linhas da planilha consolidada', () => {
-  it('usa arquivo + linha como chave estável', () => {
+  it('usa origem + linha como chave estável', () => {
     assert.equal(recordKey(record(3)), 'extrato.pdf#3');
     assert.equal(recordKey({ sourceFile: 'a.xlsx' }), 'a.xlsx#0');
     assert.equal(recordKey(null), '');
+    // O id da importação tem prioridade sobre o nome: dois extratos chamados
+    // "extrato.pdf" não compartilham mais a mesma chave.
+    assert.equal(recordKey({ sourceFileId: 'file-1', sourceFile: 'extrato.pdf', sourceRow: 7 }), 'file-1#7');
+    assert.notEqual(
+      recordKey({ sourceFileId: 'file-1', sourceFile: 'extrato.pdf', sourceRow: 7 }),
+      recordKey({ sourceFileId: 'file-2', sourceFile: 'extrato.pdf', sourceRow: 7 })
+    );
   });
 
   it('aplica o histórico digitado sem tocar nas outras linhas', () => {
@@ -105,5 +112,53 @@ describe('edição manual das linhas da planilha consolidada', () => {
     state.removedKeys.clear();
     const restored = applyRowEdits([record(1), record(2)], state);
     assert.equal(restored.rows[0].history, 'Editado');
+  });
+});
+
+describe('edição presa ao arquivo', () => {
+  it('descarta edições e exclusões do arquivo removido, mantendo as dos outros', () => {
+    const state = newState();
+    const doExtrato = record(1);
+    const daPlanilha = record(1, { file: 'outra.xlsx' });
+
+    setHistoryOverride(state, doExtrato, 'Histórico corrigido');
+    setHistoryOverride(state, daPlanilha, 'Outro histórico');
+    state.removedKeys.add(recordKey(doExtrato));
+    state.removedKeys.add(recordKey(daPlanilha));
+
+    const descartadas = forgetFileEdits(state, 'extrato.pdf');
+
+    assert.equal(descartadas, 2);
+    assert.deepEqual([...state.historyOverrides.keys()], ['outra.xlsx#1']);
+    assert.deepEqual([...state.removedKeys], ['outra.xlsx#1']);
+  });
+
+  it('reimportar o extrato não traz de volta as linhas excluídas antes', () => {
+    const state = newState();
+    state.removedKeys.add(recordKey(record(2)));
+
+    forgetFileEdits(state, 'extrato.pdf');
+
+    // Mesmo arquivo, mesmas linhas: nada é escondido sem o usuário pedir.
+    const { rows, removed } = applyRowEdits([record(2)], state);
+    assert.equal(removed, 0);
+    assert.equal(rows.length, 1);
+  });
+
+  it('é tolerante a nome vazio e a estado sem as estruturas', () => {
+    assert.equal(forgetFileEdits(newState(), ''), 0);
+    assert.equal(forgetFileEdits({}, 'extrato.pdf'), 0);
+    assert.equal(forgetFileEdits(newState(), undefined), 0);
+    assert.equal(forgetFileEdits(newState()), 0);
+  });
+
+  it('descarta também as chaves presas ao id da importação', () => {
+    const state = newState();
+    state.historyOverrides.set('file-7#2', 'editado');
+    state.removedKeys.add('file-7#3');
+
+    assert.equal(forgetFileEdits(state, 'file-7', 'extrato.pdf'), 2);
+    assert.equal(state.historyOverrides.size, 0);
+    assert.equal(state.removedKeys.size, 0);
   });
 });

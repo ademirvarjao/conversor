@@ -8,10 +8,19 @@
  * (arquivo + linha do arquivo), e são reaplicadas a cada reconstrução.
  */
 
-/** Chave estável de um lançamento: arquivo de origem + linha do arquivo. */
+/**
+ * Chave estável de um lançamento: origem + linha do arquivo.
+ *
+ * A origem é o **id da importação** (`sourceFileId`) e só cai para o nome do
+ * arquivo quando ele não existe (chamadas antigas e testes). Isso importa
+ * porque dois extratos podem chegar com o mesmo nome — "extrato.pdf" de
+ * outubro e de novembro, por exemplo. Com o nome, editar ou excluir a linha 7
+ * de um mexeria na linha 7 do outro.
+ */
 export function recordKey(record) {
   if (!record) return '';
-  return `${record.sourceFile ?? ''}#${record.sourceRow ?? 0}`;
+  const origem = record.sourceFileId || record.sourceFile || '';
+  return `${origem}#${record.sourceRow ?? 0}`;
 }
 
 /**
@@ -81,4 +90,39 @@ export function setHistoryOverride(state, record, rawHistory) {
   overrides.set(key, text);
   record.history = text;
   return true;
+}
+
+/**
+ * Esquece as edições presas a um arquivo que saiu da conciliação.
+ *
+ * A chave de um lançamento é `nome do arquivo # linha`, então as edições e
+ * exclusões feitas à mão continuam "vivas" depois que o arquivo é removido —
+ * e voltariam a valer se o mesmo nome fosse importado de novo (por exemplo,
+ * depois de corrigir e reenviar o extrato), fazendo linhas desaparecerem sem
+ * explicação. Aqui elas são descartadas junto com o arquivo.
+ *
+ * @param {{historyOverrides?: Map<string,string>, removedKeys?: Set<string>}} state
+ * @param {...string} origins id da importação e/ou nome do arquivo
+ * @returns {number} quantas chaves foram descartadas
+ */
+export function forgetFileEdits(state, ...origins) {
+  const prefixes = origins
+    .filter((origin) => typeof origin === 'string' && origin !== '')
+    .map((origin) => `${origin}#`);
+  if (prefixes.length === 0) return 0;
+
+  const matches = (key) => prefixes.some((prefix) => key.startsWith(prefix));
+  let dropped = 0;
+
+  for (const key of [...(state.historyOverrides?.keys?.() || [])]) {
+    if (!matches(key)) continue;
+    state.historyOverrides.delete(key);
+    dropped += 1;
+  }
+  for (const key of [...(state.removedKeys || [])]) {
+    if (!matches(key)) continue;
+    state.removedKeys.delete(key);
+    dropped += 1;
+  }
+  return dropped;
 }

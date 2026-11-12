@@ -21,6 +21,7 @@ import {
   tokenizeHeader,
   parseDateValue,
   parseMoneyValue,
+  TOTAL_LABEL_RE,
 } from './parsers.js';
 import {
   formatIsoToBrDate,
@@ -1694,10 +1695,9 @@ export function transformRowsWithConfig(parsedFile, config) {
 
     // Total/subtotal no meio do relatório ("Parcial Cliente", "Total do dia"):
     // é resumo, não lançamento sem data — e não deve contar como falha de data.
-    if (
-      textCells.length > 0 &&
-      /^(parcial|total|totais|subtotal|resumo)\b/.test(normalizeText(textCells.join(' ')))
-    ) {
+    // O rótulo é restrito de propósito: começar com "Total" não basta, senão o
+    // lançamento do fornecedor "Total Express Ltda" era descartado em silêncio.
+    if (textCells.length > 0 && TOTAL_LABEL_RE.test(normalizeText(textCells.join(' ')))) {
       skipped.push({
         rowIdx: rowIndex + 1,
         reason: 'Linha de total/resumo (descartada)',
