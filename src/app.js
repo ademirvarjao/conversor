@@ -14,7 +14,9 @@ import {
 } from './ai-engine.js';
 import { formatLocalDateTime, formatValueGroupedBr, formatValuePlainBr, sumValues } from './format.js';
 import { summarizeRecords } from './summary.js';
-import { applyRowEdits, recordKey, setHistoryOverride } from './row-edits.js';
+import { applyRowEdits, forgetFileEdits, recordKey, setHistoryOverride } from './row-edits.js';
+import { escapeHtml } from './html.js';
+import { installGlobalErrorReporting, reportStartupFailure } from './ui-errors.js';
 import { exportToPdf, exportToXlsx } from './exporters.js';
 import {
   applyCoachFixes,
@@ -58,7 +60,6 @@ import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
 import { describeSession, loadSession, signIn, signOut, signUp } from './cloud-auth.js';
 import {
-  CLOUD_LOCK,
   LOCKOUT_MS,
   MAX_ATTEMPTS,
   clearUnlock,
@@ -161,15 +162,6 @@ function cacheDom() {
 /*                              Utilitários de UI                             */
 /* -------------------------------------------------------------------------- */
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 const MAX_TOASTS = 4;
 
 function showToast(message, type = 'success', { duration = 4500 } = {}) {
@@ -262,12 +254,18 @@ function syncRulesToAnalysis(file) {
 /*                          Consolidação e filtros                            */
 /* -------------------------------------------------------------------------- */
 
+/** Marca cada lançamento com o id da importação (chave única de edição). */
+function stampRecordOrigin(file, records) {
+  for (const record of records || []) record.sourceFileId = file.id;
+}
+
 function rebuildUnifiedOutput({ resetPage = true } = {}) {
   const allRecords = [];
   let skippedCount = 0;
 
   for (const file of state.files) {
     const result = transformRowsWithConfig(file.parsedFile, file.analysis);
+    stampRecordOrigin(file, result.records);
     file.result = result;
     // Treinador automático: o mesmo diagnóstico que um analista faria à mão —
     // inclui a conferência do saldo linha a linha. Aproveita o transform acima.
@@ -796,6 +794,7 @@ function renderCoachPanel(file) {
 function reanalyzeFileWithCoach(file) {
   if (!file) return null;
   file.result = transformRowsWithConfig(file.parsedFile, file.analysis);
+  stampRecordOrigin(file, file.result.records);
   file.coach = buildCoachReport(file.parsedFile, file.analysis, file.result, coachOptions());
   renderCoachPanel(file);
   return file.coach;
@@ -1603,6 +1602,10 @@ function bindFilesListEvents() {
       const id = removeButton.dataset.fileId;
       const removed = findFile(id);
       state.files = state.files.filter((file) => file.id !== id);
+      // Edições e exclusões feitas à mão ficam presas ao nome do arquivo: ao
+      // tirar o arquivo da lista, elas vão junto (senão reapareceriam caladas
+      // num novo import do mesmo extrato).
+      forgetFileEdits(state, removed?.id, removed?.parsedFile?.fileName);
       if (state.selectedFileId === id) {
         state.selectedFileId = state.files[0]?.id ?? null;
         if (state.selectedFileId) openTrainerForFile(state.selectedFileId);
@@ -3013,6 +3016,7 @@ function bindGlobalEvents() {
 function init() {
   cacheDom();
   updateAiBadge();
+  installGlobalErrorReporting({ notify: showToast, scope: 'Conversor' });
 
   // Tamanho da página vem do seletor; valor estranho cai no padrão.
   const initialSize = dom['preview-page-size']?.value;
@@ -3069,15 +3073,7 @@ function init() {
 try {
   init();
 } catch (error) {
-  console.error('[Conversor] Falha na inicialização:', error);
-  const container = document.getElementById('toast-container');
-  if (container) {
-    const toast = document.createElement('div');
-    toast.className = 'toast error';
-    toast.setAttribute('role', 'alert');
-    toast.textContent = `Falha ao iniciar a aplicação: ${error.message}`;
-    container.appendChild(toast);
-  }
+  reportStartupFailure({ scope: 'Conversor', label: 'a aplicação', error });
 }
 
 // Exposto para depuração manual no console e para testes de integração.

@@ -22,6 +22,7 @@ import { transformRowsWithConfig, ROLES } from './ai-engine.js';
 import { diffRoles, recognizeLayout } from './bank-layouts.js';
 import { fromCents, toCents } from './format.js';
 import { cleanWhitespace, normalizeText, parseMoneyValue } from './parsers.js';
+import { esc } from './html.js';
 
 /** § Etapas do relatório. */
 export const CHECK_STATUS = {
@@ -894,16 +895,6 @@ export function buildCoachReport(parsedFile, analysis, transform = null, options
 /* -------------------------------------------------------------------------- */
 /*                        Renderização (HTML puro)                            */
 /* -------------------------------------------------------------------------- */
-
-/** Mesmas regras de escape do resto do app — o HTML é montado aqui e testado. */
-function esc(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 const ICON = {
   [CHECK_STATUS.OK]: '✓',

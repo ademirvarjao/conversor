@@ -20,6 +20,13 @@ const MAX_COLUMNS = 256;
 /** Limite defensivo de linhas de dados por arquivo. */
 const MAX_DATA_ROWS = 200000;
 
+/**
+ * Limite de células por intervalo mesclado. Acima disso o intervalo é ignorado:
+ * um "merge" de aba inteira (comum em relatórios antigos) custaria centenas de
+ * milhares de entradas no Set e travaria a leitura sem melhorar o resultado.
+ */
+const MAX_MERGE_CELLS = 5000;
+
 /** Tolerância vertical (pt) para considerar fragmentos na mesma linha visual. */
 const LINE_TOLERANCE = 2.5;
 
@@ -309,13 +316,46 @@ function cellToRawValue(value) {
   return null;
 }
 
-const NOISE_ROW_PREFIX =
-  /^(total|totais|subtotal|saldo\s+(anterior|atual|final|inicial|do\s+dia|em\s+conta)|resumo|pagina\s+\d+|emitido\s+em|gerado\s+em|relatorio\s+gerado)/;
+/**
+ * Linhas de rodapé/cabeçalho de página que nunca são lançamento.
+ * (Saldo não entra aqui: existe lançamento legítimo com "saldo" no histórico.)
+ */
+const PAGE_NOISE_PREFIX =
+  /^(saldo\s+(anterior|atual|final|inicial|do\s+dia|em\s+conta)|pagina\s+\d+|emitido\s+em|gerado\s+em|relatorio\s+gerado)/;
 
+/**
+ * Rótulo de total/resumo **de verdade** — "Total do dia", "Subtotal geral",
+ * "Parcial Cliente", "TOTAIS 45 1.234,56".
+ *
+ * A regra anterior aceitava qualquer linha começando por "total", "resumo" ou
+ * "saldo" e isso apagava lançamento real: fornecedor "Total Express Ltda",
+ * "Total Distribuidora", histórico "Resumo do pedido 123" e por aí vai. Aqui,
+ * depois da palavra inicial, só passam conectivos ("do", "de", "em"), palavras
+ * de resumo e números — um nome próprio derruba a regra, e o lançamento fica.
+ */
+export const TOTAL_LABEL_RE = new RegExp(
+  '^(?:parcial|parciais|total|totais|subtotal|subtotais|resumo|resumos)\\b' +
+    '(?:\\s+(?:d[oa]s?|em|no|na|nos|nas|geral|bruto|bruta|liquido|liquida|final|inicial|anterior|atual|' +
+    'mensal|semanal|diario|diaria|cliente|clientes|fornecedor|fornecedores|credor|credora|devedor|devedora|' +
+    'entradas?|saidas?|creditos?|debitos?|periodo|mes|dia|caixa|bancos?|contas?|lancamentos?|registros?|' +
+    'movimentos?|documentos?|itens?|[\\d.,/-]+))*$'
+);
+
+/**
+ * Diz se a linha é cabeçalho/banner/resumo em vez de lançamento.
+ *
+ * Regra de ouro: **linha com data e valor é lançamento**, mesmo que o texto
+ * comece com uma palavra de resumo — só o rótulo restrito acima derruba.
+ */
 export function isSummaryOrNoiseRow(rowCells) {
   const joined = normalizeText(rowCells.map(cellToString).join(' '));
   if (!joined) return true;
-  if (NOISE_ROW_PREFIX.test(joined)) return true;
+  if (PAGE_NOISE_PREFIX.test(joined)) return true;
+  if (TOTAL_LABEL_RE.test(joined)) return true;
+
+  const hasDate = rowCells.some((cell) => parseDateValue(cell) !== null);
+  const hasMoney = rowCells.some((cell) => parseMoneyValue(cell) !== null);
+  if (hasDate && hasMoney) return false;
 
   const nonEmpty = rowCells.filter((cell) => cleanWhitespace(cellToString(cell)) !== '');
   if (
@@ -342,6 +382,12 @@ export function extractSheetsFromWorkbook(workbook) {
 
     // Células mescladas: só a célula "mestre" carrega o valor; as demais são
     // ignoradas para não duplicar banners e títulos.
+    //
+    // A área é calculada antes de percorrer: planilhas exportadas de sistemas
+    // antigos às vezes trazem um "merge" gigante (a aba inteira). Percorrer isso
+    // célula por célula travaria a aba do navegador sem ganho nenhum, então
+    // intervalos acima do limite ficam de fora — o pior caso é repetir um
+    // título, que as regras de cabeçalho/rodapé já descartam.
     const mergedSlaves = new Set();
     const mergedRanges = worksheet.model?.merges || [];
     for (const rangeRef of mergedRanges) {
@@ -349,6 +395,8 @@ export function extractSheetsFromWorkbook(workbook) {
       const start = decodeCellRef(startRef);
       const end = decodeCellRef(endRef || startRef);
       if (!start || !end) continue;
+      const area = (end.row - start.row + 1) * (end.col - start.col + 1);
+      if (!Number.isFinite(area) || area > MAX_MERGE_CELLS) continue;
       for (let row = start.row; row <= end.row; row++) {
         for (let col = start.col; col <= end.col; col++) {
           if (row === start.row && col === start.col) continue;
@@ -1983,6 +2031,29 @@ export function buildTableFromTextLines(allPageLines) {
 }
 
 /**
+ * Diz, em uma frase, por que um PDF não rendeu tabela quando quase não há texto.
+ *
+ * Extrato escaneado (foto/print) costuma trazer só o cabeçalho do banco e o
+ * número da página — o suficiente para não ser "PDF sem texto", mas longe de
+ * ser um extrato. Nesse caso o usuário precisa saber que o problema é o formato,
+ * não a ferramenta: a saída é baixar o extrato em .xlsx/.csv ou o PDF do
+ * internet banking.
+ */
+function describeSparseText(lines, pageCount) {
+  const caracteres = lines.reduce(
+    (total, line) => total + line.items.reduce((soma, item) => soma + item.str.length, 0),
+    0
+  );
+  const porPagina = caracteres / Math.max(1, pageCount || 1);
+  if (porPagina >= 120) return '';
+  return (
+    ' O PDF quase não tem texto selecionável (média de ' +
+    `${Math.round(porPagina)} caractere(s) por página), o que indica documento escaneado: ` +
+    'baixe o extrato em .xlsx/.csv ou em PDF direto do internet banking.'
+  );
+}
+
+/**
  * Parser geométrico adaptativo de PDFs via PDF.js.
  * Extrai as linhas de texto e delega a reconstrução da tabela para
  * `buildTableFromTextLines`.
@@ -2000,7 +2071,7 @@ export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib, options = {}
   try {
     table = buildTableFromTextLines(lines);
   } catch (error) {
-    throw new Error(`${error.message} (${fileName})`);
+    throw new Error(`${error.message}${describeSparseText(lines, pageCount)} (${fileName})`);
   }
 
   if (table.rows.length === 0) {

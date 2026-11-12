@@ -87,6 +87,38 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 
 **Quirks por banco** que o reconhecimento já carrega: valor com sufixo `D`/`C` grudado no número (Banco do Brasil, Caixa), extrato do Itaú em **blocos de 3 linhas** com saldo só no fechamento do dia, seções de saldo que não entram na conferência (`SALDO INVEST FÁCIL`, `SALDO TOTAL DISPONÍVEL DIA`) e o Nubank sem coluna de saldo.
 
+### Correções de leitura e endurecimento do código (v1.21.0)
+
+Rodada de revisão de todo o código, **sem tirar nenhuma função** do app: o que estava certo continua
+igual, o que podia perder lançamento ou confundir o usuário foi corrigido.
+
+- **Lançamento com nome de fornecedor "Total…" não é mais descartado.** A regra que tirava linhas de
+  total/resumo olhava só a primeira palavra: `TOTAL EXPRESS LTDA`, `Total Distribuidora` e
+  `Resumo do pedido 123` sumiam em silêncio (na planilha, mesmo com data e valor na linha). Agora o
+  rótulo precisa ser um total de verdade — "Total do dia", "Parcial Cliente", "TOTAIS 45 1.234,56" — e
+  **linha com data e valor é sempre lançamento**. Mesma regra na importação de PDF e de .xlsx.
+- **Dois arquivos com o mesmo nome não se misturam.** A chave de cada lançamento (usada para editar o
+  histórico, excluir e restaurar) passou a ser o **id da importação**; antes era o nome do arquivo, e
+  dois "extrato.pdf" de meses diferentes compartilhavam a mesma linha 7. Ao remover um arquivo, as
+  edições dele vão junto (senão voltariam a valer num novo import do mesmo nome).
+- **CSV à prova de fórmula.** Histórico começando com `=`, `+`, `@`, `-` (seguido de texto), tabulação
+  ou CR é exportado com apóstrofo na frente: o Excel/Sheets mostra o texto em vez de tentar executar.
+- **Fim dos erros silenciosos.** Uma promessa rejeitada fora de `try/catch` (PDF interrompido, cota do
+  `localStorage` estourada, resposta estranha da nuvem) agora aparece como aviso curto — no máximo três
+  por página, sem repetir a mesma mensagem — e o detalhe continua no console. A falha de inicialização
+  usa o mesmo mecanismo nas duas páginas.
+- **PDF escaneado agora se explica.** Se o arquivo tem pouquíssimo texto selecionável (média abaixo de
+  120 caracteres por página), a mensagem diz que o documento parece digitalizado e sugere baixar o
+  extrato em .xlsx/.csv ou o PDF do internet banking — em vez de "não foi possível identificar linhas".
+- **Planilha com "merge" gigante não trava mais a aba.** Intervalos mesclados com mais de 5.000 células
+  são ignorados (relatórios antigos às vezes marcam a aba inteira como mesclada).
+- **Um escape de HTML só, em `src/html.js`.** Importação, conciliador e treinador montavam cada um a
+  sua cópia da função (uma delas sem uso nenhum). Agora os três importam a mesma, e um teste impede que
+  alguém volte a duplicar a função. Nenhum texto de arquivo, banco ou usuário entra na tela sem escape.
+- Limpeza: import morto (`CLOUD_LOCK`) removido, `src/ui-errors.js` e `src/html.js` novos, **401 testes**
+  na suíte (todos os 11 PDFs reais continuam com a mesma contagem de lançamentos: Caixa 51, SISPAG 45,
+  Itaú mensal 324, Itaú ICS 567, Itaú Sul 294, Bradesco 71, Sicoob 8).
+
 ### Treinador automático no fundo, interface mais limpa (v1.20.0)
 
 - O **treinador automático** continua conferindo cada arquivo (colunas, sinais, datas, descartes e

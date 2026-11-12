@@ -11,6 +11,8 @@
 
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
 import { loadAiMemory, saveAiMemory } from './ai-engine.js';
+import { escapeHtml } from './html.js';
+import { installGlobalErrorReporting, reportStartupFailure } from './ui-errors.js';
 import {
   DIRECTION,
   NATUREZA,
@@ -153,15 +155,6 @@ function cacheDom() {
     if (!element) console.warn(`[Conciliador] Elemento #${id} não encontrado no HTML.`);
     dom[id] = element;
   }
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function debounce(fn, wait) {
@@ -1443,6 +1436,7 @@ function bindEvents() {
 
 function init() {
   cacheDom();
+  installGlobalErrorReporting({ notify: showToast, scope: 'Conciliador' });
   if (dom['app-version']) dom['app-version'].textContent = `v${APP_VERSION}`;
 
   // Tamanho da página vem do seletor; qualquer valor estranho cai no padrão.
@@ -1471,15 +1465,7 @@ function init() {
 try {
   init();
 } catch (error) {
-  console.error('[Conciliador] Falha na inicialização:', error);
-  const container = document.getElementById('toast-container');
-  if (container) {
-    const toast = document.createElement('div');
-    toast.className = 'toast error';
-    toast.setAttribute('role', 'alert');
-    toast.textContent = `Falha ao iniciar a página: ${error.message}`;
-    container.appendChild(toast);
-  }
+  reportStartupFailure({ scope: 'Conciliador', label: 'a página', error });
 }
 
 if (typeof window !== 'undefined') window.__conciliador = { state };
