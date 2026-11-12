@@ -207,49 +207,59 @@
       </div>
 
       <div id="coach-panel" class="coach-panel hidden" aria-live="polite">
-        <div class="coach-head">
-          <div>
-            <h3>Treinador automático</h3>
-            <p class="coach-sub">Confere colunas, sinais, datas, descartes e o saldo antes de memorizar o layout.</p>
-          </div>
+        <div class="coach-bar">
           <span id="coach-score" class="coach-score"></span>
+          <p id="coach-bar-text" class="coach-bar-text">Treinador automático: conferindo o arquivo…</p>
+          <button
+            id="btn-coach-toggle"
+            class="btn btn-sm btn-ghost-dark coach-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="coach-body"
+          >
+            Detalhes
+          </button>
         </div>
 
-        <div id="coach-summary" class="coach-summary"></div>
+        <div id="coach-body" class="coach-body hidden">
+          <p class="coach-sub">Confere colunas, sinais, datas, descartes e o saldo antes de memorizar o layout.</p>
 
-        <ul id="coach-checks" class="coach-checks" aria-label="Conferências do treinador automático"></ul>
+          <div id="coach-summary" class="coach-summary"></div>
 
-        <div id="coach-fixes" class="coach-fixes hidden"></div>
-        <div id="coach-divergences" class="coach-divergences hidden"></div>
+          <ul id="coach-checks" class="coach-checks" aria-label="Conferências do treinador automático"></ul>
 
-        <div class="coach-registry">
-          <button id="btn-coach-registry" class="btn btn-sm btn-ghost-dark" type="button">
-            Atualizar catálogo
-          </button>
-          <button id="btn-catalog-import" class="btn btn-sm btn-ghost-dark" type="button">
-            Importar catálogo (.json)
-          </button>
-          <button id="btn-catalog-export" class="btn btn-sm btn-ghost-dark" type="button">
-            Exportar catálogo
-          </button>
-          <input id="catalog-file-input" type="file" accept=".json,application/json" class="hidden" />
-          <label class="checkbox-label">
-            <input id="coach-registry-auto" type="checkbox" checked />
-            <span>Manter o catálogo atualizado sozinho</span>
-          </label>
-          <p id="coach-registry-status" class="coach-registry-status">Catálogo de bancos: revalida sozinho ao abrir. Nada do seu arquivo sai do navegador.</p>
-        </div>
+          <div id="coach-fixes" class="coach-fixes hidden"></div>
+          <div id="coach-divergences" class="coach-divergences hidden"></div>
 
-        <div class="coach-actions">
-          <button id="btn-coach-apply" class="btn btn-primary" type="button">
-            Aplicar correções e treinar
-          </button>
-          <button id="btn-coach-analyze" class="btn btn-sm btn-secondary" type="button">
-            Reanalisar arquivo
-          </button>
-          <button id="btn-coach-copy" class="btn btn-sm btn-ghost-dark" type="button">
-            Copiar diagnóstico
-          </button>
+          <div class="coach-registry">
+            <button id="btn-coach-registry" class="btn btn-sm btn-ghost-dark" type="button">
+              Atualizar catálogo
+            </button>
+            <button id="btn-catalog-import" class="btn btn-sm btn-ghost-dark" type="button">
+              Importar catálogo (.json)
+            </button>
+            <button id="btn-catalog-export" class="btn btn-sm btn-ghost-dark" type="button">
+              Exportar catálogo
+            </button>
+            <input id="catalog-file-input" type="file" accept=".json,application/json" class="hidden" />
+            <label class="checkbox-label">
+              <input id="coach-registry-auto" type="checkbox" checked />
+              <span>Manter o catálogo atualizado sozinho</span>
+            </label>
+            <p id="coach-registry-status" class="coach-registry-status">Catálogo de bancos: revalida sozinho ao abrir. Nada do seu arquivo sai do navegador.</p>
+          </div>
+
+          <div class="coach-actions">
+            <button id="btn-coach-apply" class="btn btn-primary" type="button">
+              Aplicar correções e treinar
+            </button>
+            <button id="btn-coach-analyze" class="btn btn-sm btn-secondary" type="button">
+              Reanalisar arquivo
+            </button>
+            <button id="btn-coach-copy" class="btn btn-sm btn-ghost-dark" type="button">
+              Copiar diagnóstico
+            </button>
+          </div>
         </div>
       </div>
 
@@ -379,7 +389,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.19.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.20.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>
   </footer>
@@ -675,6 +685,8 @@
         </div>
       </div>
     </div>
+  </div>
+
   </div>
 
   <!-- Toast notifications -->
