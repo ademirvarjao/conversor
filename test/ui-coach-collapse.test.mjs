@@ -42,12 +42,11 @@ describe('treinador automático recolhido', () => {
     }
   });
 
-  it('abre sozinho só quando há falha ou correção pendente', () => {
-    assert.match(app, /const precisaAtencao =[\s\S]{0,220}?fixes\.length > 0/);
-    // Avisos (duplicados, banco fora do catálogo) não abrem o painel.
-    assert.ok(
-      !/status !== 'ok'\)\s*;?\s*\n\s*if \(precisaAtencao\)/.test(app),
-      'aviso não deve forçar a abertura do painel'
-    );
+  it('não abre sozinho em nenhum caso — só pelo clique em "Detalhes"', () => {
+    // Nem falha nem correção pendente forçam a abertura.
+    assert.ok(!/setCoachOpen\(true/.test(app), 'o painel não deve abrir sozinho');
+    assert.ok(!/precisaAtencao/.test(app), 'regra de abertura automática não deve existir');
+    // Trocar de arquivo recolhe o painel de novo.
+    assert.match(app, /if \(fileKey !== coachFileKey\) \{\s*coachFileKey = fileKey;\s*coachOpen = false;/);
   });
 });
