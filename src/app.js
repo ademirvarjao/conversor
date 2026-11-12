@@ -677,6 +677,48 @@ function coachChipHtml(coach) {
   )}">${icon} ${escapeHtml(label)}</span>`;
 }
 
+/** Painel do treinador aberto/fechado (nasce fechado: menos poluição). */
+let coachOpen = false;
+
+/**
+ * Abre/fecha o detalhamento do treinador. A conferência roda sempre — isto
+ * mostra ou esconde apenas o relatório.
+ */
+function setCoachOpen(open, { force = false } = {}) {
+  if (!force && coachOpen === open) return;
+  coachOpen = Boolean(open);
+
+  const body = dom['coach-body'];
+  const button = dom['btn-coach-toggle'];
+  if (body) body.classList.toggle('hidden', !coachOpen);
+  if (button) {
+    button.textContent = coachOpen ? 'Ocultar detalhes' : 'Detalhes';
+    button.setAttribute('aria-expanded', coachOpen ? 'true' : 'false');
+  }
+}
+
+/** Uma linha que resume o que o treinador viu — o resto fica sob demanda. */
+function coachBarText(report) {
+  const checks = Array.isArray(report?.checks) ? report.checks : [];
+  const comProblema = checks.filter((check) => check.status !== 'ok');
+  const fixes = Array.isArray(report?.fixes) ? report.fixes.length : 0;
+
+  if (report?.score?.fail > 0 || comProblema.length > 0 || fixes > 0) {
+    const partes = [];
+    if (comProblema.length > 0) {
+      partes.push(`${comProblema.length} conferência${comProblema.length > 1 ? 's' : ''} com aviso`);
+    }
+    if (fixes > 0) {
+      partes.push(`${fixes} correção${fixes > 1 ? 'ões' : ''} sugerida${fixes > 1 ? 's' : ''}`);
+    }
+    return `Treinador automático: ${partes.join(' • ')}.`;
+  }
+
+  const total = Number(report?.counts?.records || 0);
+  const conferencias = Number(report?.score?.total || 0);
+  return `Treinador automático: ${total.toLocaleString('pt-BR')} lançamento(s) conferido(s) em ${conferencias} verificações — nada a corrigir.`;
+}
+
 /** Desenha o relatório do treinador automático do arquivo em edição. */
 function renderCoachPanel(file) {
   const panel = dom['coach-panel'];
@@ -684,6 +726,7 @@ function renderCoachPanel(file) {
 
   if (!file) {
     panel.classList.add('hidden');
+    setCoachOpen(false);
     state.coachReport = null;
     return;
   }
@@ -700,6 +743,17 @@ function renderCoachPanel(file) {
     dom['coach-score'].className = `coach-score score-${score.tone}`;
     dom['coach-score'].textContent = score.scoreLabel;
   }
+
+  if (dom['coach-bar-text']) dom['coach-bar-text'].textContent = coachBarText(report);
+
+  // Só abre sozinho quando há algo para o usuário DECIDIR (falha ou correção
+  // sugerida). Avisos — duplicados, banco fora do catálogo — ficam na barra:
+  // abrir o painel inteiro por causa deles era justamente a poluição.
+  const precisaAtencao =
+    Number(report?.score?.fail || 0) > 0 ||
+    (Array.isArray(report?.fixes) && report.fixes.length > 0);
+  if (precisaAtencao) setCoachOpen(true, { force: true });
+  else setCoachOpen(coachOpen, { force: true });
 
   if (dom['coach-summary']) dom['coach-summary'].innerHTML = coachSummaryHtml(report);
   if (dom['coach-checks']) dom['coach-checks'].innerHTML = coachChecksHtml(report);
@@ -1718,6 +1772,8 @@ function bindTrainerEvents() {
     );
     if (saved) scheduleCloudPush();
   });
+
+  dom['btn-coach-toggle']?.addEventListener('click', () => setCoachOpen(!coachOpen));
 
   dom['btn-coach-registry']?.addEventListener('click', () => {
     refreshCommunityCatalog({ manual: true });
