@@ -145,9 +145,11 @@ describe('página do conciliador', () => {
     assert.ok(page.includes('.cp-cell-account') === false, 'o estilo fica no CSS');
   });
 
-  it('mostra o estado dos modelos da nuvem no topo', () => {
-    assert.ok(page.includes('id="cp-cloud-state"'));
-    assert.ok(page.includes('id="btn-cp-cloud-push"'));
-    assert.ok(page.includes('id="btn-cp-cloud-pull"'));
+  it('mostra o estado dos modelos da nuvem no topo, sem botões de sincronizar', () => {
+    assert.ok(page.includes('id="cp-cloud-state"'), 'o estado continua visível');
+    // A sincronização é automática: nenhum botão de enviar/baixar no topo.
+    assert.equal(page.includes('btn-cp-cloud-push'), false);
+    assert.equal(page.includes('btn-cp-cloud-pull'), false);
+    assert.equal(/Enviar modelos|Baixar modelos/.test(page), false);
   });
 });

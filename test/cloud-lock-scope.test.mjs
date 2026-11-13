@@ -40,10 +40,11 @@ test('a trava protege a conexão do banco (área administrativa)', () => {
   const adminEnd = html.indexOf('id="btn-cloud-lock"') + 200;
   assert.ok(urlIndex < adminEnd && keyIndex < adminEnd, 'área administrativa contém só a conexão');
 
-  // Enviar/baixar e a chave continuam fora da área protegida.
-  assert.ok(html.indexOf('id="btn-cloud-push"') < adminStart, 'enviar modelos não depende do login');
-  assert.ok(html.indexOf('id="btn-cloud-pull"') < adminStart, 'baixar modelos não depende do login');
+  // A chave continua fora da área protegida (e a sincronização não pede senha:
+  // ela é automática desde a v1.23, sem botões).
   assert.ok(html.indexOf('id="cloud-code-display"') < adminStart, 'chave de acesso visível para todos');
+  assert.equal(html.includes('btn-cloud-push'), false, 'não há mais botão de enviar');
+  assert.equal(html.includes('btn-cloud-pull'), false, 'não há mais botão de baixar');
 });
 
 test('os cliques na chave e a sincronização não passam pela trava', () => {
@@ -56,6 +57,7 @@ test('os cliques na chave e a sincronização não passam pela trava', () => {
 
   assert.doesNotMatch(app, /if \(cloud\.locked\) \{\s*if \(!silent\)/, 'envio não é barrado pela trava');
   assert.match(app, /function scheduleCloudPush\(\) \{\n  if \(!cloud\.config \|\| !cloud\.identity\) return;/);
+  assert.match(app, /function scheduleCloudPull\(/, 'o download também é automático');
   assert.doesNotMatch(conciliador, /loadUnlock|cloudUnlocked/);
 });
 

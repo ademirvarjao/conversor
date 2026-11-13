@@ -209,26 +209,26 @@ describe('ida e volta pela nuvem', () => {
 describe('sincronização sem botões', () => {
   const read = (name) => readFile(new URL(name, ROOT), 'utf8');
 
-  it('index.html não mostra mais os botões de enviar/baixar', async () => {
+  it('index.html não tem mais botão de enviar/baixar modelos', async () => {
     const html = await read('index.html');
-    for (const id of ['btn-cloud-push', 'btn-cloud-pull']) {
-      const tag = new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html)?.[0] || '';
-      assert.ok(tag, `#${id} continua no HTML (contrato do controlador)`);
-      assert.match(tag, /\bhidden\b/, `#${id} está escondido`);
-      assert.match(tag, /tabindex="-1"/, `#${id} fora da ordem de tabulação`);
-    }
+    assert.equal(html.includes('btn-cloud-push'), false, 'botão de enviar removido');
+    assert.equal(html.includes('btn-cloud-pull'), false, 'botão de baixar removido');
+    assert.doesNotMatch(html, /Enviar modelos|Baixar modelos/, 'nenhum rótulo de sincronizar na tela');
     assert.doesNotMatch(html, /<h3>2\. Sincronizar<\/h3>/, 'o bloco virou texto explicativo');
     assert.match(html, /2\. Sincronização automática/);
   });
 
-  it('conciliador.html esconde os botões e mantém o estado no topo', async () => {
+  it('conciliador.html não tem mais os botões no topo e mantém o estado', async () => {
     const html = await read('conciliador.html');
-    for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
-      const tag = new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html)?.[0] || '';
-      assert.ok(tag, `#${id} continua no HTML`);
-      assert.match(tag, /\bhidden\b/, `#${id} está escondido`);
-    }
+    assert.equal(html.includes('btn-cp-cloud-push'), false);
+    assert.equal(html.includes('btn-cp-cloud-pull'), false);
+    assert.doesNotMatch(html, /Enviar modelos|Baixar modelos/);
     assert.match(html, /id="cp-cloud-state"/, 'o estado da sincronização continua visível');
+  });
+
+  it('o CSS garante que o atributo hidden esconda até um .btn', async () => {
+    const css = await read('src/styles.css');
+    assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/, 'hidden precisa vencer o display do .btn');
   });
 
   it('as duas páginas baixam a nuvem sozinhas e somam à memória local', async () => {
@@ -239,6 +239,7 @@ describe('sincronização sem botões', () => {
       assert.match(code, /mergeVaultPayload\(/, `${file} soma em vez de substituir`);
       assert.match(code, /visibilitychange/, `${file} confere a nuvem quando a aba volta`);
       assert.doesNotMatch(code, /applyVaultPayload\(/, `${file} não descarta mais o que existe aqui`);
+      assert.doesNotMatch(code, /btn-(cp-)?cloud-(push|pull)/, `${file} não mexe mais em botão de sincronizar`);
     }
   });
 });

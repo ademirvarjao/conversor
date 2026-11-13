@@ -144,8 +144,6 @@ const REQUIRED_IDS = [
   'btn-cp-export-pdf',
   'btn-cp-export-csv',
   'cp-cloud-state',
-  'btn-cp-cloud-push',
-  'btn-cp-cloud-pull',
   'toast-container',
   'app-version',
 ];
@@ -286,10 +284,6 @@ function renderCloudState(message, tone = 'idle') {
     element.textContent = message;
     element.dataset.tone = tone;
   }
-  const hasIdentity = Boolean(cloud.identity && cloud.config);
-  for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
-    if (dom[id]) dom[id].disabled = !hasIdentity || cloud.busy;
-  }
 }
 
 async function pushModels({ silent = false } = {}) {
@@ -316,10 +310,6 @@ async function pushModels({ silent = false } = {}) {
     if (!silent) showToast(`Falha ao enviar: ${error.message}`, 'error');
   } finally {
     cloud.busy = false;
-    // Só reabilita os botões: o texto/tom do resultado continua visível.
-    for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
-      if (dom[id]) dom[id].disabled = !(cloud.config && cloud.identity);
-    }
   }
 }
 
@@ -369,9 +359,6 @@ async function pullModels({ silent = true } = {}) {
     if (!silent) showToast(`Falha ao sincronizar: ${error.message}`, 'error');
   } finally {
     cloud.busy = false;
-    for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
-      if (dom[id]) dom[id].disabled = !(cloud.config && cloud.identity);
-    }
     setTimeout(() => renderCloudState(describeIdentity(), 'idle'), 4000);
   }
 }
@@ -1537,9 +1524,6 @@ function bindEvents() {
   dom['btn-cp-export-xlsx']?.addEventListener('click', () => void exportXlsx());
   dom['btn-cp-export-pdf']?.addEventListener('click', exportPdf);
   dom['btn-cp-export-csv']?.addEventListener('click', exportCsv);
-
-  dom['btn-cp-cloud-push']?.addEventListener('click', () => void pushModels());
-  dom['btn-cp-cloud-pull']?.addEventListener('click', () => void pullModels());
 }
 
 /* -------------------------------------------------------------------------- */
