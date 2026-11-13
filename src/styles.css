@@ -2792,3 +2792,284 @@ body {
   white-space: normal;
   line-height: 1.25;
 }
+
+/* -------------------------------------------------------------------------- */
+/*                    Painel do administrador (só com a senha)                */
+/* -------------------------------------------------------------------------- */
+
+.cp-admin-panel-card {
+  max-width: 940px;
+}
+
+.cp-admin-tabs {
+  flex-wrap: wrap;
+  padding: 0 18px;
+  margin-bottom: 0;
+}
+
+.cp-admin-tabs .mtab {
+  white-space: nowrap;
+}
+
+#cp-admin-body {
+  padding-top: 14px;
+  flex: 1;
+}
+
+.cp-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.cp-admin-section {
+  margin-bottom: 18px;
+}
+
+.cp-admin-section h3 {
+  margin: 0 0 2px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.cp-admin-hint {
+  margin: 0 0 8px;
+  font-size: 0.76rem;
+  color: var(--text-light);
+}
+
+.cp-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cp-admin-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cp-admin-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  min-width: 0;
+}
+
+.cp-admin-card span {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.cp-admin-card strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--navy);
+  overflow-wrap: anywhere;
+}
+
+.cp-admin-card small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--text-light);
+}
+
+/* Gráfico de barras dos últimos 14 dias */
+.cp-admin-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 96px;
+  padding: 8px 10px 0;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.cp-admin-bar {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cp-admin-bar span {
+  display: block;
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  min-height: 2px;
+}
+
+.cp-admin-bar em {
+  font-size: 0.58rem;
+  font-style: normal;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+/* Tabelas e listas */
+.cp-admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.cp-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.cp-admin-table th,
+.cp-admin-table td {
+  padding: 6px 9px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.cp-admin-table th {
+  background: var(--surface-alt);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-light);
+  position: sticky;
+  top: 0;
+}
+
+.cp-admin-table tr:last-child td {
+  border-bottom: none;
+}
+
+.cp-admin-when {
+  white-space: nowrap;
+  color: var(--text-light);
+  font-variant-numeric: tabular-nums;
+}
+
+.cp-admin-details {
+  color: var(--text-light);
+  overflow-wrap: anywhere;
+}
+
+.cp-admin-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.cp-admin-tag.is-conciliacao { background: #dbeafe; color: #1d4ed8; }
+.cp-admin-tag.is-arquivo { background: #ede9fe; color: #6d28d9; }
+.cp-admin-tag.is-exportacao { background: #dcfce7; color: #15803d; }
+.cp-admin-tag.is-vinculo { background: #fef3c7; color: #92400e; }
+.cp-admin-tag.is-conta { background: #fae8ff; color: #a21caf; }
+.cp-admin-tag.is-nuvem { background: #cffafe; color: #0e7490; }
+.cp-admin-tag.is-erro { background: #fee2e2; color: #b91c1c; }
+.cp-admin-tag.is-sessao { background: #e2e8f0; color: #475569; }
+
+.cp-admin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.cp-admin-log-filter {
+  font-size: 0.72rem;
+}
+
+.cp-admin-log-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.cp-admin-log-list li {
+  margin-bottom: 5px;
+}
+
+.cp-admin-log-list em {
+  display: block;
+  color: var(--text-light);
+  font-style: normal;
+}
+
+.cp-admin-dl {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.cp-admin-dl dt {
+  color: var(--text-light);
+}
+
+.cp-admin-dl dd {
+  margin: 0;
+  font-weight: 600;
+  color: var(--navy);
+  overflow-wrap: anywhere;
+}
+
+.cp-admin-empty {
+  margin: 0;
+  padding: 14px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-light);
+  background: var(--surface-alt);
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+}
+
+/* Botão do administrador: muda de cor quando já está liberado */
+#btn-cp-admin[data-state='unlocked'] {
+  border-color: rgba(147, 197, 253, 0.5);
+}
+
+@media (max-width: 720px) {
+  .cp-admin-grid,
+  .cp-admin-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cp-admin-dl {
+    grid-template-columns: 1fr;
+  }
+  .cp-admin-dl dd {
+    margin-bottom: 6px;
+  }
+  .cp-admin-actions {
+    justify-content: stretch;
+  }
+  .cp-admin-actions .btn {
+    flex: 1 1 auto;
+  }
+}

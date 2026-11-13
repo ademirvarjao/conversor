@@ -10,7 +10,23 @@
  */
 
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
-import { loadAiMemory, saveAiMemory } from './ai-engine.js';
+import { STORAGE_KEY as AI_MEMORY_KEY, loadAiMemory, saveAiMemory } from './ai-engine.js';
+import {
+  MAX_EVENTS,
+  USAGE_KEY,
+  addActiveTime,
+  bumpCounter,
+  eventsToCsv,
+  formatDateTime,
+  formatDuration,
+  loadUsage,
+  recordEvent,
+  resetUsage,
+  saveUsage,
+  startSession,
+  usageReport,
+} from './admin-usage.js';
+import { adminPanelHeadline, renderAdminPanel } from './admin-panel.js';
 import { escapeHtml } from './html.js';
 import { installGlobalErrorReporting, reportStartupFailure } from './ui-errors.js';
 import {
@@ -52,6 +68,7 @@ import { formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
 import { LOCKOUT_MS, MAX_ATTEMPTS, loadUnlock, saveUnlock, verifyCloudCredentials } from './cloud-lock.js';
+import { loadSession } from './cloud-auth.js';
 import {
   loadCloudConfig,
   loadIdentity,
@@ -151,6 +168,14 @@ const REQUIRED_IDS = [
   'cp-admin-password',
   'btn-cp-admin-enter',
   'cp-admin-error',
+  'cp-admin-panel',
+  'cp-admin-body',
+  'cp-admin-headline',
+  'btn-cp-admin-close',
+  'btn-cp-admin-refresh',
+  'btn-cp-admin-export',
+  'btn-cp-admin-logs',
+  'btn-cp-admin-reset',
   'toast-container',
   'app-version',
 ];
@@ -217,6 +242,254 @@ function cpAlert(message, tone = 'info') {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                 Uso, logs e painel do administrador                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * O painel do administrador é local: mostra o uso **deste navegador** (sessões,
+ * tempo com a aba visível, conciliações, exportações), a memória da IA, os logs
+ * de eventos e os dados do dispositivo. Nada aqui consulta servidor nem guarda
+ * conteúdo de arquivo.
+ */
+const usage = loadUsage();
+const adminPanel = { tab: 'overview', open: false, logFilter: 'all', sessionStartedAt: Date.now() };
+const USAGE_TICK_MS = 30000;
+let activeAnchor = 0;
+
+function persistUsage() {
+  saveUsage(usage);
+}
+
+/** Registra um evento no histórico (e, se pedido, soma um contador). */
+function track(type, message, details = '', counter = null, amount = 1) {
+  recordEvent(usage, { type, message, details }, Date.now());
+  if (counter) bumpCounter(usage, counter, amount, Date.now());
+  persistUsage();
+}
+
+/** Só soma contador (edições em série não viram um evento cada). */
+function trackCount(counter, amount = 1) {
+  bumpCounter(usage, counter, amount, Date.now());
+  persistUsage();
+}
+
+/**
+ * Tempo de uso = tempo com a aba visível. Fecha o período quando a aba sai de
+ * foco, ao trocar de página e a cada 30 s enquanto ela está aberta.
+ */
+function flushActiveTime() {
+  if (!activeAnchor) return;
+  const now = Date.now();
+  addActiveTime(usage, now - activeAnchor, now);
+  activeAnchor = now;
+  persistUsage();
+}
+
+function watchActiveTime() {
+  activeAnchor = document.visibilityState === 'visible' ? Date.now() : 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      activeAnchor = Date.now();
+      return;
+    }
+    flushActiveTime();
+    activeAnchor = 0;
+  });
+  window.addEventListener('pagehide', flushActiveTime);
+  setInterval(flushActiveTime, USAGE_TICK_MS);
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1).replace('.', ',')} KB`;
+  return `${(value / (1024 * 1024)).toFixed(2).replace('.', ',')} MB`;
+}
+
+/** Quanto cada coisa ocupa no navegador (só o tamanho, nunca o conteúdo). */
+function storageSizes() {
+  const sizes = { memory: 0, usage: 0, total: 0, keys: 0 };
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key) continue;
+      const size = key.length + (localStorage.getItem(key) || '').length;
+      sizes.total += size;
+      sizes.keys += 1;
+      if (key === AI_MEMORY_KEY) sizes.memory = size;
+      if (key === USAGE_KEY) sizes.usage = size;
+    }
+  } catch {
+    /* modo privado: mostra "—" */
+  }
+  return {
+    memory: sizes.memory ? formatBytes(sizes.memory) : '—',
+    usage: sizes.usage ? formatBytes(sizes.usage) : '—',
+    total: sizes.total ? formatBytes(sizes.total) : '—',
+    keys: sizes.keys,
+  };
+}
+
+/** Navegador, sistema e tela — o que o app consegue saber sem pedir permissão. */
+function deviceRows() {
+  const nav = typeof navigator !== 'undefined' ? navigator : {};
+  const ua = String(nav.userAgent || '');
+  const browser =
+    /Edg\//.test(ua) ? 'Edge'
+    : /OPR\//.test(ua) ? 'Opera'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari'
+    : 'não identificado';
+  const system =
+    /Windows/.test(ua) ? 'Windows'
+    : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+    : /Mac OS X/.test(ua) ? 'macOS'
+    : /Linux/.test(ua) ? 'Linux'
+    : 'não identificado';
+  const screenInfo =
+    typeof screen !== 'undefined' ? `${screen.width}×${screen.height} (janela ${window.innerWidth}×${window.innerHeight})` : '—';
+  const tz = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || '—';
+    } catch {
+      return '—';
+    }
+  })();
+
+  return [
+    ['Navegador', browser],
+    ['Sistema', system],
+    ['Idioma', nav.language || '—'],
+    ['Fuso horário', tz],
+    ['Tela', screenInfo],
+    ['Densidade', `${window.devicePixelRatio || 1}×`],
+    ['Núcleos de CPU', nav.hardwareConcurrency ? String(nav.hardwareConcurrency) : '—'],
+    ['Memória do aparelho', nav.deviceMemory ? `${nav.deviceMemory} GB` : 'não informado'],
+    ['Conexão', nav.connection?.effectiveType ? nav.connection.effectiveType.toUpperCase() : 'não informada'],
+    ['Toque', nav.maxTouchPoints > 0 ? `sim (${nav.maxTouchPoints} ponto(s))` : 'não'],
+  ];
+}
+
+/** Resumo da nuvem já formatado para o painel. */
+function cloudSummary() {
+  const identity = cloud.identity;
+  let account = 'sem conta';
+  try {
+    const saved = loadSession();
+    account = saved?.email || 'sem conta';
+  } catch {
+    /* sem sessão guardada */
+  }
+  return {
+    accessCode: identity ? formatAccessCode(identity.code) : '',
+    lastSync: identity?.lastSyncAt ? formatDateTime(identity.lastSyncAt) : '—',
+    host: cloud.config?.url ? cloud.config.url.replace(/^https?:\/\//i, '') : '',
+    account,
+    remote: identity ? 'sincronizado' : 'não verificado',
+    auto: true,
+  };
+}
+
+/** Redesenha o corpo do painel (aba atual). */
+function renderAdminPanelBody() {
+  const body = dom['cp-admin-body'];
+  if (!body) return;
+
+  body.innerHTML = renderAdminPanel({
+    tab: adminPanel.tab,
+    usage,
+    memory: state.memory,
+    device: { rows: deviceRows() },
+    cloud: cloudSummary(),
+    storage: storageSizes(),
+    logFilter: adminPanel.logFilter,
+    sessionStartedAt: adminPanel.sessionStartedAt,
+  });
+  if (dom['cp-admin-headline']) dom['cp-admin-headline'].textContent = adminPanelHeadline(usage);
+
+  document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
+    const active = button.dataset.cpAdminTab === adminPanel.tab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+}
+
+function openAdminPanel() {
+  const panel = dom['cp-admin-panel'];
+  if (!panel) return;
+  flushActiveTime();
+  adminPanel.open = true;
+  renderAdminPanelBody();
+  panel.classList.remove('hidden');
+  panel.setAttribute('aria-hidden', 'false');
+  dom['btn-cp-admin-close']?.focus();
+  track('sessao', 'Painel do administrador aberto');
+}
+
+function closeAdminPanel() {
+  const panel = dom['cp-admin-panel'];
+  if (!panel || panel.classList.contains('hidden')) return;
+  adminPanel.open = false;
+  panel.classList.add('hidden');
+  panel.setAttribute('aria-hidden', 'true');
+  dom['btn-cp-admin']?.focus();
+}
+
+/** Baixa um arquivo de texto gerado no navegador. */
+function downloadTextFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function adminFileName(extension) {
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  return `painel-administrador-${stamp}.${extension}`;
+}
+
+function exportAdminReport() {
+  flushActiveTime();
+  const report = usageReport(
+    {
+      usage,
+      memory: state.memory,
+      device: Object.fromEntries(deviceRows()),
+      cloud: cloudSummary(),
+      appVersion: APP_VERSION,
+    },
+    Date.now()
+  );
+  downloadTextFile(JSON.stringify(report, null, 2), adminFileName('json'), 'application/json');
+  track('exportacao', 'Relatório do painel exportado', '.json');
+  showToast('Relatório do painel exportado em .json.');
+}
+
+function exportAdminLogs() {
+  const csv = `\ufeff${eventsToCsv(usage)}`;
+  downloadTextFile(csv, adminFileName('csv'), 'text/csv;charset=utf-8');
+  track('exportacao', 'Logs do painel exportados', '.csv');
+  showToast('Logs exportados em .csv (separador ";" — abre direto no Excel).');
+}
+
+function resetAdminHistory() {
+  if (!window.confirm('Apagar o histórico de uso e os logs deste navegador? A memória da IA não é afetada.')) return;
+  const fresh = resetUsage();
+  Object.assign(usage, fresh);
+  persistUsage();
+  adminPanel.sessionStartedAt = Date.now();
+  renderAdminPanelBody();
+  showToast('Histórico de uso apagado.', 'warn');
+}
+
+/* -------------------------------------------------------------------------- */
 /*                    Painel da memória (só administrador)                    */
 /* -------------------------------------------------------------------------- */
 
@@ -248,11 +521,22 @@ function setAdminError(message) {
   box.classList.toggle('hidden', !message);
 }
 
-/** Mostra/esconde o botão "Administrador", o formulário e o resumo. */
+/**
+ * Estado do acesso administrativo: o botão fica sempre no topo (é ele que abre
+ * o login ou, já liberado, o painel completo), o formulário só aparece quando
+ * ainda falta entrar e o resumo da memória só com o desbloqueio válido.
+ */
 function renderAdminState() {
   const unlocked = adminUnlocked();
   const toggle = dom['btn-cp-admin'];
-  if (toggle) toggle.hidden = unlocked;
+  if (toggle) {
+    toggle.hidden = false;
+    toggle.title = unlocked
+      ? 'Abrir o painel do administrador (uso, memória, logs)'
+      : 'Entrar como administrador para ver o painel';
+    toggle.dataset.state = unlocked ? 'unlocked' : 'locked';
+    toggle.setAttribute('aria-label', unlocked ? 'Abrir o painel do administrador' : 'Entrar como administrador');
+  }
   if (unlocked) {
     dom['cp-admin-gate']?.classList.add('hidden');
     toggle?.setAttribute('aria-expanded', 'false');
@@ -299,7 +583,8 @@ async function submitAdminGate(event) {
     saveUnlock();
     if (dom['cp-admin-password']) dom['cp-admin-password'].value = '';
     renderAdminState();
-    showToast('Painel da memória liberado nesta aba por 1 hora.', 'success');
+    openAdminPanel();
+    showToast('Painel do administrador liberado nesta aba por 1 hora.', 'success');
   } catch (error) {
     setAdminError(error?.message || 'Não foi possível validar a senha.');
   } finally {
@@ -416,6 +701,10 @@ async function pushModels({ silent = false } = {}) {
     });
     cloud.identity = touchIdentitySync({ ...cloud.identity }, result.updatedAt);
     renderCloudState(`Modelos enviados • ${new Date().toLocaleTimeString('pt-BR')}`, 'ok');
+    // O envio automático é frequente: soma no contador e só vira log quando o
+    // usuário pediu (ou quando é o primeiro envio depois de aprender algo).
+    if (silent) trackCount('cloudPush');
+    else track('nuvem', 'Modelos enviados para a nuvem', '', 'cloudPush');
     if (!silent) showToast('Modelos aprendidos enviados para a nuvem.');
   } catch (error) {
     renderCloudState('Falha ao enviar', 'error');
@@ -456,6 +745,8 @@ async function pullModels({ silent = true } = {}) {
     const novos = Math.max(0, (state.memory.counterparties?.uses || 0) - (before.counterparties?.uses || 0));
     const changed = JSON.stringify(before) !== JSON.stringify(state.memory);
     renderCloudState('Modelos em dia com a nuvem', 'ok');
+    trackCount('cloudPull');
+    if (changed) track('nuvem', 'Modelos recebidos da nuvem', novos > 0 ? `${novos} uso(s) novo(s)` : 'memória atualizada');
     if (changed) {
       showToast(
         novos > 0
@@ -614,6 +905,12 @@ async function loadContacts(fileList) {
     failures.length > 0 ? 'warn' : 'info'
   );
   updateRunButton();
+  track(
+    'arquivo',
+    `Cadastro carregado: ${contacts.length} contato(s)`,
+    `${read} arquivo(s) • ${summary.suppliers} fornecedores • ${summary.customers} clientes`,
+    'contactsFiles'
+  );
 }
 
 /** Lê um arquivo de extrato e devolve os lançamentos com sinal. */
@@ -701,6 +998,12 @@ async function loadLedger(fileList) {
     failures.length > 0 ? 'warn' : 'info'
   );
   updateRunButton();
+  track(
+    'arquivo',
+    `Extrato carregado: ${transactions.length} lançamento(s)`,
+    `${read} arquivo(s) • ${payments} pagamentos • ${receipts} recebimentos`,
+    'ledgerFiles'
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -753,6 +1056,18 @@ async function runReconciliation() {
     scheduleCloudPush();
 
     render();
+
+    track(
+      'conciliacao',
+      `Conciliação: ${stats.matched} de ${stats.total} vinculados`,
+      `${stats.byDocument || 0} por CPF/CNPJ • ${stats.ambiguous} para revisar • ${stats.unmatched} sem contato`,
+      'reconciliations'
+    );
+    // Soma os números da rodada (linhas, não eventos).
+    bumpCounter(usage, 'rowsReconciled', stats.matched, Date.now());
+    bumpCounter(usage, 'rowsReview', stats.ambiguous, Date.now());
+    bumpCounter(usage, 'rowsUnmatched', stats.unmatched, Date.now());
+    persistUsage();
 
     const suggested = rows.filter((row) => row.accountSuggestion).length;
     const fromMemory = rows.filter((row) => row.counterpartSource === 'memory').length;
@@ -1055,6 +1370,7 @@ async function exportXlsx() {
   try {
     const rows = exportRows();
     await exportCounterpartiesXlsx(rows, exportName('xlsx'), window.ExcelJS);
+    track('exportacao', `Planilha .xlsx gerada`, `${rows.length} lançamento(s)`, 'exports');
     showToast(
       `Planilha .xlsx gerada com ${rows.length} lançamento(s)${
         state.selected.size > 0 ? ' selecionado(s)' : ' (todos)'
@@ -1070,6 +1386,7 @@ function exportPdf() {
   try {
     const rows = exportRows();
     exportCounterpartiesPdf(rows, summarizeReconciliation(rows), exportName('pdf'));
+    track('exportacao', 'PDF gerado', `${rows.length} lançamento(s)`, 'exports');
     showToast(
       `PDF gerado com ${rows.length} lançamento(s)${
         state.selected.size > 0 ? ' selecionado(s)' : ' (todos)'
@@ -1085,6 +1402,7 @@ function exportCsv() {
   try {
     const rows = exportRows();
     exportCounterpartiesCsv(rows, exportName('csv'));
+    track('exportacao', 'CSV gerado', `${rows.length} lançamento(s)`, 'exports');
     showToast(
       `CSV gerado com ${rows.length} lançamento(s)${
         state.selected.size > 0 ? ' selecionado(s)' : ' (todos)'
@@ -1135,6 +1453,7 @@ function applySuggestion(rowId) {
 
   state.stats = summarizeReconciliation(state.rows);
   render();
+  track('conta', 'Sugestão aceita', `conta ${suggestion.account} no ${suggestion.side === 'credit' ? 'crédito' : 'débito'}`, 'suggestionsApplied');
 
   showToast(
     `Conta ${suggestion.account} aplicada no ${suggestion.side === 'credit' ? 'crédito' : 'débito'} — memória reforçada.`
@@ -1162,6 +1481,7 @@ function applySuggestionsBatch() {
 
   state.stats = summarizeReconciliation(state.rows);
   render();
+  track('conta', 'Sugestões aplicadas em lote', `${targets.length} conta(s)`, 'suggestionsApplied', targets.length);
   showToast(`${targets.length} conta(s) sugerida(s) aplicada(s) — a memória foi reforçada.`);
 }
 
@@ -1239,6 +1559,12 @@ function applyAccountBatch() {
       ? `Contas digitadas à mão removidas — ${summary}.`
       : `Aplicado ${describeScope(scope, targets.length)} — ${summary}.`;
   }
+  track(
+    'conta',
+    clearing ? 'Contas digitadas à mão removidas' : 'Contas aplicadas em lote',
+    summary,
+    clearing ? 'accountsCleared' : 'accountsApplied'
+  );
   showToast(clearing ? `Contas digitadas à mão removidas — ${summary}.` : `Contas aplicadas — ${summary}.`);
 }
 
@@ -1281,6 +1607,7 @@ function applyCellAccount(input) {
   setRowCellAccount(row, side, account);
   delete row.accountSuggestion;
   rememberAccount(row, side, account);
+  trackCount('accountEdits');
   state.stats = summarizeReconciliation(state.rows);
   render();
 
@@ -1467,6 +1794,7 @@ function applyLink(code) {
   state.linkingId = null;
   dom['cp-link-panel']?.classList.add('hidden');
   render();
+  track('vinculo', 'Vínculo feito à mão', `${contact.name} (${contact.code})`, 'manualLinks');
   showToast(`Vínculo memorizado: este histórico passa a apontar para ${contact.name}.`);
 }
 
@@ -1560,8 +1888,12 @@ function bindEvents() {
 
   dom['btn-cp-apply-suggestions']?.addEventListener('click', applySuggestionsBatch);
 
-  // Painel da memória: só abre com login e senha do administrador.
+  // Administrador: sem desbloqueio abre o login; com desbloqueio abre o painel.
   dom['btn-cp-admin']?.addEventListener('click', () => {
+    if (adminUnlocked()) {
+      openAdminPanel();
+      return;
+    }
     const gate = dom['cp-admin-gate'];
     if (!gate) return;
     const open = gate.classList.toggle('hidden') === false;
@@ -1570,6 +1902,48 @@ function bindEvents() {
     if (open) dom['cp-admin-user']?.focus();
   });
   dom['cp-admin-gate']?.addEventListener('submit', (event) => void submitAdminGate(event));
+
+  // ---- painel do administrador ----
+  dom['btn-cp-admin-close']?.addEventListener('click', closeAdminPanel);
+  dom['btn-cp-admin-refresh']?.addEventListener('click', () => {
+    flushActiveTime();
+    renderAdminPanelBody();
+    showToast('Painel atualizado.');
+  });
+  dom['btn-cp-admin-export']?.addEventListener('click', exportAdminReport);
+  dom['btn-cp-admin-logs']?.addEventListener('click', exportAdminLogs);
+  dom['btn-cp-admin-reset']?.addEventListener('click', resetAdminHistory);
+
+  dom['cp-admin-panel']?.addEventListener('click', (event) => {
+    // Clique no fundo escuro fecha o painel (clique no cartão, não).
+    if (event.target === dom['cp-admin-panel']) closeAdminPanel();
+  });
+
+  document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      adminPanel.tab = button.dataset.cpAdminTab;
+      renderAdminPanelBody();
+    });
+  });
+
+  // Filtro dos logs: guarda o tipo escolhido e redesenha a aba.
+  dom['cp-admin-body']?.addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-cp-admin-log]');
+    if (!chip) return;
+    adminPanel.logFilter = chip.dataset.cpAdminLog || 'all';
+    renderAdminPanelBody();
+  });
+
+  // Esc fecha o painel e o login do administrador.
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (adminPanel.open) {
+      closeAdminPanel();
+      return;
+    }
+    dom['cp-admin-gate']?.classList.add('hidden');
+    dom['btn-cp-admin']?.setAttribute('aria-expanded', 'false');
+  });
 
   dom['cp-tbody']?.addEventListener('change', (event) => {
     const cell = event.target.closest('[data-cp-cell]');
@@ -1655,7 +2029,22 @@ function bindEvents() {
 
 function init() {
   cacheDom();
-  installGlobalErrorReporting({ notify: showToast, scope: 'Conciliador' });
+
+  // Uso deste navegador: sessão nova + um contador de aberturas por dia.
+  startSession(usage);
+  bumpCounter(usage, 'sessions', 1, Date.now());
+  persistUsage();
+  watchActiveTime();
+  recordEvent(usage, { type: 'sessao', message: 'Conciliação aberta' }, Date.now());
+  persistUsage();
+
+  installGlobalErrorReporting({
+    scope: 'Conciliador',
+    notify: (message, kind, options) => {
+      if (kind === 'error') track('erro', 'Aviso de erro na tela', String(message).slice(0, 180), 'errors');
+      showToast(message, kind, options);
+    },
+  });
   if (dom['app-version']) dom['app-version'].textContent = `v${APP_VERSION}`;
 
   // Tamanho da página vem do seletor; qualquer valor estranho cai no padrão.
@@ -1670,6 +2059,9 @@ function init() {
 
   counterpartyMemory();
   renderCloudState(describeIdentity(), 'idle');
+  // Quem já entrou como administrador na página principal (mesma aba do
+  // navegador) não digita a senha de novo para ver o painel.
+  if (loadUnlock()) admin.unlocked = true;
   renderAdminState();
   bindEvents();
   render();
@@ -1678,6 +2070,7 @@ function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     renderAdminState(); // o desbloqueio do administrador expira em 1 hora
+    if (adminPanel.open) renderAdminPanelBody();
     scheduleCloudPull(1500);
   });
 
