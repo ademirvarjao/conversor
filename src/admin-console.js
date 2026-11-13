@@ -31,6 +31,7 @@ import {
   adminGateMarkup,
   adminPanelHeadline,
   adminPanelMarkup,
+  liveMetrics,
   renderAdminPanel,
 } from './admin-panel.js';
 import {
@@ -213,6 +214,11 @@ export function createAdminConsole(options = {}) {
   let ticker = null;
   let mounted = false;
   let lastFocused = null;
+  /** Relógio do painel aberto (1 s) e quando o conteúdo foi redesenhado. */
+  let liveTimer = null;
+  let lastPaint = 0;
+  let lastVaultsReload = 0;
+  let refreshTimer = null;
 
   const dom = {};
 
@@ -223,7 +229,6 @@ export function createAdminConsole(options = {}) {
       'cp-admin-headline',
       'cp-admin-body',
       'btn-cp-admin-close',
-      'btn-cp-admin-refresh',
       'btn-cp-admin-export',
       'btn-cp-admin-logs',
       'btn-cp-admin-reset',
@@ -258,17 +263,31 @@ export function createAdminConsole(options = {}) {
     saveUsage(usage);
   }
 
+  /**
+   * Redesenha o conteúdo com o painel aberto, sem pressa: junta as mudanças de
+   * uma rajada (uma conciliação dispara vários contadores) num desenho só.
+   */
+  function scheduleRefresh(delay = 300) {
+    if (!state.open || refreshTimer) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      if (state.open) render();
+    }, delay);
+  }
+
   /** Registra um evento (e, se pedido, soma um contador). */
   function track(type, message, details = '', counter = null, amount = 1) {
     recordEvent(usage, { type, message, details }, Date.now());
     if (counter) bumpCounter(usage, counter, amount, Date.now());
     persistUsage();
+    scheduleRefresh();
   }
 
   /** Só soma contador (edições em série não viram um evento cada). */
   function count(counter, amount = 1) {
     bumpCounter(usage, counter, amount, Date.now());
     persistUsage();
+    scheduleRefresh();
   }
 
   /* ------------------------------ tempo de uso ----------------------------- */
@@ -279,6 +298,7 @@ export function createAdminConsole(options = {}) {
     addActiveTime(usage, now - activeAnchor, now);
     activeAnchor = now;
     persistUsage();
+    lastPaint = 0; // o total gravado mudou: o próximo desenho mostra o valor novo
   }
 
   function watchActiveTime() {
@@ -419,6 +439,7 @@ export function createAdminConsole(options = {}) {
   function render() {
     if (!hasDom() || !dom['cp-admin-body']) return;
     const memory = getMemory() || {};
+    const scroll = dom['cp-admin-body'].scrollTop;
     dom['cp-admin-body'].innerHTML = renderAdminPanel({
       tab: state.tab,
       usage,
@@ -429,16 +450,87 @@ export function createAdminConsole(options = {}) {
       storage: storageSizes(),
       logFilter: state.logFilter,
       sessionStartedAt: state.sessionStartedAt,
+      liveMs: liveMsNow(),
       vaults: state.vaults,
       flash: state.flash,
     });
-    if (dom['cp-admin-headline']) dom['cp-admin-headline'].textContent = adminPanelHeadline(usage);
+    // O conteúdo foi recriado: a rolagem volta para onde estava e o relógio
+    // continua de onde parou (sem "pular" a cada redesenho).
+    dom['cp-admin-body'].scrollTop = scroll;
+    if (dom['cp-admin-headline']) dom['cp-admin-headline'].textContent = adminPanelHeadline(usage, Date.now(), { liveMs: liveMsNow() });
     document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
-      const active = button.dataset.cpAdminTab === state.tab;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-selected', String(active));
-      button.tabIndex = active ? 0 : -1;
+      markTab(button, button.dataset.cpAdminTab === state.tab);
     });
+    lastPaint = Date.now();
+    paintLive();
+  }
+
+  /**
+   * Estado visual da aba. O CSS cuida da aparência, mas o `style` inline é a
+   * garantia: nenhuma regra de navegador/extensão deixa as seis abas com a
+   * mesma cara de "selecionada".
+   */
+  function markTab(button, active) {
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+    button.tabIndex = active ? 0 : -1;
+    button.style.color = active ? 'var(--primary)' : 'var(--text-light)';
+    button.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
+    button.style.fontWeight = active ? '700' : '600';
+  }
+
+  /** Quanto a sessão aberta já andou desde a última gravação. */
+  function liveMsNow() {
+    if (!activeAnchor) return 0;
+    if (hasDom() && document.visibilityState !== 'visible') return 0;
+    return Math.max(0, Date.now() - activeAnchor);
+  }
+
+  /** Troca só os textos que correm (relógio, tempos, contadores). */
+  function paintLive() {
+    if (!hasDom() || !dom['cp-admin-body']) return;
+    if (!state.open || dom['cp-admin-panel']?.classList.contains('hidden')) return;
+    const values = liveMetrics({
+      usage,
+      now: Date.now(),
+      sessionStartedAt: state.sessionStartedAt,
+      liveMs: liveMsNow(),
+    });
+    dom['cp-admin-body'].querySelectorAll('[data-cp-live]').forEach((element) => {
+      const value = values[element.dataset.cpLive];
+      if (value === undefined || element.textContent === value) return;
+      element.textContent = value;
+    });
+    if (dom['cp-admin-headline'] && values.headline) {
+      dom['cp-admin-headline'].textContent = values.headline;
+    }
+  }
+
+  /** Relógio de 1 s + redesenho periódico (gráfico, tabelas, memória, chaves). */
+  function startLive() {
+    if (!hasDom() || liveTimer) return;
+    liveTimer = setInterval(() => {
+      if (!state.open) return;
+      if (hasDom() && document.visibilityState !== 'visible') return;
+      paintLive();
+      const now = Date.now();
+      // Redesenho completo a cada 10 s para o gráfico e as listas acompanharem;
+      // nunca por cima de um botão em foco (o foco saltaria).
+      const focusNoCorpo = document.activeElement && dom['cp-admin-body']?.contains(document.activeElement);
+      if (now - lastPaint >= 10_000 && !focusNoCorpo) {
+        render();
+        if (state.tab === 'vaults' && now - lastVaultsReload >= 30_000 && !state.vaults.loading && !state.vaults.busy) {
+          lastVaultsReload = now;
+          void reloadVaults();
+        }
+      }
+    }, 1000);
+  }
+
+  function stopLive() {
+    if (!liveTimer) return;
+    clearInterval(liveTimer);
+    liveTimer = null;
   }
 
   function openPanel(tab) {
@@ -452,6 +544,8 @@ export function createAdminConsole(options = {}) {
     dom['cp-admin-panel'].setAttribute('aria-hidden', 'false');
     lastFocused = document.activeElement;
     dom['btn-cp-admin-close']?.focus();
+    paintLive(); // relógio já no valor certo, sem esperar o primeiro segundo
+    startLive();
     track('sessao', `Painel do administrador aberto (${page})`, `aba ${state.tab}`);
     return true;
   }
@@ -459,6 +553,11 @@ export function createAdminConsole(options = {}) {
   function closePanel() {
     if (!dom['cp-admin-panel'] || dom['cp-admin-panel'].classList.contains('hidden')) return;
     state.open = false;
+    stopLive();
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
     dom['cp-admin-panel'].classList.add('hidden');
     dom['cp-admin-panel'].setAttribute('aria-hidden', 'true');
     if (lastFocused instanceof HTMLElement) lastFocused.focus();
@@ -686,11 +785,6 @@ export function createAdminConsole(options = {}) {
       return true;
     }
 
-    if (hit('reload')) {
-      void reloadVaults({ announce: true });
-      return true;
-    }
-
     return false;
   }
 
@@ -751,12 +845,6 @@ export function createAdminConsole(options = {}) {
 
   function bind() {
     dom['btn-cp-admin-close']?.addEventListener('click', closePanel);
-    dom['btn-cp-admin-refresh']?.addEventListener('click', () => {
-      flushActiveTime();
-      render();
-      if (state.tab === 'vaults') void reloadVaults({ announce: true });
-      else notify('Painel atualizado.', 'success');
-    });
     dom['btn-cp-admin-export']?.addEventListener('click', exportReport);
     dom['btn-cp-admin-logs']?.addEventListener('click', exportLogs);
     dom['btn-cp-admin-reset']?.addEventListener('click', resetHistory);
@@ -817,6 +905,7 @@ export function createAdminConsole(options = {}) {
         notify('O acesso do administrador expirou. Entre com a senha de novo.', 'warn');
       } else if (state.open) {
         render();
+        startLive();
       }
     });
   }
@@ -867,6 +956,11 @@ export function createAdminConsole(options = {}) {
     flushActiveTime,
     usage,
     memorySummary: () => memorySummary(getMemory()),
+    /** Relógio do painel: pinta os valores ao vivo agora (testes e uso manual). */
+    tick: () => {
+      paintLive();
+      return liveMetrics({ usage, now: Date.now(), sessionStartedAt: state.sessionStartedAt, liveMs: liveMsNow() });
+    },
     /** Aba de códigos: relê o banco e redesenha (o painel também faz sozinho). */
     reloadVaults,
     vaults: () => state.vaults,

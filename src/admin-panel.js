@@ -36,11 +36,22 @@ const TYPE_LABELS = {
   erro: 'Erro',
 };
 
-function info(label, value, hint = '') {
+/**
+ * Cartão de número.
+ *
+ * `live` marca o `<strong>` (e opcionalmente o `<small>`) com `data-cp-live`:
+ * é por ali que o painel troca **só o texto** a cada segundo, sem redesenhar a
+ * aba inteira (o que perderia rolagem, foco e seleção).
+ */
+function info(label, value, hint = '', live = '', hintLive = '') {
   return `<div class="cp-admin-card">
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value)}</strong>
-      ${hint ? `<small>${escapeHtml(hint)}</small>` : ''}
+      <strong${live ? ` data-cp-live="${escapeHtml(live)}"` : ''}>${escapeHtml(value)}</strong>
+      ${
+        hint
+          ? `<small${hintLive ? ` data-cp-live="${escapeHtml(hintLive)}"` : ''}>${escapeHtml(hint)}</small>`
+          : ''
+      }
     </div>`;
 }
 
@@ -88,7 +99,7 @@ function counterList(counters) {
   ];
   return `<div class="cp-admin-grid cp-admin-grid-3">
       ${labels
-        .map(([key, label]) => info(label, String(counters[key] ?? 0)))
+        .map(([key, label]) => info(label, String(counters[key] ?? 0), '', `counter:${key}`))
         .join('')}
     </div>`;
 }
@@ -168,9 +179,9 @@ function overviewTab(ctx) {
   return `
     ${memorySummaryCard(ctx)}
     <div class="cp-admin-grid">
-      ${info('Tempo nesta sessão', formatDuration(atual), `aberta em ${clockOf(startedAt)}`)}
-      ${info('Tempo total de uso', formatDuration(summary.activeMs), `em ${summary.sessions} sessão(ões)`)}
-      ${info('Média por sessão', formatDuration(summary.avgSessionMs), `hoje: ${formatDuration(summary.todayMs)}`)}
+      ${info('Tempo nesta sessão', formatDuration(atual), `aberta em ${clockOf(startedAt)}`, 'session')}
+      ${info('Tempo total de uso', formatDuration(summary.activeMs), `em ${summary.sessions} sessão(ões)`, 'total')}
+      ${info('Média por sessão', formatDuration(summary.avgSessionMs), `hoje: ${formatDuration(summary.todayMs)}`, 'avg', 'today')}
       ${info('Primeiro uso', formatDateTime(summary.firstSeenAt), `${summary.totalEvents} evento(s) no histórico`)}
     </div>
     ${section('Atividade dos últimos 14 dias', activityChart(summary.days), 'Altura da barra = tempo com a página aberta e visível.')}
@@ -193,10 +204,10 @@ function usageTab(ctx) {
     ${section(
       'Tempo',
       `<div class="cp-admin-grid">
-        ${info('Tempo total', formatDuration(summary.activeMs), `${summary.sessions} sessão(ões)`)}
-        ${info('Hoje', formatDuration(summary.todayMs), `${summary.todayEvents} evento(s)`)}
-        ${info('Últimos 7 dias', formatDuration(summary.last7Ms))}
-        ${info('Média por sessão', formatDuration(summary.avgSessionMs))}
+        ${info('Tempo total', formatDuration(summary.activeMs), `${summary.sessions} sessão(ões)`, 'total')}
+        ${info('Hoje', formatDuration(summary.todayMs), `${summary.todayEvents} evento(s)`, 'today')}
+        ${info('Últimos 7 dias', formatDuration(summary.last7Ms), '', 'last7')}
+        ${info('Média por sessão', formatDuration(summary.avgSessionMs), '', 'avg')}
       </div>`,
       'Só conta o tempo com a aba visível — segundo plano e tela travada ficam de fora.'
     )}
@@ -339,10 +350,7 @@ function vaultsTab(ctx) {
         ${info('No banco', String(inDb), 'linha do cofre encontrada')}
         ${info('Bloqueados', String(blocked), blocked ? 'envio e download suspensos' : 'nenhum bloqueio ativo')}
       </div>
-      ${vaultButton(vaults.loading ? 'Consultando…' : 'Recarregar do banco', 'data-cp-vault-reload=""', {
-        disabled: vaults.loading || !configured,
-        title: 'Lê de novo os cofres que aparecem no banco',
-      })}
+      ${vaults.loading ? '<span class="cp-vault-loading" role="status">Consultando o banco…</span>' : ''}
     </div>
     ${
       vaults.loading && list.length === 0
@@ -465,7 +473,7 @@ function flashMarkup(flash) {
 
 export function renderAdminPanel(ctx) {
   const now = ctx.now || Date.now();
-  const summary = usageSummary(ctx.usage, now);
+  const summary = usageSummary(ctx.usage, now, { liveMs: ctx.liveMs });
   const full = {
     ...ctx,
     now,
@@ -499,10 +507,41 @@ export function renderAdminPanel(ctx) {
 }
 
 /** Cabeçalho do painel: resume o estado em uma linha. */
-export function adminPanelHeadline(usage, now = Date.now()) {
-  const summary = usageSummary(usage, now);
+export function adminPanelHeadline(usage, now = Date.now(), options = {}) {
+  const summary = usageSummary(usage, now, options);
   const dias = summary.days.filter((day) => day.events > 0).length;
   return `${summary.sessions} sessão(ões) • ${formatDuration(summary.activeMs)} de uso • ${dias} dia(s) com atividade`;
+}
+
+/**
+ * Valores que mudam sozinhos (relógio, tempo total, contadores) — o console
+ * troca só o texto dos elementos `[data-cp-live]` a cada segundo com isto.
+ *
+ * @param {object} input
+ * @param {object} input.usage            estado de `admin-usage.js`
+ * @param {number} [input.now]
+ * @param {number} [input.sessionStartedAt] quando a sessão do painel abriu
+ * @param {number} [input.liveMs]          tempo decorrido ainda não gravado
+ * @returns {Record<string, string>} `{ session, total, avg, today, last7, headline, 'counter:x': '12', … }`
+ */
+export function liveMetrics({ usage, now = Date.now(), sessionStartedAt = 0, liveMs = 0 } = {}) {
+  const summary = usageSummary(usage, now, { liveMs });
+  const startedAt = Number(sessionStartedAt);
+  const sessionMs = Number.isFinite(startedAt) && startedAt > 0 ? Math.max(0, now - startedAt) : 0;
+
+  const values = {
+    session: formatDuration(sessionMs),
+    total: formatDuration(summary.activeMs),
+    avg: formatDuration(summary.avgSessionMs),
+    today: formatDuration(summary.todayMs),
+    last7: formatDuration(summary.last7Ms),
+    headline: adminPanelHeadline(usage, now, { liveMs }),
+  };
+
+  for (const [key, value] of Object.entries(summary.counters)) {
+    values[`counter:${key}`] = String(value);
+  }
+  return values;
 }
 
 /** Último dia com atividade (para o rodapé do painel). */
@@ -541,7 +580,10 @@ export function adminPanelMarkup() {
       <div class="modal-header">
         <div>
           <h2 id="cp-admin-title">Painel do administrador</h2>
-          <p class="modal-sub" id="cp-admin-headline">—</p>
+          <p class="modal-sub">
+            <span class="cp-admin-live-dot" aria-hidden="true"></span
+            ><span id="cp-admin-headline">—</span>
+          </p>
         </div>
         <button id="btn-cp-admin-close" class="icon-btn" type="button" aria-label="Fechar painel">✕</button>
       </div>
@@ -555,7 +597,6 @@ export function adminPanelMarkup() {
       <div class="cp-admin-actions">
         <button id="btn-cp-admin-lock" class="btn btn-sm btn-outline-dark" type="button" title="Pedir a senha de novo">Bloquear acesso</button>
         <span class="cp-admin-spacer"></span>
-        <button id="btn-cp-admin-refresh" class="btn btn-sm btn-outline-dark" type="button">Atualizar</button>
         <button id="btn-cp-admin-export" class="btn btn-sm btn-navy" type="button">Relatório .json</button>
         <button id="btn-cp-admin-logs" class="btn btn-sm btn-outline-dark" type="button">Logs .csv</button>
         <button id="btn-cp-admin-reset" class="btn btn-sm btn-danger-outline" type="button">Limpar histórico</button>

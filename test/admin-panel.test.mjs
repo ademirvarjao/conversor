@@ -18,6 +18,7 @@ import {
   adminPanelHeadline,
   adminPanelMarkup,
   lastActiveDay,
+  liveMetrics,
   renderAdminPanel,
 } from '../src/admin-panel.js';
 import { normalizeUsage, recordEvent, addActiveTime, bumpCounter, startSession } from '../src/admin-usage.js';
@@ -27,6 +28,7 @@ const html = await readFile(new URL('conciliador.html', ROOT), 'utf8');
 const indexHtml = await readFile(new URL('index.html', ROOT), 'utf8');
 const page = await readFile(new URL('src/counterparty-page.js', ROOT), 'utf8');
 const styles = await readFile(new URL('src/styles.css', ROOT), 'utf8');
+const consoleSource = await readFile(new URL('src/admin-console.js', ROOT), 'utf8');
 
 const NOW = Date.parse('2026-11-11T14:30:00.000Z');
 
@@ -213,6 +215,40 @@ describe('painel do administrador: segurança do conteúdo', () => {
   });
 });
 
+describe('painel do administrador: tudo ao vivo', () => {
+  it('os números que correm têm marcador para atualizar sem redesenhar', () => {
+    const overview = renderAdminPanel(baseCtx({ liveMs: 5000 }));
+    for (const key of ['session', 'total', 'avg', 'today']) {
+      assert.match(overview, new RegExp(`data-cp-live="${key}"`), `falta o marcador ${key}`);
+    }
+    const uso = renderAdminPanel(baseCtx({ tab: 'usage', liveMs: 5000 }));
+    for (const key of ['total', 'today', 'last7', 'avg']) {
+      assert.match(uso, new RegExp(`data-cp-live="${key}"`), `falta o marcador ${key} na aba Uso`);
+    }
+    assert.match(uso, /data-cp-live="counter:filesLoaded"/, 'os contadores também são ao vivo');
+  });
+
+  it('o tempo ao vivo entra no resumo da aba', () => {
+    const sem = renderAdminPanel(baseCtx({ liveMs: 0 }));
+    const com = renderAdminPanel(baseCtx({ liveMs: 120000 }));
+    assert.notEqual(sem, com, 'dois minutos a mais mudam o que aparece');
+  });
+
+  it('liveMetrics entrega os textos formatados', () => {
+    const values = liveMetrics({
+      usage: baseCtx().usage,
+      now: baseCtx().now,
+      sessionStartedAt: baseCtx().now - 65000,
+      liveMs: 30000,
+    });
+    assert.equal(values.session, '1 min');
+    assert.match(values.total, /1 h 30 min|1 h 31 min/);
+    assert.match(values.headline, /sessão/);
+    assert.match(values['counter:filesLoaded'], /^\d+$/);
+    assert.equal(values['counter:naoExiste'], undefined);
+  });
+});
+
 describe('painel do administrador: layout do cartão', () => {
   it('o cartão é uma grade de quatro linhas (cabeçalho, abas, corpo, ações)', () => {
     const card = styles.slice(styles.indexOf('.cp-admin-panel-card {'));
@@ -271,6 +307,41 @@ describe('painel do administrador: layout do cartão', () => {
   });
 });
 
+describe('painel do administrador: uma aba selecionada só', () => {
+  it('a marcação entrega apenas a primeira aba como ativa', () => {
+    const markup = adminPanelMarkup();
+    assert.equal([...markup.matchAll(/aria-selected="true"/g)].length, 1);
+    assert.equal([...markup.matchAll(/class="mtab active"/g)].length, 1);
+    assert.match(markup, /class="mtab active"[^>]*aria-selected="true"/);
+  });
+
+  it('o CSS distingue ativa de inativa sem depender só da cor', () => {
+    const tabs = styles.slice(styles.indexOf('.cp-admin-tabs .mtab {'));
+    const idle = tabs.slice(0, tabs.indexOf('.cp-admin-tabs .mtab:hover'));
+    assert.match(idle, /color: var\(--text-light\)/, 'inativa é cinza');
+    assert.match(idle, /border-bottom: 2px solid transparent/, 'inativa não tem risco');
+    const active = tabs.slice(tabs.indexOf(".cp-admin-tabs .mtab[aria-selected='true']"));
+    assert.match(active.slice(0, 220), /background: #eff6ff/, 'ativa ganha fundo');
+    assert.match(active.slice(0, 220), /border-bottom-color: var\(--primary\)/, 'e o risco embaixo');
+  });
+
+  it('o console reforça o estado inline (nenhuma regra externa pinta todas)', () => {
+    assert.match(consoleSource, /button\.style\.borderBottomColor = active \? 'var\(--primary\)' : 'transparent'/);
+    assert.match(consoleSource, /button\.style\.color = active \? 'var\(--primary\)' : 'var\(--text-light\)'/);
+    assert.match(consoleSource, /button\.classList\.toggle\('active', active\)/);
+  });
+
+  it('o foco do teclado é caixa, não risco embaixo', () => {
+    assert.match(styles, /\.cp-admin-tabs \.mtab:focus-visible \{[^}]*box-shadow: inset/);
+  });
+
+  it('sem botões redundantes: o painel se atualiza sozinho', () => {
+    const markup = adminPanelMarkup();
+    assert.equal(markup.includes('btn-cp-admin-refresh'), false, 'o "Atualizar" saiu');
+    assert.equal(renderAdminPanel(baseCtx({ tab: 'vaults' })).includes('data-cp-vault-reload'), false, 'o "Recarregar" saiu');
+  });
+});
+
 describe('painel do administrador: porta de entrada universal', () => {
   it('a marcação entrega o painel fechado e com todos os controles', () => {
     const markup = adminPanelMarkup();
@@ -281,7 +352,6 @@ describe('painel do administrador: porta de entrada universal', () => {
       'cp-admin-headline',
       'cp-admin-body',
       'btn-cp-admin-close',
-      'btn-cp-admin-refresh',
       'btn-cp-admin-export',
       'btn-cp-admin-logs',
       'btn-cp-admin-reset',
