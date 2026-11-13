@@ -248,10 +248,17 @@ export function shortDay(key) {
 
 /**
  * Números do dashboard: tempo, sessões, eventos por tipo e os últimos 14 dias.
+ *
  * `now` é injetável para os testes ficarem determinísticos.
+ *
+ * `options.liveMs` é o tempo decorrido desde a última gravação (a sessão aberta,
+ * ainda não somada ao `localStorage`). O painel usa isso para o relógio andar a
+ * cada segundo sem gravar no navegador a cada segundo — e o dia de hoje, no
+ * gráfico, cresce junto.
  */
-export function usageSummary(usage, now = Date.now()) {
+export function usageSummary(usage, now = Date.now(), options = {}) {
   const data = normalizeUsage(usage, now);
+  const liveMs = Math.max(0, Math.round(n(options.liveMs) || 0));
   const today = dayKey(now);
   const byType = Object.fromEntries(EVENT_TYPES.map((type) => [type, 0]));
   for (const event of data.events) byType[event.type] = (byType[event.type] || 0) + 1;
@@ -263,19 +270,22 @@ export function usageSummary(usage, now = Date.now()) {
     date.setDate(date.getDate() - offset);
     const key = dayKey(date.getTime());
     const bucket = data.days[key] || { ms: 0, events: 0 };
-    days.push({ key, label: shortDay(key), ms: n(bucket.ms), events: n(bucket.events) });
+    const extra = key === today ? liveMs : 0;
+    days.push({ key, label: shortDay(key), ms: n(bucket.ms) + extra, events: n(bucket.events) });
   }
 
   const last7 = days.slice(-7).reduce((sum, day) => sum + day.ms, 0);
+  const activeMs = data.activeMs + liveMs;
   return {
     firstSeenAt: data.firstSeenAt,
     lastSeenAt: data.lastSeenAt,
     sessions: data.sessions,
-    activeMs: data.activeMs,
-    todayMs: n(data.days[today]?.ms),
+    activeMs,
+    liveMs,
+    todayMs: n(data.days[today]?.ms) + liveMs,
     todayEvents: n(data.days[today]?.events),
     last7Ms: last7,
-    avgSessionMs: data.sessions > 0 ? Math.round(data.activeMs / data.sessions) : 0,
+    avgSessionMs: data.sessions > 0 ? Math.round(activeMs / data.sessions) : 0,
     counters: data.counters,
     events: data.events,
     totalEvents: data.events.length,

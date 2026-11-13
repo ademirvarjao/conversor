@@ -268,6 +268,33 @@ A migração nova é
 banco ainda não a tiver, a própria aba avisa e pede o **SQL de instalação** da aba **Nuvem** (o mesmo texto de
 [`src/sql-setup.js`](src/sql-setup.js)) — que agora já inclui esse trecho.
 
+### Painel em tempo real (v1.28.0)
+O painel deixou de ser uma foto do momento: enquanto está aberto, ele se atualiza **sozinho**, sem
+`Atualizar` e sem F5.
+
+- **Relógios de 1 s**: *Tempo nesta sessão*, *Tempo total de uso*, *Média por sessão*, *Hoje*,
+  *Últimos 7 dias* e a linha do cabeçalho andam a cada segundo. O tempo da sessão aberta ainda não
+  gravado entra no cálculo (`usageSummary(usage, now, { liveMs })`) sem escrever no `localStorage` a
+  cada segundo — a gravação continua a cada 30 s.
+- **Redesenho automático a cada 10 s** (e na hora em que o app registra um evento): eventos novos
+  aparecem na aba **Logs**, os contadores sobem, o gráfico dos 14 dias cresce no dia de hoje e as abas
+  **Memória da IA** e **Dispositivo e conta** acompanham o estado atual. A rolagem e o foco do teclado
+  são preservados (o corpo não "pula" para o topo).
+- **Códigos de acesso**: a lista relê o banco sozinha a cada 30 s enquanto a aba está aberta, além de
+  recarregar logo depois de bloquear ou excluir. Por isso os botões **Atualizar** (rodapé) e
+  **Recarregar do banco** (aba) saíram: eram redundantes.
+- **Selo "ao vivo"**: o ponto verde antes da linha de resumo indica que o painel está correndo — e
+  respeita `prefers-reduced-motion`.
+- **Nada roda com o painel fechado**: o relógio e o redesenho param ao fechar e voltam ao reabrir; com
+  a aba do navegador escondida o relógio também para (o tempo conta só com a página visível).
+
+### Aba selecionada (v1.28.0)
+A aba ativa é a **única** marcada: fundo azul-claro, texto azul e o risco embaixo; as demais ficam
+cinza, sem risco. O estado é aplicado pelo console (`markTab`) também **inline** (cor e borda por
+botão), então nenhuma regra de navegador/extensão consegue deixar as seis abas com a mesma cara. O
+foco do teclado virou uma **caixa** em volta da aba — antes ele desenhava um risco embaixo e se
+confundia com "selecionada".
+
 ### Layout do painel (v1.27.0 · corrigido na v1.27.1)
 - **O cartão é uma grade, não uma coluna flex** (v1.27.1): com `display: grid` e
   `grid-template-rows: auto auto minmax(0, 1fr) auto`, cabeçalho, abas e rodapé ficam na **altura natural**

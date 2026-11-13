@@ -45,6 +45,43 @@ function fakeStorage() {
   };
 }
 
+describe('tempo ao vivo (painel aberto)', () => {
+  const agora = Date.parse('2026-11-13T18:00:00.000Z');
+  const base = {
+    version: 1,
+    sessions: 2,
+    activeMs: 600000, // 10 min gravados
+    firstSeenAt: '2026-11-10T10:00:00.000Z',
+    lastSeenAt: '2026-11-13T17:00:00.000Z',
+    days: { '2026-11-13': { ms: 120000, events: 3 }, '2026-11-12': { ms: 60000, events: 1 } },
+    counters: {},
+    events: [],
+  };
+
+  it('soma o tempo ainda não gravado sem tocar no localStorage', () => {
+    const resumo = usageSummary(base, agora, { liveMs: 30000 });
+    assert.equal(resumo.liveMs, 30000);
+    assert.equal(resumo.activeMs, 630000, 'total = gravado + ao vivo');
+    assert.equal(resumo.todayMs, 150000, 'hoje acompanha o relógio');
+    assert.equal(resumo.avgSessionMs, 315000, 'média por sessão usa o total');
+    const hoje = resumo.days[resumo.days.length - 1];
+    assert.equal(hoje.ms, 150000, 'a barra de hoje cresce');
+    assert.equal(base.activeMs, 600000, 'o objeto de uso não é alterado');
+  });
+
+  it('sem tempo ao vivo nada muda', () => {
+    const sem = usageSummary(base, agora);
+    const zero = usageSummary(base, agora, { liveMs: 0 });
+    assert.equal(sem.activeMs, 600000);
+    assert.deepEqual(zero.days, sem.days);
+  });
+
+  it('tempo negativo ou inválido é ignorado', () => {
+    assert.equal(usageSummary(base, agora, { liveMs: -5000 }).activeMs, 600000);
+    assert.equal(usageSummary(base, agora, { liveMs: 'lixo' }).activeMs, 600000);
+  });
+});
+
 describe('registro de uso: base', () => {
   it('começa com todos os contadores e nenhum evento', () => {
     const usage = normalizeUsage(null, NOW);
