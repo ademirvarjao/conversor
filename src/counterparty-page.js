@@ -51,6 +51,7 @@ import {
 import { formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
+import { LOCKOUT_MS, MAX_ATTEMPTS, loadUnlock, saveUnlock, verifyCloudCredentials } from './cloud-lock.js';
 import {
   loadCloudConfig,
   loadIdentity,
@@ -144,6 +145,12 @@ const REQUIRED_IDS = [
   'btn-cp-export-pdf',
   'btn-cp-export-csv',
   'cp-cloud-state',
+  'btn-cp-admin',
+  'cp-admin-gate',
+  'cp-admin-user',
+  'cp-admin-password',
+  'btn-cp-admin-enter',
+  'cp-admin-error',
   'toast-container',
   'app-version',
 ];
@@ -209,10 +216,115 @@ function cpAlert(message, tone = 'info') {
   box.innerHTML = message;
 }
 
-/** Mostra o quanto a memória já sabe sobre contas (treino do conciliador). */
+/* -------------------------------------------------------------------------- */
+/*                    Painel da memória (só administrador)                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * O resumo "Memória: N históricos • N contatos…" é informação de administração.
+ * Ele só aparece depois de o dono entrar com login e senha, usando **a mesma
+ * trava da conexão do banco** (`cloud-lock.js`): o desbloqueio fica na sessão da
+ * aba por 1 hora, então quem liberou na página principal já encontra liberado
+ * aqui, e quem nunca entrou não vê número nenhum.
+ */
+const admin = {
+  unlocked: Boolean(loadUnlock()),
+  attempts: 0,
+  cooldownUntil: 0,
+};
+
+/** `true` só enquanto o desbloqueio vale; expirou, volta a esconder. */
+function adminUnlocked() {
+  if (!admin.unlocked) return false;
+  if (loadUnlock()) return true;
+  admin.unlocked = false;
+  return false;
+}
+
+function setAdminError(message) {
+  const box = dom['cp-admin-error'];
+  if (!box) return;
+  box.textContent = message;
+  box.classList.toggle('hidden', !message);
+}
+
+/** Mostra/esconde o botão "Administrador", o formulário e o resumo. */
+function renderAdminState() {
+  const unlocked = adminUnlocked();
+  const toggle = dom['btn-cp-admin'];
+  if (toggle) toggle.hidden = unlocked;
+  if (unlocked) {
+    dom['cp-admin-gate']?.classList.add('hidden');
+    toggle?.setAttribute('aria-expanded', 'false');
+    setAdminError('');
+  }
+  renderMemoryState();
+}
+
+async function submitAdminGate(event) {
+  event?.preventDefault();
+  const now = Date.now();
+  if (admin.cooldownUntil > now) {
+    setAdminError(`Muitas tentativas. Aguarde ${Math.ceil((admin.cooldownUntil - now) / 1000)}s.`);
+    return;
+  }
+
+  const user = dom['cp-admin-user']?.value || '';
+  const password = dom['cp-admin-password']?.value || '';
+  if (!user.trim() || !password) {
+    setAdminError('Informe login e senha.');
+    return;
+  }
+
+  const button = dom['btn-cp-admin-enter'];
+  if (button) button.disabled = true;
+  try {
+    const ok = await verifyCloudCredentials(user, password);
+    if (!ok) {
+      admin.attempts += 1;
+      if (admin.attempts >= MAX_ATTEMPTS) {
+        admin.attempts = 0;
+        admin.cooldownUntil = Date.now() + LOCKOUT_MS;
+        setAdminError('Muitas tentativas erradas. Aguarde 30 segundos.');
+      } else {
+        setAdminError(`Login ou senha incorretos (${admin.attempts}/${MAX_ATTEMPTS}).`);
+      }
+      if (dom['cp-admin-password']) dom['cp-admin-password'].value = '';
+      return;
+    }
+
+    admin.attempts = 0;
+    admin.cooldownUntil = 0;
+    admin.unlocked = true;
+    saveUnlock();
+    if (dom['cp-admin-password']) dom['cp-admin-password'].value = '';
+    renderAdminState();
+    showToast('Painel da memória liberado nesta aba por 1 hora.', 'success');
+  } catch (error) {
+    setAdminError(error?.message || 'Não foi possível validar a senha.');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/**
+ * Mostra o quanto a memória já sabe sobre contas (treino do conciliador).
+ * Sem o desbloqueio do administrador o resumo fica oculto e o texto é limpo,
+ * para não sobrar número no DOM.
+ */
 function renderMemoryState() {
   const element = dom['cp-memory-state'];
   if (!element) return;
+
+  const show = adminUnlocked();
+  element.classList.toggle('hidden', !show);
+  element.hidden = !show;
+  if (!show) {
+    element.textContent = '';
+    // Se o desbloqueio venceu com a página aberta, o acesso volta a aparecer.
+    if (dom['btn-cp-admin']) dom['btn-cp-admin'].hidden = false;
+    return;
+  }
 
   const summary = accountMemorySummary(state.memory);
   const contacts = Object.keys(sanitizeCounterparties(state.memory.counterparties).contacts).length;
@@ -1448,6 +1560,17 @@ function bindEvents() {
 
   dom['btn-cp-apply-suggestions']?.addEventListener('click', applySuggestionsBatch);
 
+  // Painel da memória: só abre com login e senha do administrador.
+  dom['btn-cp-admin']?.addEventListener('click', () => {
+    const gate = dom['cp-admin-gate'];
+    if (!gate) return;
+    const open = gate.classList.toggle('hidden') === false;
+    dom['btn-cp-admin'].setAttribute('aria-expanded', String(open));
+    setAdminError('');
+    if (open) dom['cp-admin-user']?.focus();
+  });
+  dom['cp-admin-gate']?.addEventListener('submit', (event) => void submitAdminGate(event));
+
   dom['cp-tbody']?.addEventListener('change', (event) => {
     const cell = event.target.closest('[data-cp-cell]');
     if (cell) {
@@ -1547,13 +1670,15 @@ function init() {
 
   counterpartyMemory();
   renderCloudState(describeIdentity(), 'idle');
-  renderMemoryState();
+  renderAdminState();
   bindEvents();
   render();
   // Sem botão de sincronizar: puxa a nuvem sozinho na abertura e ao voltar o foco.
   scheduleCloudPull();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') scheduleCloudPull(1500);
+    if (document.visibilityState !== 'visible') return;
+    renderAdminState(); // o desbloqueio do administrador expira em 1 hora
+    scheduleCloudPull(1500);
   });
 
   if (!('ExcelJS' in window) || !window.jspdf) {

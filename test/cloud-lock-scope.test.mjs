@@ -58,7 +58,15 @@ test('os cliques na chave e a sincronização não passam pela trava', () => {
   assert.doesNotMatch(app, /if \(cloud\.locked\) \{\s*if \(!silent\)/, 'envio não é barrado pela trava');
   assert.match(app, /function scheduleCloudPush\(\) \{\n  if \(!cloud\.config \|\| !cloud\.identity\) return;/);
   assert.match(app, /function scheduleCloudPull\(/, 'o download também é automático');
-  assert.doesNotMatch(conciliador, /loadUnlock|cloudUnlocked/);
+  // No conciliador a trava não fica no caminho da sincronização: ela só abre o
+  // painel da memória (informação de administração).
+  const pushBody = conciliador.slice(conciliador.indexOf('async function pushModels'), conciliador.indexOf('async function pullModels'));
+  const pullBody = conciliador.slice(conciliador.indexOf('async function pullModels'), conciliador.indexOf('function describeIdentity'));
+  for (const [nome, corpo] of [['envio', pushBody], ['download', pullBody]]) {
+    assert.ok(corpo.length > 200, `corpo do ${nome} encontrado`);
+    assert.doesNotMatch(corpo, /admin\.|loadUnlock|verifyCloudCredentials/, `${nome} não passa pela senha`);
+  }
+  assert.match(conciliador, /function adminUnlocked\(\)/, 'a trava do conciliador é só do painel da memória');
 });
 
 test('a configuração da trava continua sendo só hash (sem senha em texto puro)', () => {
