@@ -58,6 +58,7 @@ import {
   touchIdentitySync,
 } from './sync-vault.js';
 import { normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
+import { findVault } from './vault-registry.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
 import { describeSession, loadSession, signIn, signOut, signUp } from './cloud-auth.js';
@@ -2846,7 +2847,9 @@ async function useAccessCode(rawCode) {
   let adopted = false;
   await withCloudBusy(async () => {
     try {
-      const identity = await restoreIdentityFromCode(code);
+      // Mesma chave que já estava anotada aqui = recuperação; senão, chave colada.
+      const source = findVault((await restoreIdentityFromCode(code)).slot) ? 'recuperada' : 'colada';
+      const identity = await restoreIdentityFromCode(code, { source });
       saveIdentity(identity);
       cloud.identity = identity;
       renderCloudPanel();
@@ -2896,7 +2899,7 @@ async function useAccessCode(rawCode) {
 async function createAccessIdentity() {
   try {
     const code = generateAccessCode();
-    const identity = await restoreIdentityFromCode(code);
+    const identity = await restoreIdentityFromCode(code, { source: 'criada' });
     saveIdentity(identity);
     cloud.identity = identity;
     renderCloudPanel();

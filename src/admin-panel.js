@@ -10,12 +10,14 @@
  */
 
 import { escapeHtml } from './html.js';
+import { formatAccessCode } from './sync-crypto.js';
 import { formatDateTime, formatDuration, shortDay, usageSummary } from './admin-usage.js';
 
 /** Abas do painel, na ordem em que aparecem. */
 export const ADMIN_TABS = [
   { id: 'overview', label: 'Visão geral' },
   { id: 'usage', label: 'Uso' },
+  { id: 'vaults', label: 'Códigos de acesso' },
   { id: 'memory', label: 'Memória da IA' },
   { id: 'logs', label: 'Logs' },
   { id: 'device', label: 'Dispositivo e conta' },
@@ -58,7 +60,7 @@ function activityChart(days) {
       const height = Math.max(2, Math.round((day.ms / max) * 100));
       const label = `${day.label}: ${formatDuration(day.ms)} em ${day.events} evento(s)`;
       return `<div class="cp-admin-bar" title="${escapeHtml(label)}">
-          <span style="height:${height}%" aria-hidden="true"></span>
+          <span class="cp-admin-bar-col" aria-hidden="true"><i style="height:${height}%"></i></span>
           <em>${escapeHtml(day.label)}</em>
         </div>`;
     })
@@ -209,6 +211,154 @@ function usageTab(ctx) {
   `;
 }
 
+/* ----------------------------- códigos de acesso -------------------------- */
+
+const SOURCE_LABELS = {
+  criada: 'Criada neste navegador',
+  recuperada: 'Recuperada aqui',
+  colada: 'Colada aqui',
+  banco: 'Só vista no banco',
+};
+
+function vaultButton(label, attrs, { kind = 'outline', disabled = false, title = '' } = {}) {
+  const classes = kind === 'danger' ? 'btn btn-sm btn-danger-outline' : kind === 'primary' ? 'btn btn-sm btn-navy' : 'btn btn-sm btn-outline-dark';
+  return `<button class="${classes}" type="button" ${attrs}${disabled ? ' disabled' : ''}${
+    title ? ` title="${escapeHtml(title)}"` : ''
+  }>${escapeHtml(label)}</button>`;
+}
+
+function vaultItem(item, ctx) {
+  const vaults = ctx.vaults || {};
+  const revealed = (vaults.revealed || []).includes(item.slot);
+  const busy = vaults.busy === item.slot;
+  const confirming = vaults.confirmDelete === item.slot;
+  const blocked = Boolean(item.blockedAt);
+  const code = item.code ? (revealed ? formatAccessCode(item.code) : item.masked) : item.shortSlot;
+
+  const badges = [];
+  if (blocked) badges.push('<span class="cp-vault-badge is-blocked">Bloqueado</span>');
+  else if (item.inDb) badges.push('<span class="cp-vault-badge is-open">Liberado</span>');
+  if (item.isCurrent) badges.push('<span class="cp-vault-badge is-current">Em uso agora</span>');
+  badges.push(`<span class="cp-vault-badge">${escapeHtml(SOURCE_LABELS[item.source] || item.source)}</span>`);
+  badges.push(
+    item.inDb
+      ? '<span class="cp-vault-badge is-cloud">No banco</span>'
+      : '<span class="cp-vault-badge is-local">Só neste navegador</span>'
+  );
+
+  const meta = [
+    `Criada em ${escapeHtml(formatDateTime(item.createdAt))}`,
+    item.lastSeenAt ? `último uso ${escapeHtml(formatDateTime(item.lastSeenAt))}` : 'sem uso registrado',
+    item.inDb && item.dbUpdatedAt ? `banco ${escapeHtml(formatDateTime(item.dbUpdatedAt))}` : null,
+    item.inDb ? (item.ownerId ? 'dono: conta logada' : 'dono: sem conta (legado/anônimo)') : null,
+    blocked && item.blockedAt ? `bloqueado em ${escapeHtml(formatDateTime(item.blockedAt))}` : null,
+    item.code ? null : `slot ${escapeHtml(item.shortSlot)}`,
+  ].filter(Boolean);
+
+  const actions = [];
+  actions.push(
+    item.code
+      ? vaultButton(revealed ? 'Ocultar' : 'Ver código', `data-cp-vault-reveal="${escapeHtml(item.slot)}" aria-pressed="${revealed}"`)
+      : vaultButton('Ver código', '', { disabled: true, title: 'Esta chave não está anotada neste navegador — o banco guarda só o slot.' })
+  );
+  if (item.code) {
+    actions.push(vaultButton('Copiar', `data-cp-vault-copy="${escapeHtml(item.slot)}"`));
+  }
+  actions.push(
+    vaultButton(
+      blocked ? 'Desbloquear' : 'Bloquear',
+      `data-cp-vault-block="${escapeHtml(item.slot)}" data-cp-vault-target="${blocked ? 'open' : 'blocked'}"`,
+      {
+        kind: blocked ? 'primary' : 'outline',
+        disabled: busy || !item.inDb || !vaults.configured,
+        title: item.inDb ? 'Grava o bloqueio no banco (vale para todos os navegadores)' : 'Só é possível bloquear um cofre que está no banco.',
+      }
+    )
+  );
+  if (confirming) {
+    actions.push(vaultButton('Confirmar exclusão', `data-cp-vault-delete="${escapeHtml(item.slot)}"`, { kind: 'danger', disabled: busy }));
+    actions.push(vaultButton('Cancelar', 'data-cp-vault-cancel=""'));
+  } else {
+    actions.push(
+      vaultButton('Excluir do banco', `data-cp-vault-ask="${escapeHtml(item.slot)}"`, {
+        kind: 'danger',
+        disabled: busy || !item.inDb || !vaults.configured,
+        title: 'Apaga a linha do cofre no banco (o conteúdo cifrado some)',
+      })
+    );
+  }
+  if (!item.inDb && item.code) {
+    actions.push(vaultButton('Esquecer aqui', `data-cp-vault-forget="${escapeHtml(item.slot)}"`));
+  }
+
+  return `<article class="cp-vault-item${blocked ? ' is-blocked' : ''}${busy ? ' is-busy' : ''}" data-cp-vault-row="${escapeHtml(item.slot)}">
+      <div class="cp-vault-main">
+        <code class="cp-vault-code">${escapeHtml(code)}</code>
+        <div class="cp-vault-badges">${badges.join('')}</div>
+        <p class="cp-vault-meta">${meta.join(' • ')}</p>
+        ${
+          confirming
+            ? '<p class="cp-vault-confirm" role="alert">Excluir apaga a linha do cofre no banco: o conteúdo cifrado não volta.</p>'
+            : ''
+        }
+      </div>
+      <div class="cp-vault-actions">${actions.join('')}</div>
+    </article>`;
+}
+
+function vaultsTab(ctx) {
+  const vaults = ctx.vaults || {};
+  const list = Array.isArray(vaults.list) ? vaults.list : [];
+  const configured = Boolean(vaults.configured);
+
+  const notices = [];
+  if (vaults.notice?.text) {
+    notices.push(`<p class="cp-vault-notice is-${escapeHtml(vaults.notice.kind || 'ok')}" role="status">${escapeHtml(vaults.notice.text)}</p>`);
+  }
+  if (!configured) {
+    notices.push(
+      '<p class="cp-vault-notice is-warn" role="note">Banco compartilhado não configurado: a lista mostra só os códigos que este navegador conhece, e bloquear/excluir fica desligado.</p>'
+    );
+  }
+  if (vaults.schemaOutdated) {
+    notices.push(
+      '<p class="cp-vault-notice is-warn" role="alert">O banco está sem a migração de bloqueio. Abra a aba Nuvem, copie o SQL de instalação e rode uma vez no SQL Editor para liberar bloquear e excluir.</p>'
+    );
+  }
+  if (vaults.error) {
+    notices.push(`<p class="cp-vault-notice is-error" role="alert">${escapeHtml(vaults.error)}</p>`);
+  }
+
+  const blocked = list.filter((item) => item.blockedAt).length;
+  const inDb = list.filter((item) => item.inDb).length;
+
+  const body = `
+    <div class="cp-vault-toolbar">
+      <div class="cp-admin-grid cp-admin-grid-3 cp-vault-stats">
+        ${info('Códigos conhecidos', String(list.length), `${vaults.localCount ?? 0} anotado(s) neste navegador`)}
+        ${info('No banco', String(inDb), 'linha do cofre encontrada')}
+        ${info('Bloqueados', String(blocked), blocked ? 'envio e download suspensos' : 'nenhum bloqueio ativo')}
+      </div>
+      ${vaultButton(vaults.loading ? 'Consultando…' : 'Recarregar do banco', 'data-cp-vault-reload=""', {
+        disabled: vaults.loading || !configured,
+        title: 'Lê de novo os cofres que aparecem no banco',
+      })}
+    </div>
+    ${
+      vaults.loading && list.length === 0
+        ? '<p class="cp-admin-empty">Consultando o banco…</p>'
+        : list.length === 0
+          ? '<p class="cp-admin-empty">Nenhum código de acesso ainda. Crie uma chave na aba Nuvem e ela aparece aqui.</p>'
+          : `<div class="cp-vault-list">${list.map((item) => vaultItem(item, ctx)).join('')}</div>`
+    }
+  `;
+
+  return `
+    ${notices.join('')}
+    ${section('Códigos de acesso gerados', body, 'A chave em si só existe neste navegador — o banco guarda apenas o slot e o conteúdo cifrado. Bloquear e excluir valem para o banco, portanto para todos os navegadores.')}
+  `;
+}
+
 function memoryTab(ctx) {
   const { memory, storage } = ctx;
   const profiles = Array.isArray(memory?.learnedProfiles) ? memory.learnedProfiles : [];
@@ -325,6 +475,8 @@ export function renderAdminPanel(ctx) {
   switch (ctx.tab) {
     case 'usage':
       return usageTab(full);
+    case 'vaults':
+      return vaultsTab(full);
     case 'memory':
       return memoryTab(full);
     case 'logs':
@@ -419,7 +571,7 @@ export function adminGateMarkup() {
       <div class="modal-header">
         <div>
           <h2 id="admin-gate-title">Acesso do administrador</h2>
-          <p class="modal-sub">Painel de uso, memória da IA e logs — liberado por 1 hora nesta aba</p>
+          <p class="modal-sub">Painel de uso, códigos de acesso, memória da IA e logs — liberado por 1 hora nesta aba</p>
         </div>
         <button id="btn-admin-gate-close" class="icon-btn" type="button" aria-label="Fechar">✕</button>
       </div>

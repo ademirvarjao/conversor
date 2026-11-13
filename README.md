@@ -210,7 +210,7 @@ O **ícone da marca** na barra superior leva para uma **página própria** (`con
 - **Seleção em massa e tamanho da página**: o checkbox do cabeçalho marca **todos os lançamentos do filtro atual** (não só os da página) e o botão **Limpar seleção** desfaz tudo de uma vez; ao lado da paginação há o seletor **Linhas por página** — **50**, **100**, **300**, **1000** ou **todas**. O contador `selecionados (N)` acompanha a seleção, que sobrevive à troca de página e de tamanho.
 - **Treino de contas no conciliador**: toda conta digitada — em lote, célula a célula ou no painel de vínculo — é memorizada **pelo histórico e pelo contato**. Na conciliação seguinte, o histórico já conhecido vem com a conta aplicada (2+ confirmações) ou como **chip de sugestão** clicável (1 confirmação), e o botão **Aplicar sugeridas** resolve o filtro inteiro. As sugestões aparecem também no painel de vínculo. O memorizado viaja no pacote cifrado da nuvem (`accounts`), então outra máquina com a mesma chave já recebe as contas.
 - **Resumo da memória só para o administrador** (v1.24.0 · movido para o painel na v1.26.0): o resumo “Memória: N históricos • N contatos com conta • N contatos conciliados” deixou de aparecer para todo mundo. Desde a v1.26.0 ele **existe apenas dentro do painel do administrador** — a barra do conciliador não mostra número nenhum, e sem o desbloqueio o painel não abre. O limite de tentativas (5) e a espera de 30 s são os mesmos da aba Nuvem, e o desbloqueio feito em qualquer página vale para o site inteiro (mesma aba).
-- **Painel do administrador** (v1.25.0): com o desbloqueio do administrador, o botão **Administrador** abre um painel com cinco abas — **Visão geral** (tempo nesta sessão, tempo total, média por sessão, gráfico dos últimos 14 dias, conciliações e últimos eventos), **Uso** (13 contadores: cadastros e extratos carregados, conciliações, lançamentos vinculados/para revisar/sem contato, exportações, vínculos à mão, contas digitadas, sugestões aceitas, envios e sincronizações da nuvem, erros), **Memória da IA** (perfis, vocabulário, assinaturas, contatos, apelidos, contas memorizadas, espaço usado no navegador e o histórico de aprendizado), **Logs** (até 300 eventos com filtro por tipo) e **Dispositivo e conta** (navegador, sistema, tela, fuso e o estado da chave/nuvem). O tempo só conta com a aba visível; nada sai do navegador. Sai um **relatório `.json`** completo (a chave de acesso à nuvem vai mascarada e a chave do LLM nunca aparece) e os **logs em `.csv`** com separador `;`, prontos para o Excel — e **Limpar histórico** (com confirmação) zera só o uso, sem tocar na memória da IA. O código está em [`src/admin-usage.js`](src/admin-usage.js) (dados) e [`src/admin-panel.js`](src/admin-panel.js) (telas).
+- **Painel do administrador** (v1.25.0 · revisado na v1.27.0): com o desbloqueio do administrador, o botão **Administrador** abre um painel com **seis abas** — **Visão geral** (tempo nesta sessão, tempo total, média por sessão, gráfico dos últimos 14 dias, conciliações e últimos eventos), **Uso** (13 contadores: cadastros e extratos carregados, conciliações, lançamentos vinculados/para revisar/sem contato, exportações, vínculos à mão, contas digitadas, sugestões aceitas, envios e sincronizações da nuvem, erros), **Códigos de acesso** (ver, bloquear e excluir do banco — seção própria abaixo), **Memória da IA** (perfis, vocabulário, assinaturas, contatos, apelidos, contas memorizadas, espaço usado no navegador e o histórico de aprendizado), **Logs** (até 300 eventos com filtro por tipo) e **Dispositivo e conta** (navegador, sistema, tela, fuso e o estado da chave/nuvem). O tempo só conta com a aba visível; nada sai do navegador. Sai um **relatório `.json`** completo (a chave de acesso à nuvem vai mascarada e a chave do LLM nunca aparece) e os **logs em `.csv`** com separador `;`, prontos para o Excel — e **Limpar histórico** (com confirmação) zera só o uso, sem tocar na memória da IA. O código está em [`src/admin-usage.js`](src/admin-usage.js) (dados) e [`src/admin-panel.js`](src/admin-panel.js) (telas).
 - **Backup sem segredo**: a exportação da memória (`.json`) sai **sem a chave do LLM** e a importação não sobrescreve a configuração local do provedor — o arquivo pode ir para o GitHub sem vazar chave.
 - **Edição e exclusão na planilha consolidada**: o **histórico é editável** linha a linha (clique no texto, Enter confirma, Esc cancela) e o texto corrigido vale para as exportações; o **✕** exclui um lançamento e o checkbox do cabeçalho marca **todos os lançamentos do filtro** (não só os da página) para **Excluir selecionados**. Nada é definitivo: **Restaurar excluídas (N)** devolve as linhas e as edições de histórico sobrevivem a remapear/treinar a IA. O seletor **Linhas por página** oferece **50**, **100** (padrão), **300**, **1000** ou **todas**, e os totais do resumo saem com separador de milhar — `1.128.118,12`.
 - **Exportação ao concluir**: **`.xlsx`**, **`.pdf`** e **`.csv`** no mesmo layout de cinco colunas, com linha de `TOTAIS` (soma só do `valor`). As contas saem como **texto** no Excel, para não perder zeros à esquerda. O CSV usa `;` como separador e vírgula decimal (abre direto no Excel em português), com BOM UTF-8 para preservar acentos.
@@ -232,6 +232,52 @@ A **engrenagem** (⚙) fica na barra superior das **duas páginas** — Converso
 - **Layout do menu**: `340 px` (ou a largura da tela no celular), posicionado abaixo do botão e nunca fora da janela; navegação por `↑` `↓` `Home` `End` `Esc` e clique fora para fechar, com foco devolvido à engrenagem.
 - **O uso agora é do site inteiro**: as duas páginas gravam no mesmo registro local — arquivos importados, lançamentos gerados, exportações, memória, nuvem e erros aparecem juntos nos contadores e no histórico.
 - **O resumo da memória vive no painel**: a visão geral e a aba **Memória da IA** mostram “Memória: N históricos • N contatos com conta • N contatos conciliados” — e a barra do conciliador não tem mais o texto.
+
+### Códigos de acesso: ver, bloquear e excluir do banco (v1.27.0)
+A aba **Códigos de acesso** do painel é a lista de todas as chaves de acesso que já passaram por este
+navegador, cruzada com o que existe no banco:
+
+- **Ver** — a lista mostra a chave mascarada (`ABCD-••••`), a origem (*criada aqui*, *recuperada aqui*,
+  *colada aqui* ou *só vista no banco*), a data de criação, o último uso, se está **no banco** ou só neste
+  navegador, se é a **chave em uso agora**, de quem é o cofre (conta logada ou sem dono, o caso legado) e o
+  **estado** (liberado/bloqueado, com a data do bloqueio). **Ver código** revela a chave inteira e **Copiar**
+  leva o `ABCD-EFGH` para a área de transferência.
+- **Bloquear** — grava o bloqueio **no banco**, então vale para todos os navegadores: a partir daí o app
+  **recusa enviar e baixar** por aquela chave (o download barrado nem decifra o pacote) e o próprio banco
+  recusa qualquer gravação de conteúdo na linha bloqueada, inclusive por uma versão antiga do app em cache.
+  **Desbloquear** limpa o bloqueio e o cofre volta a sincronizar. Clicar em bloquear a chave que está em uso
+  deixa o aviso na hora — o estado da nuvem passa a mostrar o erro em vez de insistir.
+- **Excluir do banco** — pede confirmação em dois toques e então **apaga a linha** com o conteúdo cifrado
+  (função `conversor_delete_vault`), além de tirar a chave da lista deste navegador. Sem a linha, o código não
+  recupera mais nada em máquina nenhuma. Existe também **Esquecer aqui**, que só apaga a anotação local.
+- **Por que a lista local**: o banco guarda apenas o **slot** (HMAC da chave) e o pacote cifrado — não há como
+  voltar do slot para o código. Por isso `src/vault-registry.js` anota cada chave criada/colada **neste
+  navegador** (até 50, em `conversor_admin_vaults_v1`); as linhas que só existem no banco aparecem pelo slot,
+  sem chave, e mesmo assim podem ser bloqueadas ou excluídas.
+- **Quem pode o quê**: bloquear e excluir passam por funções `security definer` que só aceitam cofre **sem
+  dono** ou **da própria conta** — cofre de outra conta é recusado (`42501`) e não aparece para quem não é dono.
+  A chave anônima continua **sem** permissão de `DELETE` direto na tabela: a exclusão só acontece pela função.
+- **O que isso não é**: o app é estático e usa a chave anônima pública, então a trava do painel é do navegador.
+  O bloqueio, porém, é um dado do banco e vale para todos; e o conteúdo continua **cifrado** (AES-GCM com a
+  chave de acesso) até alguém excluir a linha.
+
+A migração nova é
+[`20261112100000_conversor_models_block.sql`](supabase/migrations/20261112100000_conversor_models_block.sql)
+(colunas `blocked_at`/`blocked_reason`, o gatilho que barra escrita em cofre bloqueado e as funções
+`conversor_block_vault`/`conversor_delete_vault`). Ela entra sozinha pela integração Supabase + GitHub; se o
+banco ainda não a tiver, a própria aba avisa e pede o **SQL de instalação** da aba **Nuvem** (o mesmo texto de
+[`src/sql-setup.js`](src/sql-setup.js)) — que agora já inclui esse trecho.
+
+### Layout do painel (v1.27.0)
+- **Abas em uma linha só**: as seis abas não quebram mais em duas fileiras (o que desalinhava o cabeçalho);
+  em tela estreita elas **rolam na horizontal**, com o mesmo comportamento de teclado (`←` `→` `Home` `End`).
+- **Nada mais cortado**: o corpo do painel agora encolhe de verdade (`min-height: 0`) e rola dentro do cartão —
+  antes o conteúdo longo empurrava a barra de ações para fora e os botões sumiam.
+- **Grade fluida**: `auto-fit` no lugar de 4 colunas fixas — 4 no desktop, 2 no tablet e 1 no celular, sem
+  cartão espremido.
+- **Gráfico dos 14 dias**: a barra cresce dentro da coluna e o rótulo fica fora da área medida (antes a barra
+  em `%` + o rótulo estouravam o gráfico); no celular os rótulos `dd/mm` saem e ficam no `title`/`aria-label`.
+- **Barra de ações no celular**: dois botões por linha, com **Limpar histórico** ocupando a linha inteira.
 
 ### Nuvem dos modelos aprendidos (v1.5.0)
 Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**:
@@ -303,9 +349,11 @@ Na interface (**Memória da IA → Nuvem → Conta na nuvem**) há **Entrar**, *
 
 As migrações que ligam isso são
 [`20261111160000_conversor_models_owner.sql`](supabase/migrations/20261111160000_conversor_models_owner.sql)
-(coluna + políticas) e
+(coluna + políticas),
 [`20261111180000_conversor_models_adopt.sql`](supabase/migrations/20261111180000_conversor_models_adopt.sql)
-(adoção das linhas antigas), aplicadas pela integração Supabase + GitHub como as demais. Para trocar a senha da conta use
+(adoção das linhas antigas) e
+[`20261112100000_conversor_models_block.sql`](supabase/migrations/20261112100000_conversor_models_block.sql)
+(bloqueio e exclusão pelo painel do administrador), aplicadas pela integração Supabase + GitHub como as demais. Para trocar a senha da conta use
 **Sair da conta** e o painel do Supabase (**Authentication → Users**), onde também dá para
 desligar o cadastro público se você for o único usuário.
 
@@ -409,6 +457,7 @@ conversor/
 │   ├── sync-crypto.js            # Chave de acesso, PBKDF2, AES-GCM (puro)
 │   ├── sync-client.js            # Cliente REST do Supabase (só chave anônima)
 │   ├── sync-vault.js             # Identidade, pacote de modelos e sincronização
+│   ├── vault-registry.js         # Códigos de acesso conhecidos (ver/bloquear/excluir)
 │   ├── sync-config.js            # URL + chave anônima padrão (públicas)
 │   ├── admin-usage.js            # Uso do navegador: sessões, tempo, contadores e logs
 │   ├── admin-panel.js            # Painel do administrador (dashboard, abas, tabelas)

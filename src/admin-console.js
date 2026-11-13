@@ -48,6 +48,24 @@ import {
 import { STORAGE_KEY as AI_MEMORY_KEY } from './ai-engine.js';
 import { accountMemorySummary, sanitizeCounterparties } from './counterparty.js';
 import { APP_VERSION } from './ui-contract.js';
+import { currentAccessToken } from './cloud-auth.js';
+import { formatAccessCode } from './sync-crypto.js';
+import { loadCloudConfig, loadIdentity } from './sync-vault.js';
+import {
+  blockVault,
+  deleteVault,
+  describeVaultAdminError,
+  fetchVaultRows,
+  normalizeSupabaseConfig,
+} from './sync-client.js';
+import {
+  findVault,
+  listVaults,
+  markVaultBlocked,
+  mergeVaultView,
+  registerVault,
+  removeVault,
+} from './vault-registry.js';
 
 /** De quanto em quanto tempo o tempo de uso é gravado enquanto a aba está aberta. */
 const USAGE_TICK_MS = 30_000;
@@ -169,7 +187,25 @@ export function createAdminConsole(options = {}) {
   } = options;
 
   const usage = loadUsage();
-  const state = { tab: 'overview', open: false, logFilter: 'all', sessionStartedAt: Date.now(), unlocked: false };
+  const state = {
+    tab: 'overview',
+    open: false,
+    logFilter: 'all',
+    sessionStartedAt: Date.now(),
+    unlocked: false,
+    vaults: {
+      loading: false,
+      error: '',
+      notice: null,
+      schemaOutdated: false,
+      configured: false,
+      localCount: 0,
+      list: [],
+      revealed: [],
+      confirmDelete: null,
+      busy: null,
+    },
+  };
   const admin = { attempts: 0, cooldownUntil: 0 };
   let activeAnchor = 0;
   let ticker = null;
@@ -378,6 +414,7 @@ export function createAdminConsole(options = {}) {
       storage: storageSizes(),
       logFilter: state.logFilter,
       sessionStartedAt: state.sessionStartedAt,
+      vaults: state.vaults,
     });
     if (dom['cp-admin-headline']) dom['cp-admin-headline'].textContent = adminPanelHeadline(usage);
     document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
@@ -393,6 +430,7 @@ export function createAdminConsole(options = {}) {
     if (tab && ADMIN_TABS.some((entry) => entry.id === tab)) state.tab = tab;
     flushActiveTime();
     render();
+    if (state.tab === 'vaults') void reloadVaults();
     state.open = true;
     dom['cp-admin-panel'].classList.remove('hidden');
     dom['cp-admin-panel'].setAttribute('aria-hidden', 'false');
@@ -424,6 +462,219 @@ export function createAdminConsole(options = {}) {
     if (!ADMIN_TABS.some((entry) => entry.id === tab)) return;
     state.tab = tab;
     render();
+    if (tab === 'vaults') void reloadVaults();
+  }
+
+  /* ----------------------------- códigos de acesso ------------------------- */
+
+  function vaultContext() {
+    const config = normalizeSupabaseConfig(loadCloudConfig());
+    const identity = loadIdentity();
+    // A chave em uso é sempre a primeira da lista, mesmo que o registro tenha
+    // sido limpo (é a única cópia do código: o banco só guarda o slot).
+    if (identity?.code && identity?.slot && !findVault(identity.slot)) {
+      registerVault({ code: identity.code, slot: identity.slot, source: 'colada' });
+    }
+    const entries = listVaults();
+    state.vaults.configured = Boolean(config);
+    state.vaults.localCount = entries.length;
+    return { config, identity, entries };
+  }
+
+  /** Lista local na hora; depois completa com o que o banco responder. */
+  function paintVaults(entries, rows = [], identity = null) {
+    state.vaults.list = mergeVaultView(entries, rows, { currentSlot: identity?.slot || '' });
+  }
+
+  function setVaultNotice(kind, text) {
+    state.vaults.notice = text ? { kind, text } : null;
+  }
+
+  async function reloadVaults({ announce = false } = {}) {
+    const { config, identity, entries } = vaultContext();
+    paintVaults(entries, [], identity);
+    state.vaults.error = '';
+    if (!config) {
+      state.vaults.loading = false;
+      state.vaults.schemaOutdated = false;
+      render();
+      if (announce) notify('Banco não configurado: só os códigos deste navegador aparecem.', 'warn');
+      return state.vaults.list;
+    }
+
+    state.vaults.loading = true;
+    render();
+    try {
+      const token = await currentAccessToken(config);
+      const { rows, schemaOutdated } = await fetchVaultRows(config, { accessToken: token });
+      state.vaults.schemaOutdated = Boolean(schemaOutdated);
+      paintVaults(entries, rows, identity);
+      // O banco manda: alinha o bloqueio no registro local (o app consulta isso).
+      for (const item of state.vaults.list) {
+        if (item.code) markVaultBlocked(item.slot, item.blockedAt || null);
+      }
+      if (announce) notify(`${state.vaults.list.length} código(s) de acesso na lista.`, 'success');
+    } catch (error) {
+      state.vaults.error = describeVaultAdminError(error);
+    } finally {
+      state.vaults.loading = false;
+      render();
+    }
+    return state.vaults.list;
+  }
+
+  function findVaultItem(slot) {
+    return state.vaults.list.find((item) => item.slot === slot) || null;
+  }
+
+  async function copyVaultCode(slot) {
+    const item = findVaultItem(slot);
+    if (!item?.code) return;
+    const shown = formatAccessCode(item.code);
+    try {
+      await navigator.clipboard.writeText(shown);
+      setVaultNotice('ok', `Código ${shown} copiado.`);
+      notify(`Código ${shown} copiado.`, 'success');
+    } catch {
+      setVaultNotice('warn', `Não foi possível copiar. O código é ${shown}.`);
+    }
+    render();
+  }
+
+  /** Bloquear/desbloquear grava no banco; o app passa a recusar envio e download. */
+  async function toggleVaultBlocked(slot, blocked) {
+    const { config } = vaultContext();
+    if (!config) {
+      setVaultNotice('warn', 'Configure o banco compartilhado para bloquear um cofre.');
+      render();
+      return;
+    }
+
+    state.vaults.busy = slot;
+    state.vaults.confirmDelete = null;
+    render();
+    try {
+      const token = await currentAccessToken(config);
+      const result = await blockVault(config, slot, blocked, { accessToken: token });
+      markVaultBlocked(slot, blocked ? result.blockedAt || new Date().toISOString() : null);
+      const item = findVaultItem(slot);
+      const label = item?.code || item?.shortSlot || slot;
+      setVaultNotice(
+        'ok',
+        blocked
+          ? `Código ${label} bloqueado no banco: envio e download ficam suspensos até desbloquear.`
+          : `Código ${label} desbloqueado no banco.`
+      );
+      notify(blocked ? 'Código bloqueado no banco.' : 'Código desbloqueado no banco.', blocked ? 'warn' : 'success');
+      track('nuvem', blocked ? 'Código de acesso bloqueado' : 'Código de acesso desbloqueado', String(label));
+    } catch (error) {
+      setVaultNotice('error', describeVaultAdminError(error));
+      notify(describeVaultAdminError(error), 'error');
+    } finally {
+      state.vaults.busy = null;
+      await reloadVaults();
+    }
+  }
+
+  /** Exclui a linha do banco (o conteúdo cifrado some de vez). */
+  async function confirmVaultDelete(slot) {
+    const { config } = vaultContext();
+    if (!config) {
+      setVaultNotice('warn', 'Configure o banco compartilhado para excluir um cofre.');
+      render();
+      return;
+    }
+
+    state.vaults.busy = slot;
+    state.vaults.confirmDelete = null;
+    render();
+    try {
+      const token = await currentAccessToken(config);
+      const item = findVaultItem(slot);
+      const label = item?.code || item?.shortSlot || slot;
+      await deleteVault(config, slot, { accessToken: token });
+      removeVault(slot); // a chave também sai da lista deste navegador
+      state.vaults.revealed = state.vaults.revealed.filter((entry) => entry !== slot);
+      setVaultNotice('ok', `Código ${label} excluído do banco. O conteúdo cifrado não existe mais.`);
+      notify('Código excluído do banco.', 'warn');
+      track('nuvem', 'Código de acesso excluído do banco', String(label));
+    } catch (error) {
+      setVaultNotice('error', describeVaultAdminError(error));
+      notify(describeVaultAdminError(error), 'error');
+    } finally {
+      state.vaults.busy = null;
+      await reloadVaults();
+    }
+  }
+
+  /** Esquece um código que só existe neste navegador (nada a ver com o banco). */
+  function forgetVault(slot) {
+    const item = findVaultItem(slot);
+    removeVault(slot);
+    state.vaults.revealed = state.vaults.revealed.filter((entry) => entry !== slot);
+    setVaultNotice('ok', `Código ${item?.code || slot} removido da lista deste navegador (nada foi apagado do banco).`);
+    reloadVaults();
+  }
+
+  /** Cliques dentro da aba de códigos de acesso (delegação de eventos). */
+  function handleVaultClick(event) {
+    const hit = (name) => event.target.closest(`[data-cp-vault-${name}]`);
+
+    const reveal = hit('reveal');
+    if (reveal) {
+      const slot = reveal.dataset.cpVaultReveal;
+      state.vaults.revealed = state.vaults.revealed.includes(slot)
+        ? state.vaults.revealed.filter((entry) => entry !== slot)
+        : [...state.vaults.revealed, slot];
+      render();
+      return true;
+    }
+
+    const copy = hit('copy');
+    if (copy) {
+      void copyVaultCode(copy.dataset.cpVaultCopy);
+      return true;
+    }
+
+    const block = hit('block');
+    if (block) {
+      void toggleVaultBlocked(block.dataset.cpVaultBlock, block.dataset.cpVaultTarget === 'blocked');
+      return true;
+    }
+
+    const ask = hit('ask');
+    if (ask) {
+      state.vaults.confirmDelete = ask.dataset.cpVaultAsk;
+      setVaultNotice('warn', 'Confirme a exclusão: a linha do cofre no banco será apagada e o conteúdo cifrado não volta.');
+      render();
+      return true;
+    }
+
+    if (hit('cancel')) {
+      state.vaults.confirmDelete = null;
+      setVaultNotice(null, '');
+      render();
+      return true;
+    }
+
+    const remove = hit('delete');
+    if (remove) {
+      void confirmVaultDelete(remove.dataset.cpVaultDelete);
+      return true;
+    }
+
+    const forget = hit('forget');
+    if (forget) {
+      forgetVault(forget.dataset.cpVaultForget);
+      return true;
+    }
+
+    if (hit('reload')) {
+      void reloadVaults({ announce: true });
+      return true;
+    }
+
+    return false;
   }
 
   /* ------------------------------- exportação ------------------------------ */
@@ -486,7 +737,8 @@ export function createAdminConsole(options = {}) {
     dom['btn-cp-admin-refresh']?.addEventListener('click', () => {
       flushActiveTime();
       render();
-      notify('Painel atualizado.', 'success');
+      if (state.tab === 'vaults') void reloadVaults({ announce: true });
+      else notify('Painel atualizado.', 'success');
     });
     dom['btn-cp-admin-export']?.addEventListener('click', exportReport);
     dom['btn-cp-admin-logs']?.addEventListener('click', exportLogs);
@@ -520,9 +772,12 @@ export function createAdminConsole(options = {}) {
     // Filtro dos logs: guarda o tipo e redesenha a aba.
     dom['cp-admin-body']?.addEventListener('click', (event) => {
       const chip = event.target.closest('[data-cp-admin-log]');
-      if (!chip) return;
-      state.logFilter = chip.dataset.cpAdminLog || 'all';
-      render();
+      if (chip) {
+        state.logFilter = chip.dataset.cpAdminLog || 'all';
+        render();
+        return;
+      }
+      handleVaultClick(event);
     });
 
     dom['admin-gate-form']?.addEventListener('submit', (event) => void submitGate(event));
@@ -595,6 +850,9 @@ export function createAdminConsole(options = {}) {
     flushActiveTime,
     usage,
     memorySummary: () => memorySummary(getMemory()),
+    /** Aba de códigos: relê o banco e redesenha (o painel também faz sozinho). */
+    reloadVaults,
+    vaults: () => state.vaults,
     /** Para testes: estado interno somente leitura. */
     snapshot: () => ({ ...state, mounted, page }),
   };

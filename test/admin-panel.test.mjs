@@ -64,13 +64,20 @@ function baseCtx(overrides = {}) {
 }
 
 describe('painel do administrador: abas', () => {
-  it('são cinco, na ordem da marcação', () => {
+  it('são seis, na ordem da marcação', () => {
     assert.deepEqual(
       ADMIN_TABS.map((tab) => tab.id),
-      ['overview', 'usage', 'memory', 'logs', 'device']
+      ['overview', 'usage', 'vaults', 'memory', 'logs', 'device']
     );
     const markup = adminPanelMarkup();
-    const order = ['Visão geral', 'Uso', 'Memória da IA', 'Logs', 'Dispositivo e conta'];
+    const order = [
+      'Visão geral',
+      'Uso',
+      'Códigos de acesso',
+      'Memória da IA',
+      'Logs',
+      'Dispositivo e conta',
+    ];
     let cursor = -1;
     for (const label of order) {
       const position = markup.indexOf(`>${label}<`, cursor + 1);
@@ -257,6 +264,14 @@ describe('painel do administrador: porta de entrada universal', () => {
     ]) {
       assert.ok(styles.includes(rule), `falta ${rule} em styles.css`);
     }
-    assert.match(styles, /@media \(max-width: 720px\)[\s\S]{0,400}cp-admin-grid/);
+    // A grade é fluida (auto-fit): era o `repeat(4, …)` fixo que espremia os
+    // cartões no tablet e estourava no celular.
+    assert.match(styles, /\.cp-admin-grid \{[^}]*auto-fit/);
+    // O corpo que rola precisa poder encolher, senão a barra de ações é cortada.
+    assert.match(styles, /#cp-admin-body \{[^}]*min-height: 0/);
+    assert.match(styles, /@media \(max-width: 560px\)[\s\S]*\.cp-admin-bar em \{[^}]*display: none/);
+    for (const rule of ['.cp-vault-item', '.cp-vault-actions', '.cp-vault-notice', '.cp-vault-badge']) {
+      assert.ok(styles.includes(rule), `falta ${rule} em styles.css`);
+    }
   });
 });
