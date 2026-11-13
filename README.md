@@ -87,6 +87,34 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 
 **Quirks por banco** que o reconhecimento já carrega: valor com sufixo `D`/`C` grudado no número (Banco do Brasil, Caixa), extrato do Itaú em **blocos de 3 linhas** com saldo só no fechamento do dia, seções de saldo que não entram na conferência (`SALDO INVEST FÁCIL`, `SALDO TOTAL DISPONÍVEL DIA`) e o Nubank sem coluna de saldo.
 
+### Conciliação por CPF/CNPJ e nomes claros na tela (v1.22.0)
+
+O conciliador de clientes/fornecedores passou a usar o **CPF/CNPJ** como identidade, e os dois campos
+de arquivo ganharam nomes que dizem o que entra em cada um.
+
+- **Casamento pelo CPF/CNPJ**, com ou sem máscara (`12.345.678/0001-99` = `12345678000199`), tanto
+  quando o documento está no histórico (`PIX ENVIADO 12.345.678/0001-99`) quanto numa **coluna própria
+  do extrato** — o Itaú ICS, por exemplo, imprime `CNPJ/CPF` ao lado da razão social. Documento igual é
+  identidade: vale mais que qualquer semelhança de nome, e resolve o PIX/TED que só traz o número.
+- **Extrato com duas colunas de texto** (`Lançamentos` + `Razão Social`) passou a virar um histórico só
+  (`RECEBIMENTO REDE ELO — REDECARD INSTITUICAO DE PAGAMENTO S.A.`), sem repetir a parte que já estava
+  na descrição. Antes o nome da contraparte era perdido e nada casava.
+- **Selo `CPF/CNPJ` na linha** e **filtro `CPF/CNPJ`** para auditar de onde veio cada vínculo; o selo
+  `conciliado` agora explica no `title` se o casamento foi por documento ou por nome (com o percentual),
+  e o `revisar` avisa que há mais de um contato parecido.
+- **Contadores na tela**: o aviso do cadastro mostra quantos contatos têm CPF/CNPJ (ou avisa que nenhum
+  tem); o do extrato, quantos lançamentos trazem documento; a notificação final e o KPI dizem quantos
+  vínculos vieram do documento.
+- **Painel de vínculo** mostra o CPF/CNPJ do histórico, o documento de cada candidato e destaca
+  `mesmo CPF/CNPJ` quando o do candidato aparece no lançamento.
+- **Busca da conciliação** passou a considerar contato, código, CPF/CNPJ e as contas de débito/crédito —
+  procurar `5086959` mostra onde a conta foi usada.
+- Nomes dos campos: **Cadastro Cliente e Fornecedores** e **Conciliação bancária Conversor** (antes
+  "Cadastro de contatos" e "Extrato / conciliação bancária"), com o título da seção acompanhando.
+- Verificado com os arquivos reais: `Questor_Exportacao.pdf` (486 contatos, todos com CPF/CNPJ) e o
+  extrato ICS de outubro (567 lançamentos, 484 com documento na coluna) — usando os documentos do
+  próprio extrato no cadastro, **151 lançamentos** foram vinculados só pelo CPF/CNPJ.
+
 ### Correções de leitura e endurecimento do código (v1.21.0)
 
 Rodada de revisão de todo o código, **sem tirar nenhuma função** do app: o que estava certo continua

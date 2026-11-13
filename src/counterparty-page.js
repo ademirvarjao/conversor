@@ -35,6 +35,11 @@ import {
   reconcileCounterparties,
   sanitizeCounterparties,
   scoreCandidates,
+  documentDigits,
+  findDocumentInHistory,
+  formatDocument,
+  historyContainsDocument,
+  historyHasDocument,
   summarizeReconciliation,
   transactionsFromTable,
 } from './counterparty.js';
@@ -450,8 +455,13 @@ async function loadContacts(fileList) {
   dom['cp-result']?.classList.add('hidden');
 
   const summary = contactSummary(contacts);
+  // Quantos contatos trazem CPF/CNPJ: é o que permite casar um PIX/TED que só
+  // mostra o documento, sem o nome do favorecido.
+  const withDocument = contacts.filter((contact) => documentDigits(contact.document)).length;
   if (statusEl) {
-    statusEl.textContent = `${read} arquivo(s) • ${contacts.length} contatos • ${summary.suppliers} credora • ${summary.customers} devedora`;
+    statusEl.textContent =
+      `${read} arquivo(s) • ${contacts.length} contatos • ${summary.suppliers} credora • ` +
+      `${summary.customers} devedora${withDocument ? ` • ${withDocument} com CPF/CNPJ` : ''}`;
   }
   dom['cp-contacts-status']?.closest('.cp-file')?.classList.add('is-loaded');
 
@@ -462,7 +472,12 @@ async function loadContacts(fileList) {
   cpAlert(
     `Cadastro lido: <strong>${contacts.length}</strong> contatos de ${read} arquivo(s) (${summary.suppliers} fornecedores credora, ${
       summary.customers
-    } clientes devedora)${rejected ? ` • ${rejected} linha(s) ignorada(s)` : ''}.${failureNote}`,
+    } clientes devedora)` +
+      (withDocument
+        ? ` • <strong>${withDocument}</strong> com CPF/CNPJ`
+        : ' • nenhum CPF/CNPJ no cadastro: o vínculo será só por nome') +
+      (rejected ? ` • ${rejected} linha(s) ignorada(s) (sem código de contato ou sem natureza)` : '') +
+      `.${failureNote}`,
     failures.length > 0 ? 'warn' : 'info'
   );
   updateRunButton();
@@ -530,8 +545,15 @@ async function loadLedger(fileList) {
   state.page = 1;
   dom['cp-result']?.classList.add('hidden');
 
+  // O CPF/CNPJ pode vir numa coluna própria do extrato (Itaú ICS) ou dentro do
+  // histórico; os dois casos contam.
+  const withDocument = transactions.filter(
+    (item) => documentDigits(item.document) || historyHasDocument(item.history)
+  ).length;
   if (statusEl) {
-    statusEl.textContent = `${read} arquivo(s) • ${transactions.length} lançamentos • ${payments} pagamentos • ${receipts} recebimentos`;
+    statusEl.textContent =
+      `${read} arquivo(s) • ${transactions.length} lançamentos • ${payments} pagamentos • ` +
+      `${receipts} recebimentos${withDocument ? ` • ${withDocument} com CPF/CNPJ` : ''}`;
   }
   dom['cp-ledger-status']?.closest('.cp-file')?.classList.add('is-loaded');
 
@@ -540,7 +562,9 @@ async function loadLedger(fileList) {
       ? ` <strong>${failures.length} arquivo(s) não lido(s):</strong> ${failures.map(escapeHtml).join(' • ')}`
       : '';
   cpAlert(
-    `Extrato lido: <strong>${transactions.length}</strong> lançamentos de ${read} arquivo(s) (${payments} pagamentos, ${receipts} recebimentos). Clique em <em>Conciliar agora</em>.${failureNote}`,
+    `Extrato lido: <strong>${transactions.length}</strong> lançamentos de ${read} arquivo(s) (${payments} pagamentos, ${receipts} recebimentos)` +
+      (withDocument ? ` • <strong>${withDocument}</strong> com CPF/CNPJ no histórico` : '') +
+      `. Clique em <em>Conciliar agora</em>.${failureNote}`,
     failures.length > 0 ? 'warn' : 'info'
   );
   updateRunButton();
@@ -602,6 +626,7 @@ async function runReconciliation() {
     cpAlert('');
     showToast(
       `Conciliação concluída: ${stats.matched} de ${stats.total} lançamentos vinculados (${stats.ambiguous} para revisar).` +
+        (stats.byDocument ? ` ${stats.byDocument} pelo CPF/CNPJ do histórico.` : '') +
         (fromMemory ? ` ${fromMemory} conta(s) da memória.` : '') +
         (suggested ? ` ${suggested} conta(s) sugerida(s).` : '')
     );
@@ -625,17 +650,47 @@ function visibleRows() {
     if (state.filter === 'matched' && !['matched', 'manual'].includes(row.status)) return false;
     if (state.filter === 'review' && row.status !== 'ambiguous') return false;
     if (state.filter === 'unmatched' && row.contact) return false;
+    if (state.filter === 'document' && row.matchReason !== 'document') return false;
     if (!term) return true;
-    return normalizeText(`${row.history} ${row.contact?.name || ''} ${row.date}`).includes(term);
+    // A busca vale para tudo o que está na linha: histórico, contato, código,
+    // CPF/CNPJ, data e as contas de débito/crédito. Procurar a conta
+    // "5086959" é o jeito mais rápido de auditar onde ela foi usada.
+    const haystack = [
+      row.history,
+      row.contact?.name,
+      row.contact?.code,
+      row.contact?.document,
+      row.date,
+      row.debitAccount,
+      row.creditAccount,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return normalizeText(haystack).includes(term);
   });
 }
 
+/**
+ * Selo do vínculo, com a explicação no `title`.
+ *
+ * Saber **por que** a linha casou (nome, memória ou CPF/CNPJ) é o que permite
+ * revisar rápido: um vínculo por nome a 62% merece conferência; um vínculo por
+ * CPF/CNPJ, não.
+ */
 function statusBadge(row) {
-  if (row.status === 'manual') return '<span class="cp-badge">manual</span>';
-  if (row.learnedAlias) return '<span class="cp-badge">memória</span>';
-  if (row.status === 'matched') return '<span class="cp-badge">conciliado</span>';
-  if (row.status === 'ambiguous') return '<span class="cp-badge is-review">revisar</span>';
-  return '<span class="cp-badge is-none">sem contato</span>';
+  const score = row.score ? `${Math.round(row.score * 100)}% de semelhança` : 'sem semelhança';
+  if (row.status === 'manual') return '<span class="cp-badge" title="Vínculo escolhido à mão">manual</span>';
+  if (row.learnedAlias) {
+    return '<span class="cp-badge" title="Histórico já vinculado numa conciliação anterior">memória</span>';
+  }
+  if (row.status === 'matched') {
+    const why = row.matchReason === 'document' ? 'CPF/CNPJ igual ao do cadastro' : `nome — ${score}`;
+    return `<span class="cp-badge" title="Vínculo automático por ${escapeHtml(why)}">conciliado</span>`;
+  }
+  if (row.status === 'ambiguous') {
+    return `<span class="cp-badge is-review" title="Há mais de um contato parecido (${escapeHtml(score)}) — confira antes de exportar">revisar</span>`;
+  }
+  return '<span class="cp-badge is-none" title="Nenhum contato do cadastro bateu com este histórico">sem contato</span>';
 }
 
 /** Célula de débito/crédito: vazia vira campo para digitar a conta à mão. */
@@ -717,6 +772,11 @@ function renderRows() {
           <td class="col-hist">
             <span class="cp-history">${escapeHtml(row.history)}</span><br />
             ${statusBadge(row)}
+            ${
+              row.matchReason === 'document'
+                ? '<span class="cp-badge is-doc" title="Vínculo pelo CPF/CNPJ que veio no histórico do lançamento">CPF/CNPJ</span>'
+                : ''
+            }
             ${row.counterpartSource === 'memory' ? '<span class="cp-badge is-memory" title="Conta preenchida pela memória da IA">conta da memória</span>' : ''}
             ${row.contact ? `<span class="cp-contact">${escapeHtml(row.contact.name)}</span>` : ''}
             ${suggestionChip(row)}
@@ -797,7 +857,11 @@ function render() {
   };
 
   set('cp-kpi-count', String(stats.total));
-  set('cp-kpi-matched', `${stats.matched} conciliados • ${stats.ambiguous} para revisar`);
+  set(
+    'cp-kpi-matched',
+    `${stats.matched} conciliados • ${stats.ambiguous} para revisar` +
+      (stats.byDocument ? ` • ${stats.byDocument} por CPF/CNPJ` : '')
+  );
   set('cp-kpi-debit', formatValuePlainBr(stats.debitCents / 100));
   set('cp-kpi-suppliers', `${stats.suppliers} fornecedores`);
   set('cp-kpi-credit', formatValuePlainBr(stats.creditCents / 100));
@@ -1165,20 +1229,25 @@ function renderCandidates() {
   }
 
   list.innerHTML = entries
-    .map(
-      (entry) => `
+    .map((entry) => {
+      const document = formatDocument(entry.contact.document);
+      // O CPF/CNPJ do candidato apareceu no histórico deste lançamento? Vale
+      // avisar: é o sinal mais forte de que o vínculo está certo.
+      const sameDocument = document && historyContainsDocument(row.rawHistory, entry.contact.document);
+      return `
       <li class="cp-candidate">
         <span class="cp-candidate-info">
           <span class="cp-candidate-name">${escapeHtml(entry.contact.name)}</span>
           <span class="cp-candidate-meta">
             ${escapeHtml(contactCode(entry.contact.code))} • ${escapeHtml(NATUREZA_LABELS[entry.contact.natureza] || entry.contact.natureza)}${
-              entry.score ? ` • ${Math.round(entry.score * 100)}%` : ''
-            }
+              document ? ` • ${escapeHtml(document)}` : ''
+            }${entry.score ? ` • ${Math.round(entry.score * 100)}%` : ''}
+            ${sameDocument ? '<span class="cp-badge is-doc" title="Este CPF/CNPJ está no histórico do lançamento">mesmo CPF/CNPJ</span>' : ''}
           </span>
         </span>
         <button class="btn btn-sm btn-primary" type="button" data-cp-pick="${escapeHtml(entry.contact.code)}">Vincular</button>
-      </li>`
-    )
+      </li>`;
+    })
     .join('');
 }
 
@@ -1190,7 +1259,16 @@ function openLinkPanel(rowId) {
   state.linkingId = rowId;
   state.linkSearch = '';
   if (dom['cp-link-search']) dom['cp-link-search'].value = '';
-  if (dom['cp-link-history']) dom['cp-link-history'].textContent = row.rawHistory;
+  if (dom['cp-link-history']) {
+    // Quando o histórico traz o CPF/CNPJ, isso vai junto: é a pista mais forte
+    // para o usuário escolher o contato certo na lista abaixo.
+    const document = row.contact?.document
+      ? formatDocument(row.contact.document)
+      : formatDocument(row.document) || findDocumentInHistory(row.rawHistory);
+    dom['cp-link-history'].textContent = document
+      ? `${row.rawHistory} • CPF/CNPJ no histórico: ${document}`
+      : row.rawHistory;
+  }
   const suggestion = row.accountSuggestion;
   if (dom['cp-link-account-input']) {
     dom['cp-link-account-input'].value = row.counterpartAccount || suggestion?.account || '';

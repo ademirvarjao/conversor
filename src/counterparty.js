@@ -66,6 +66,22 @@ const MATCH_THRESHOLD = 0.62;
 const AMBIGUOUS_THRESHOLD = 0.55;
 const AMBIGUITY_MARGIN = 0.06;
 
+/**
+ * Peso do casamento por CPF/CNPJ. Documento no histórico é **identidade**, não
+ * semelhança de nome: quando bate com o cadastro, vale mais que qualquer
+ * coincidência de palavras (PIX e TED às vezes trazem só o documento).
+ */
+const DOCUMENT_MATCH_SCORE = 0.99;
+
+/** Tamanhos válidos de documento: CPF (11) e CNPJ (14). */
+const DOCUMENT_LENGTHS = new Set([11, 14]);
+
+/** CNPJ mascarado (`12.345.678/0001-99`) ou só os 14 dígitos. */
+const CNPJ_PATTERN = /\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b|\b\d{14}\b/;
+
+/** CPF mascarado (`123.456.789-09`) ou só os 11 dígitos. */
+const CPF_PATTERN = /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\b\d{11}\b/;
+
 const MAX_ALIASES = 800;
 const MAX_KNOWN_CONTACTS = 4000;
 const MAX_TOKEN_WEIGHT = 6;
@@ -115,6 +131,109 @@ function compactName(value) {
  */
 export function historyCore(history) {
   return significantTokens(history).slice(0, 3).join(' ');
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        CPF / CNPJ (identidade forte)                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Só os dígitos de um CPF/CNPJ — ou `null` quando o valor não é documento.
+ *
+ * O cadastro do Questor às vezes traz o campo vazio como `-`, `0` ou com o
+ * clássico documento de teste `111.111.111-11`; nenhum deles identifica
+ * ninguém, então todos caem fora (só valem 11 ou 14 dígitos, nunca repetidos).
+ */
+export function documentDigits(value) {
+  const digits = String(value ?? '').replace(/\D+/g, '');
+  if (!DOCUMENT_LENGTHS.has(digits.length)) return null;
+  if (/^(\d)\1+$/.test(digits)) return null;
+  return digits;
+}
+
+/**
+ * Índice dos documentos que aparecem num histórico.
+ *
+ * O banco imprime o documento das duas formas (`123.456.789-09` e
+ * `12345678909`), então os pedaços de dígitos são reunidos na ordem em que
+ * aparecem: assim a versão com pontos, barra e traço também é encontrada.
+ * A busca é por conteúdo (`includes`), porque o histórico pode trazer o
+ * documento grudado em outro número ("NF 1234 CPF 123.456.789-09").
+ */
+function indexHistoryDocuments(history) {
+  const text = String(history ?? '');
+  if (!/\d{11}/.test(text.replace(/[^\d]+/g, ''))) return { blob: '', runs: new Set() };
+  const runs = new Set();
+  let blob = '';
+  for (const chunk of text.split(/[^\d]+/)) {
+    if (!chunk) continue;
+    if (DOCUMENT_LENGTHS.has(chunk.length)) runs.add(chunk);
+    blob += chunk;
+  }
+  return { blob, runs };
+}
+
+/** Cache do documento por contato (a mesma lista é pontuada linha a linha). */
+const documentCache = new WeakMap();
+
+function contactDocument(contact) {
+  if (!contact || typeof contact !== 'object') return null;
+  if (documentCache.has(contact)) return documentCache.get(contact);
+  const digits = documentDigits(contact.document);
+  documentCache.set(contact, digits);
+  return digits;
+}
+
+/** O histórico desta transação traz o CPF/CNPJ deste contato? */
+export function documentMatches(contact, context) {
+  const digits = contactDocument(contact);
+  if (!digits) return false;
+  const documents = context?.documents;
+  if (!documents || !documents.blob) return false;
+  if (documents.runs?.has(digits)) return true;
+  return documents.blob.includes(digits);
+}
+
+/** O histórico traz algum CPF/CNPJ? (usado para avisar o usuário na tela) */
+export function historyHasDocument(history) {
+  const { blob } = indexHistoryDocuments(history);
+  return blob.length >= 11;
+}
+
+/** O histórico contém **este** CPF/CNPJ? (usado no painel de vínculo) */
+export function historyContainsDocument(history, document) {
+  const digits = documentDigits(document);
+  if (!digits) return false;
+  const { blob } = indexHistoryDocuments(history);
+  return blob.includes(digits);
+}
+
+/**
+ * Primeiro CPF/CNPJ que aparece num histórico, já formatado (ou `''`).
+ * Serve para explicar na tela por que um vínculo foi automático.
+ */
+export function findDocumentInHistory(history) {
+  const text = String(history ?? '');
+  // CNPJ primeiro (14 dígitos): é o formato que mais aparece em pagamento a
+  // empresa. `\b` impede recortar um pedaço de um número maior.
+  for (const pattern of [CNPJ_PATTERN, CPF_PATTERN]) {
+    const match = pattern.exec(text);
+    if (match) {
+      const digits = documentDigits(match[0]);
+      if (digits) return formatDocument(digits);
+    }
+  }
+  return '';
+}
+
+/** Documento pronto para mostrar na tela: `12.345.678/0001-99` ou `123.456.789-09`. */
+export function formatDocument(document) {
+  const digits = documentDigits(document);
+  if (!digits) return '';
+  if (digits.length === 14) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+  }
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -405,6 +524,8 @@ export function buildSourceTransactions(records) {
       amount: Math.abs(amountCents) / 100,
       direction: amountCents < 0 ? DIRECTION.PAYMENT : DIRECTION.RECEIPT,
       history: cleanWhitespace(record.history),
+      /** CPF/CNPJ da contraparte, quando o extrato traz a coluna. */
+      document: cleanWhitespace(record.document || ''),
       sourceFile: record.sourceFile || '',
     });
   }
@@ -498,10 +619,47 @@ export function setRowCellAccount(row, side, rawAccount) {
   return syncCounterpartAccount(row);
 }
 
+/** 60%+ das palavras do nome já aparecem no texto: o nome é redundante. */
+function nameMostlyPresent(name, existingText) {
+  const tokens = significantTokens(name);
+  if (tokens.length === 0) return true;
+  const existing = new Set(significantTokens(existingText));
+  const hits = tokens.filter((token) => existing.has(token)).length;
+  return hits / tokens.length >= 0.6;
+}
+
+/**
+ * Cabeçalhos que trazem o nome de quem está do outro lado da operação.
+ *
+ * Extratos como o do Itaú ICS separam a descrição ("PIX ENVIADO") do nome
+ * ("Razão Social"); sem juntar os dois o histórico não tem nome nenhum e a
+ * conciliação não acha contato.
+ */
+const NAME_COLUMN_PATTERNS = [
+  'razao',
+  'nome',
+  'favorecido',
+  'beneficiar',
+  'pagador',
+  'recebedor',
+  'sacado',
+  'cliente',
+  'fornecedor',
+  'contraparte',
+];
+
+/** Cabeçalhos que trazem o CPF/CNPJ da contraparte. */
+const DOCUMENT_COLUMN_PATTERNS = ['cnpj', 'cpf', 'inscricao', 'inscfederal'];
+
 /**
  * Converte a tabela do extrato (PDF ou .xlsx) em lançamentos prontos para a
  * conciliação. As colunas são achadas pelo cabeçalho e, quando ele não ajuda,
  * pelas posições clássicas (data | valor | histórico).
+ *
+ * Além do histórico principal, as colunas de **nome** (Razão Social,
+ * Favorecido, Cliente…) entram no texto do lançamento — é o que permite achar
+ * o contato — e o CPF/CNPJ fica guardado à parte para o casamento por
+ * documento.
  */
 export function transactionsFromTable(headers, rows, options = {}) {
   const sourceFile = options.sourceFile || '';
@@ -527,6 +685,16 @@ export function transactionsFromTable(headers, rows, options = {}) {
   const historyFound = findCol(['historico', 'descri', 'lancamento'], exclude);
   const historyCol = historyFound >= 0 ? historyFound : fallbackCol(exclude);
 
+  // Colunas extras de texto que identificam a contraparte e a de CPF/CNPJ.
+  const used = new Set([...exclude, historyCol].filter((index) => index >= 0));
+  const nameCols = keys
+    .map((key, index) => ({ key, index }))
+    .filter(({ key, index }) => !used.has(index) && key && NAME_COLUMN_PATTERNS.some((pattern) => key.includes(pattern)))
+    .map(({ index }) => index);
+  const documentCol = keys.findIndex(
+    (key, index) => !used.has(index) && !nameCols.includes(index) && DOCUMENT_COLUMN_PATTERNS.some((pattern) => key.includes(pattern))
+  );
+
   const readMoney = (value) => {
     const parsed = typeof value === 'number' ? value : parseMoneyValue(value)?.value;
     return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
@@ -544,11 +712,31 @@ export function transactionsFromTable(headers, rows, options = {}) {
       value = credit - debit;
     }
 
+    // Histórico = descrição + nome da contraparte, sem repetir o que já está lá.
+    const parts = [];
+    const addPart = (raw, { tokensToo = false } = {}) => {
+      const text = cleanWhitespace(raw);
+      if (!text) return;
+      const key = normalizeKey(text);
+      if (!key) return;
+      const existing = normalizeKey(parts.join(' '));
+      if (existing && existing.includes(key)) return;
+      const existingReversed = parts.some((part) => normalizeKey(part).includes(key));
+      if (existingReversed) return;
+      // Nome praticamente igual ao que já foi escrito ("PAGTO PLASTTOTAL
+      // PLASTICOS" + "PLASTTOTAL PLASTICOS INDUSTRIAIS LTDA"): não repete.
+      if (tokensToo && existing && nameMostlyPresent(text, existing)) return;
+      parts.push(text);
+    };
+    addPart(row?.[historyCol]);
+    for (const index of nameCols) addPart(row?.[index], { tokensToo: true });
+
     records.push({
       dateIso,
       dateBr: formatIsoToBrDate(dateIso),
       value,
-      history: row?.[historyCol],
+      history: parts.join(' — '),
+      document: documentCol >= 0 ? cleanWhitespace(row?.[documentCol]) : '',
       sourceFile,
     });
   }
@@ -660,6 +848,9 @@ function scoreContact(contact, context) {
   const historyTokens = context.historyTokens;
   const learned = weightsFor(contact, context.learned);
 
+  // CPF/CNPJ igual é identidade: não depende de o banco ter escrito o nome.
+  if (documentMatches(contact, context)) return DOCUMENT_MATCH_SCORE;
+
   // Peso final de cada token: aprendizado × raridade no cadastro.
   const entries = contact.tokens.map((token) => {
     const rarity = context.index ? context.index.weight(token) : 1;
@@ -739,11 +930,12 @@ function pickBest(transaction, contacts, context) {
         score: Math.min(1, fromAlias.score + 0.25),
         status: 'matched',
         learnedAlias: true,
+        reason: 'alias',
       };
     }
   }
 
-  if (scored.length === 0) return { contact: null, score: 0, status: 'unmatched' };
+  if (scored.length === 0) return { contact: null, score: 0, status: 'unmatched', reason: null };
 
   const [best, second] = scored;
   // Nome com uma ou duas palavras significativas informa pouco: só confirma
@@ -751,16 +943,25 @@ function pickBest(transaction, contacts, context) {
   const required =
     best.contact.tokens.length <= 2 || !isCompanyName(best.contact.name) ? 0.94 : MATCH_THRESHOLD;
   // O cadastro pode repetir a mesma pessoa em dois códigos: empate de nome
-  // idêntico não é ambiguidade.
+  // idêntico (ou de CPF/CNPJ) não é ambiguidade.
   const sameName =
     second && normalizeKey(second.contact.name) === normalizeKey(best.contact.name);
-  if (best.score >= required && (sameName || !second || best.score - second.score >= AMBIGUITY_MARGIN)) {
-    return { contact: best.contact, score: best.score, status: 'matched' };
+  const bestDocument = contactDocument(best.contact);
+  const sameDocument =
+    Boolean(bestDocument) && second && contactDocument(second.contact) === bestDocument;
+  // De onde veio o vínculo — a tela mostra isso ao usuário.
+  const reason = documentMatches(best.contact, context) ? 'document' : 'name';
+
+  if (
+    best.score >= required &&
+    (sameName || sameDocument || !second || best.score - second.score >= AMBIGUITY_MARGIN)
+  ) {
+    return { contact: best.contact, score: best.score, status: 'matched', reason };
   }
   if (best.score >= AMBIGUOUS_THRESHOLD) {
-    return { contact: best.contact, score: best.score, status: 'ambiguous' };
+    return { contact: best.contact, score: best.score, status: 'ambiguous', reason };
   }
-  return { contact: null, score: best.score, status: 'unmatched' };
+  return { contact: null, score: best.score, status: 'unmatched', reason: null };
 }
 
 /**
@@ -776,6 +977,7 @@ export function scoreCandidates(history, contacts, options = {}) {
     historyTokens: new Set(significantTokens(history)),
     historyCompact: compactName(history),
     aliasKey: historyCore(history),
+    documents: indexHistoryDocuments(history),
     learned,
     index: buildPoolIndex(pool),
   };
@@ -811,6 +1013,7 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
       historyTokens: new Set(significantTokens(transaction.history)),
       historyCompact: compactName(transaction.history),
       aliasKey: historyCore(transaction.history),
+      documents: indexHistoryDocuments(`${transaction.history} ${transaction.document || ''}`),
       learned,
       index: isPayment ? supplierIndex : customerIndex,
     };
@@ -835,6 +1038,8 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
       counterpartAccount: '',
       history: linkHistory(transaction.history, contact),
       rawHistory: transaction.history,
+      /** CPF/CNPJ que veio na coluna do extrato (se houver). */
+      document: transaction.document || '',
       sourceFile: transaction.sourceFile,
       contact: contact
         ? {
@@ -847,6 +1052,8 @@ export function reconcileCounterparties(transactions, contacts, options = {}) {
       score: Number(best.score.toFixed(3)),
       status: best.status,
       learnedAlias: !!best.learnedAlias,
+      /** `document` (CPF/CNPJ), `alias` (memória) ou `name` (semelhança). */
+      matchReason: best.reason || null,
     };
 
     // Treino de contas: aplica a conta já confirmada; as demais ficam como
@@ -911,11 +1118,14 @@ export function summarizeReconciliation(rows) {
     creditCents: 0,
     suppliers: 0,
     customers: 0,
+    /** Vínculos que vieram do CPF/CNPJ do histórico. */
+    byDocument: 0,
   };
 
   for (const row of rows) {
     if (row.status === 'matched' || row.status === 'manual' || row.status === 'learned') {
       stats.matched += 1;
+      if (row.matchReason === 'document') stats.byDocument += 1;
     }
     else if (row.status === 'ambiguous') stats.ambiguous += 1;
     else stats.unmatched += 1;
