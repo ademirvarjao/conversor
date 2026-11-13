@@ -43,11 +43,11 @@ import {
 } from './layout-registry.js';
 import { formatAccessCode, generateAccessCode, normalizeAccessCode } from './sync-crypto.js';
 import {
-  applyVaultPayload,
   clearCloudConfig,
   clearIdentity,
   loadCloudConfig,
   loadIdentity,
+  mergeVaultPayload,
   pullVault,
   pushVault,
   restoreIdentityFromCode,
@@ -2606,17 +2606,35 @@ async function pullNow({ silent = false } = {}) {
       return null;
     }
 
-    state.memory = applyVaultPayload(state.memory, remote.payload);
+    // A sincronização é automática: em vez de substituir a memória local (o que
+    // apagaria um treinamento feito sem rede), o pacote da nuvem é somado ao
+    // que já existe aqui.
+    const before = state.memory;
+    state.memory = mergeVaultPayload(state.memory, remote.payload);
     saveAiMemory(state.memory);
     updateAiBadge();
     renderAiModal();
-    if (state.selectedFileId) openTrainerForFile(state.selectedFileId);
+    // Só atualiza o treinador se ele já estiver aberto — nunca abre sozinho.
+    if (state.selectedFileId && dom['ai-trainer-section'] && !dom['ai-trainer-section'].classList.contains('hidden')) {
+      openTrainerForFile(state.selectedFileId);
+    }
     renderFilesList();
+    renderOutputSection();
+
+    const changed = JSON.stringify(before) !== JSON.stringify(state.memory);
+    const novos = Math.max(0, state.memory.learnedProfiles.length - before.learnedProfiles.length);
 
     cloud.identity = touchIdentitySync({ ...cloud.identity }, remote.updatedAt);
-    showToast(
-      `Modelos restaurados da nuvem: ${state.memory.learnedProfiles.length} perfil(is) de layout.`
-    );
+
+    if (changed) {
+      if (novos > 0) {
+        showToast(`Sincronizado com a nuvem: ${novos} perfil(is) de layout recebido(s).`);
+      } else if (!silent) {
+        showToast('Modelos atualizados com a nuvem.');
+      }
+      // O que só existia aqui (treinado offline) sobe na sequência.
+      scheduleCloudPush();
+    }
     return remote;
   } catch (error) {
     setCloudStatus(`Falha ao baixar: ${error.message}`, 'error');
@@ -2668,6 +2686,26 @@ function scheduleCloudPush() {
     cloudPushTimer = null;
     void cloudPush({ silent: true });
   }, 1200);
+}
+
+/**
+ * Baixa em segundo plano (abertura do app, chave recém-adotada, aba que volta
+ * ao foco). Não existe botão: quem tem chave de acesso vê os modelos da nuvem
+ * chegarem sozinhos, e o que veio é somado ao que já havia aqui.
+ */
+let cloudPullTimer = null;
+
+function scheduleCloudPull(delay = 900) {
+  if (!cloud.config || !cloud.identity) return;
+  if (cloudPullTimer) clearTimeout(cloudPullTimer);
+  cloudPullTimer = setTimeout(() => {
+    cloudPullTimer = null;
+    if (cloud.busy) {
+      scheduleCloudPull(4000);
+      return;
+    }
+    void cloudPull({ silent: true });
+  }, delay);
 }
 
 /** Copia a chave; devolve `true` quando o navegador permitiu. */
@@ -2733,7 +2771,10 @@ async function useAccessCode(rawCode) {
         );
       } else if (pulled === false) {
         // A chave pode estar certa mas o banco inacessível: mantém a chave.
-        showToast('Chave guardada, mas não consegui baixar os modelos agora. Tente “Baixar modelos”.', 'warn');
+        showToast(
+          'Chave guardada, mas não consegui falar com a nuvem agora. A sincronização automática tenta de novo sozinha.',
+          'warn'
+        );
       }
     } catch (error) {
       clearIdentity();
@@ -2797,6 +2838,11 @@ function downloadKeyCard(identity) {
 }
 
 function bindCloudEvents() {
+  // Outra máquina pode ter treinado enquanto esta aba estava em segundo plano.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleCloudPull(1500);
+  });
+
   dom['btn-cloud-save-config']?.addEventListener('click', async () => {
     const config = {
       url: dom['cloud-url']?.value || '',
@@ -3057,6 +3103,10 @@ function init() {
   activateModalTab('profiles');
   dom['ai-modal']?.setAttribute('aria-hidden', 'true');
   renderCloudPanel();
+
+  // Nuvem sem botões: quem tem chave de acesso recebe os modelos sozinho na
+  // abertura (e confere de novo quando a aba volta ao foco).
+  scheduleCloudPull();
 
   renderFilesList();
   renderOutputSection();

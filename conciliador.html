@@ -38,10 +38,12 @@
         <div class="cp-cloud">
           <span id="cp-cloud-state" class="cp-cloud-state" role="status">Modelos: carregando…</span>
           <span id="cp-memory-state" class="cp-cloud-state cp-memory-state" role="status">Memória: carregando…</span>
-          <button id="btn-cp-cloud-push" class="btn btn-sm btn-outline-light" type="button" title="Enviar os modelos aprendidos para a nuvem (cifrados)">
+          <!-- Sincronização automática: os botões de enviar/baixar não aparecem mais.
+               Os ids seguem no HTML porque o controlador e os testes de contrato os usam. -->
+          <button id="btn-cp-cloud-push" class="btn btn-sm btn-outline-light" type="button" hidden tabindex="-1" title="Enviar os modelos aprendidos para a nuvem (cifrados)">
             Enviar modelos
           </button>
-          <button id="btn-cp-cloud-pull" class="btn btn-sm btn-outline-light" type="button" title="Baixar os modelos aprendidos da nuvem">
+          <button id="btn-cp-cloud-pull" class="btn btn-sm btn-outline-light" type="button" hidden tabindex="-1" title="Baixar os modelos aprendidos da nuvem">
             Baixar modelos
           </button>
         </div>
@@ -308,7 +310,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.22.0</span> — os arquivos nunca saem do navegador.
+        Conversor <span id="app-version" class="footer-version">v1.23.0</span> — os arquivos nunca saem do navegador.
       </p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>

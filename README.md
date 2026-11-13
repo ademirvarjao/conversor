@@ -198,7 +198,7 @@ Números depois da revisão: **Itaú 567** lançamentos (saldo 20/20), **Bradesc
 ### Conciliação de clientes/fornecedores (v1.8.0)
 O **ícone da marca** na barra superior leva para uma **página própria** (`conciliador.html`), com fluxo separado da conciliação unificada para cruzar o **cadastro de contatos do Questor** com o extrato bancário. O ícone de volta (e o botão *Conversor*) retornam à página principal — as duas telas compartilham a mesma memória da IA.
 
-- **Página dedicada**: `conciliador.html` tem espaço para a tabela inteira (sem painel apertado), estado de processamento, atalho de volta e o estado dos modelos da nuvem no topo, com botões **Enviar/Baixar modelos** usando a chave já criada.
+- **Página dedicada**: `conciliador.html` tem espaço para a tabela inteira (sem painel apertado), estado de processamento, atalho de volta e o estado dos modelos da nuvem no topo — a sincronização é automática, sem botões (v1.23.0).
 - **Duas entradas, vários arquivos**: (1) um ou mais cadastros `Questor_Exportacao` (`.pdf`/`.xlsx`) com as colunas `contactb`, `nomepessoa` e `natureza`; (2) um ou mais extratos com data, valor assinado e histórico. Os cadastros são consolidados por `contactb` (grafias diferentes viram apelidos do mesmo contato) e os extratos são unidos em ordem de data, sem repetir o mesmo lançamento quando um arquivo é enviado duas vezes — repetições legítimas dentro do mesmo arquivo (duas taxas iguais no mesmo dia) são preservadas.
 - **Fornecedores × clientes pelo cadastro**: natureza **Credora** (contas `2.x`) são fornecedores; natureza **Devedora** (contas `1.x`) são clientes. Quando a coluna `natureza` vem vazia, o plano de contas decide. Grafias diferentes do mesmo `contactb` são unificadas.
 - **Regra de vínculo**: **pagamento** (saída de caixa) casa com fornecedor de natureza **credora** e vai para a coluna **débito**; **recebimento** (entrada) casa com cliente de natureza **devedora** e vai para **crédito**.
@@ -222,8 +222,26 @@ Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**
 - **A chave fica sempre à vista na barra superior**: um clique copia, e o botão avisa que ela é necessária para abrir os modelos em outro computador (o `?` ao lado explica; sem chave, o mesmo botão a cria e já copia).
 - **Entrar em outro computador direto pelo topo**: cole a chave no campo `Colar chave de outro PC` e confirme com `Usar` (ou `Enter`) — os modelos descem na hora.
 - **Cifrado no navegador.** A chave passa por PBKDF2-SHA256 com 310.000 iterações e gera duas coisas: um `slot` opaco (HMAC) que identifica a linha no banco e uma chave AES-GCM-256 que cifra o conteúdo. Nem quem tem a chave anônima do projeto lê ou correlaciona usuários.
-- **Envio automático** depois de cada treinamento, mais botões de **Enviar modelos** e **Baixar modelos**.
+- **Sincronização automática, sem botões** (v1.23.0): o envio acontece sozinho depois de cada treinamento (e o download na abertura do app, ao adotar uma chave e quando a aba volta ao foco). **Não há mais os botões "Enviar modelos"/"Baixar modelos"** — o que a nuvem tem é **somado** ao que existe na máquina (perfis por `id`, histórico por `id`, maior peso por token, contas pelo registro mais recente), então nada do que foi aprendido offline se perde.
 - **O LLM continua local:** ao baixar, a chave do conector já configurada nesta máquina é preservada.
+
+#### Sincronização automática (v1.23.0)
+A aba **Nuvem** deixou de ter botões de sincronizar: quem tem chave de acesso vê os modelos chegarem
+e partirem sozinhos.
+
+- **Envio**: agendado 1,2 s depois de qualquer mudança na memória (treinar um layout, corrigir conta,
+  aceitar sugestão) — várias alterações seguidas geram **um** envio, não um por alteração.
+- **Download**: na abertura do app, ao adotar uma chave e quando a aba volta ao foco (`visibilitychange`),
+  sempre em segundo plano e sem travar a tela.
+- **Soma, não substituição**: o pacote baixado é unido à memória local (`mergeVaultPayload`) — perfis e
+  histórico pelo `id` (em conflito, fica o usado mais recentemente), pesos por token pelo maior valor,
+  contas pelo registro mais recente e `uses`/`hits` pelo maior. Assim duas máquinas com a mesma chave
+  terminam com os modelos das duas, e um treinamento feito sem internet não é apagado pelo download.
+- **O que é local continua local**: a chave do LLM, as assinaturas de layout e a preferência do catálogo
+  da comunidade nunca sobem e nunca são sobrescritas pelo que vem da nuvem.
+- **Interface discreta**: a aba Nuvem mostra só o estado ("Modelos em dia com a nuvem", "Sincronizando…")
+  e o painel do conciliador mantém a chave e o estado no topo. Os botões ficaram `hidden` no HTML
+  (fora da ordem de tabulação), para não haver controle inútil na tela.
 
 #### Trava da conexão do banco (v1.11.0 · reescopada na v1.13.0)
 A aba **Nuvem** é aberta para todo mundo: consultar a chave de acesso, criar/recuperar chave,

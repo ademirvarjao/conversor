@@ -52,9 +52,9 @@ import { formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
 import {
-  applyVaultPayload,
   loadCloudConfig,
   loadIdentity,
+  mergeVaultPayload,
   pullVault,
   pushVault,
   touchIdentitySync,
@@ -323,32 +323,50 @@ async function pushModels({ silent = false } = {}) {
   }
 }
 
-async function pullModels() {
+/**
+ * Traz os modelos da nuvem — sempre em segundo plano, junto com o envio: não há
+ * botão de sincronizar. O pacote é **somado** ao que já existe aqui (merge), e
+ * não substituído, para não apagar treino feito sem conexão.
+ */
+async function pullModels({ silent = true } = {}) {
   if (!cloud.config || !cloud.identity) {
-    showToast('Crie sua chave na página inicial para baixar os modelos da nuvem.', 'warn');
+    if (!silent) showToast('Crie sua chave na página inicial para usar os modelos da nuvem.', 'warn');
     return;
   }
   if (cloud.busy) return;
 
   cloud.busy = true;
-  renderCloudState('Baixando modelos…', 'busy');
+  renderCloudState('Sincronizando com a nuvem…', 'busy');
   try {
     const remote = await pullVault({ config: cloud.config, identity: cloud.identity });
     if (!remote) {
       renderCloudState('Nenhum modelo na nuvem para esta chave', 'warn');
-      showToast('Nada para baixar: a nuvem ainda não tem modelos desta chave.', 'warn');
+      if (!silent) showToast('A nuvem ainda não tem modelos desta chave.', 'warn');
       return;
     }
 
-    state.memory = applyVaultPayload(state.memory, remote.payload);
+    const before = state.memory;
+    state.memory = mergeVaultPayload(state.memory, remote.payload);
     persistMemory();
     renderMemoryState();
     cloud.identity = touchIdentitySync({ ...cloud.identity }, remote.updatedAt);
-    renderCloudState('Modelos atualizados', 'ok');
-    showToast('Modelos da nuvem aplicados a esta máquina — as contas memorizadas já valem aqui.');
+
+    const novos = Math.max(0, (state.memory.counterparties?.uses || 0) - (before.counterparties?.uses || 0));
+    const changed = JSON.stringify(before) !== JSON.stringify(state.memory);
+    renderCloudState('Modelos em dia com a nuvem', 'ok');
+    if (changed) {
+      showToast(
+        novos > 0
+          ? `Modelos sincronizados: ${novos} conta(s) memorizada(s) chegaram da nuvem.`
+          : 'Modelos sincronizados com a nuvem.'
+      );
+      render();
+      // O que só existe aqui (aprendido sem rede) sobe agora.
+      scheduleCloudPush();
+    }
   } catch (error) {
-    renderCloudState('Falha ao baixar', 'error');
-    showToast(`Falha ao baixar: ${error.message}`, 'error');
+    renderCloudState('Falha ao sincronizar', 'error');
+    if (!silent) showToast(`Falha ao sincronizar: ${error.message}`, 'error');
   } finally {
     cloud.busy = false;
     for (const id of ['btn-cp-cloud-push', 'btn-cp-cloud-pull']) {
@@ -377,6 +395,22 @@ function scheduleCloudPush() {
     cloudPushTimer = null;
     void pushModels({ silent: true });
   }, 1200);
+}
+
+let cloudPullTimer = null;
+
+/** Baixa os modelos em segundo plano (abertura, chave nova e aba em foco). */
+function scheduleCloudPull(delay = 900) {
+  if (!cloud.config || !cloud.identity) return;
+  if (cloudPullTimer) clearTimeout(cloudPullTimer);
+  cloudPullTimer = setTimeout(() => {
+    cloudPullTimer = null;
+    if (cloud.busy) {
+      scheduleCloudPull(4000);
+      return;
+    }
+    void pullModels({ silent: true });
+  }, delay);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1532,6 +1566,11 @@ function init() {
   renderMemoryState();
   bindEvents();
   render();
+  // Sem botão de sincronizar: puxa a nuvem sozinho na abertura e ao voltar o foco.
+  scheduleCloudPull();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleCloudPull(1500);
+  });
 
   if (!('ExcelJS' in window) || !window.jspdf) {
     showToast('Bibliotecas de planilha/PDF não carregaram corretamente. Recarregue a página.', 'error', {
