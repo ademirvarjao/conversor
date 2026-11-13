@@ -353,6 +353,23 @@ campo **Modelo (opcional)** permite trocar o modelo sem atualizar o app — nece
 gratuito muda com o tempo. Nenhum desses planos é ilimitado; o caminho sem cota continua sendo a IA
 local, que não faz requisição nenhuma.
 
+### Manual próprio e Sobre (v1.30.0)
+A opção **Como funciona** do menu da engrenagem deixou de abrir o README do repositório: agora ela abre
+**`manual.html`**, uma página do próprio aplicativo (publicada junto no deploy), em outra aba — assim quem
+já importou arquivos não perde o trabalho.
+
+- **12 seções com sumário fixo**: importação, OCR de PDF escaneado, IA de layouts, revisar/exportar,
+  conciliador de clientes/fornecedores, memória e nuvem, conector LLM, painel do administrador, atalhos e
+  acessibilidade, limitações conhecidas, solução de problemas e **Sobre**. O item da seção visível fica
+  destacado no sumário (`IntersectionObserver`), e a página é legível **sem JavaScript**.
+- **Sem vínculo com o GitHub**: nenhum link para repositório, wiki ou página externa. O manual é estático,
+  servido com o app, e usa o mesmo CSS.
+- **Bloco Sobre** com o nome do produto (*Conversor — Conciliação Financeira*), a **versão** (a mesma do
+  `APP_VERSION`, injetada por `src/manual.js`), o autor **Ademir Varjão**, o **ano** e o crédito de
+  copyright. O ano acompanha o relógio do computador; sem JS, o HTML já traz `2026`.
+- **Acesso também pelo rodapé** de `index.html` e `conciliador.html` (*Manual do usuário · Sobre o
+  Conversor*), além do novo item **Sobre o Conversor** no menu da engrenagem.
+
 ### Layout do painel (v1.27.0 · corrigido na v1.27.1)
 - **O cartão é uma grade, não uma coluna flex** (v1.27.1): com `display: grid` e
   `grid-template-rows: auto auto minmax(0, 1fr) auto`, cabeçalho, abas e rodapé ficam na **altura natural**
@@ -534,12 +551,14 @@ O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e
 conversor/
 ├── index.html                    # Conciliação unificada (HTML semântico + ARIA)
 ├── conciliador.html              # Página do conciliador de clientes/fornecedores
+├── manual.html                   # Manual do usuário + bloco Sobre (versão, autor, ano)
 ├── package.json                  # Scripts de dev/teste (sem dependências)
 ├── scripts/serve.mjs             # Servidor estático de desenvolvimento
 ├── src/
 │   ├── app.js                    # Controlador de UI, upload, filtros, modal
 │   ├── parsers.js                # PDF (extração + geometria), OCR e XLSX
 │   ├── ocr.js                    # OCR offline de PDFs digitalizados (Tesseract.js)
+│   ├── manual.js                 # Manual: versão/ano do "Sobre" e sumário ativo
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
 │   ├── seed-profiles.js          # Perfis de fábrica (extratos Itaú e Bradesco)
 │   ├── training-coach.js         # Treinador automático (diagnóstico + conferência de saldo)

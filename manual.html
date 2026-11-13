@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual do Conversor — Conciliação Financeira</title>
+  <meta
+    name="description"
+    content="Manual do Conversor: como importar extratos .pdf e .xlsx, ler PDFs escaneados com OCR, ensinar layouts à IA, conciliar clientes e fornecedores, guardar a memória na nuvem e exportar .xlsx, .pdf e .csv. Tudo no navegador."
+  />
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#0f2744" />
+  <link
+    rel="icon"
+    type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E"
+  />
+  <link rel="stylesheet" href="./src/styles.css?v=1.30.0" />
+</head>
+<body class="manual-page">
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <a class="brand-icon brand-back" href="./index.html" aria-label="Abrir o Conversor" title="Abrir o Conversor">
+          <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect width="36" height="36" rx="9" fill="#0F2744" />
+            <path d="M9 11.5H27M9 18H27M9 24.5H19" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="25.5" cy="24.5" r="3.5" fill="#10B981" />
+          </svg>
+        </a>
+        <div>
+          <h1 class="brand-title">Manual do Conversor</h1>
+          <p class="brand-sub">Guia completo, limitações e créditos</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <a class="btn btn-sm btn-secondary manual-top-link" href="./index.html">Abrir o Conversor</a>
+        <a class="btn btn-sm btn-ghost-dark manual-top-link" href="./conciliador.html">Conciliador</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="conteudo" class="container main-content manual-main">
+    <section class="card manual-hero" aria-labelledby="manual-hero-title">
+      <span class="step-tag">MANUAL DO USUÁRIO</span>
+      <h2 id="manual-hero-title">Do arquivo do banco ao relatório pronto — sem instalar nada</h2>
+      <p>
+        O <strong>Conversor</strong> lê extratos bancários e planilhas de pagamentos/recebimentos, padroniza tudo em
+        <code>data | valor | histórico</code>, aprende o layout de cada banco e exporta em <code>.xlsx</code>,
+        <code>.pdf</code> ou <code>.csv</code>. A conciliação de clientes e fornecedores fica em uma página própria,
+        ligada pelo ícone da marca.
+      </p>
+
+      <ol class="manual-steps">
+        <li>
+          <strong>1. Importe</strong>
+          <span>Arraste os arquivos <code>.pdf</code> ou <code>.xlsx</code> (vários de uma vez, se quiser).</span>
+        </li>
+        <li>
+          <strong>2. Confira</strong>
+          <span>A IA sugere o papel de cada coluna; ajuste no <em>Passo 2</em> se precisar.</span>
+        </li>
+        <li>
+          <strong>3. Exporte</strong>
+          <span>Marque as linhas que quiser (ou nenhuma, para exportar tudo) e baixe o relatório.</span>
+        </li>
+      </ol>
+
+      <p class="manual-privacy">
+        <strong>Privacidade:</strong> o arquivo nunca sai do navegador. Tudo — leitura, OCR, IA e exportação — roda na
+        sua máquina. As duas únicas saídas de rede são opcionais e você quem liga: a <a href="#memoria-nuvem">memória
+        na nuvem</a> (pacote cifrado) e o <a href="#llm">conector LLM</a> com a sua chave.
+      </p>
+    </section>
+
+    <div class="manual-layout">
+      <nav class="manual-nav" aria-label="Sumário do manual">
+        <p class="manual-nav-title">Neste manual</p>
+        <ol>
+          <li><a href="#importar">Importar arquivos</a></li>
+          <li><a href="#ocr">PDF escaneado (OCR)</a></li>
+          <li><a href="#ia-layouts">A IA de layouts</a></li>
+          <li><a href="#revisar-exportar">Revisar e exportar</a></li>
+          <li><a href="#conciliador">Conciliação de clientes/fornecedores</a></li>
+          <li><a href="#memoria-nuvem">Memória da IA e nuvem</a></li>
+          <li><a href="#llm">Conector LLM (opcional)</a></li>
+          <li><a href="#painel-admin">Painel do administrador</a></li>
+          <li><a href="#atalhos">Atalhos e acessibilidade</a></li>
+          <li><a href="#limitacoes">Limitações conhecidas</a></li>
+          <li><a href="#problemas">Solução de problemas</a></li>
+          <li><a href="#sobre">Sobre</a></li>
+        </ol>
+      </nav>
+
+      <div class="manual-body">
+        <section id="importar" class="card manual-section" aria-labelledby="importar-title">
+          <h2 id="importar-title">1. Importar arquivos</h2>
+          <p>
+            No <strong>Passo 1</strong> da tela principal, arraste os arquivos para a área pontilhada ou clique em
+            <em>clique para selecionar</em>. Dá para enviar vários de uma vez — por exemplo, o relatório de pagamentos e
+            o de recebimentos do mesmo período. O app detecta arquivos repetidos (mesmo nome e tamanho) e avisa em vez
+            de duplicar.
+          </p>
+
+          <h3>O que ele aceita</h3>
+          <ul>
+            <li><strong>.pdf</strong> — extratos com camada de texto são lidos pelo PDF.js; os digitalizados caem no
+              <a href="#ocr">OCR</a> automaticamente.</li>
+            <li><strong>.xlsx</strong> — lido pelo ExcelJS: várias abas (com seletor), datas nativas preservadas,
+              fórmulas resolvidas, células mescladas sem duplicação, banners e linhas de total removidos.</li>
+          </ul>
+
+          <h3>O que ele entende de cada formato</h3>
+          <ul>
+            <li><strong>Colunas separadas de entrada e saída</strong> (<code>Entrada (+)</code> / <code>Saída (-)</code>,
+              <code>Débito</code> / <code>Crédito</code>, <code>Pagto.</code> / <code>Recbto.</code>): o par é
+              reconhecido pela exclusividade dos dados e o sentido é confirmado pela variação do saldo linha a linha.
+              O resultado é <strong>um lançamento assinado por linha</strong>, não duas colunas somadas.</li>
+            <li><strong>Histórico quebrado em 2–3 linhas</strong>: cada pedaço é ligado ao lançamento a que pertence e
+              remontado na ordem vertical — data e descrição nunca viram uma coluna só.</li>
+            <li><strong>Cabeçalho e rodapé repetidos</strong> em cada página são descartados, inclusive a linha
+              <code>Conta Corrente :</code>, sem contaminar a última linha da página anterior.</li>
+            <li><strong>Colunas de saldo, total e acumulado</strong> são ignoradas no cálculo (e podem ser usadas na
+              conferência do treinador automático).</li>
+          </ul>
+
+          <p class="manual-tip">
+            <strong>Dica:</strong> o formato mais confiável é o PDF exportado direto do internet banking. Foto de tela,
+            digitalização torta e planilha com layout muito atípico podem precisar de ajuste manual — e é justamente
+            esse ajuste que a IA aprende.
+          </p>
+        </section>
+
+        <section id="ocr" class="card manual-section" aria-labelledby="ocr-title">
+          <h2 id="ocr-title">2. PDF escaneado (OCR)</h2>
+          <p>
+            Quando o PDF é só imagem (foto do caixa, digitalização, “print” salvo em PDF), ele não tem camada de texto.
+            Nesse caso o Conversor rasteriza as páginas e lê com o <strong>Tesseract.js</strong> em português — tudo
+            dentro do navegador, sem enviar nada para servidor nenhum e sem chave.
+          </p>
+          <ul>
+            <li>O progresso aparece na tela: <em>“PDF escaneado: aplicando OCR em arquivo.pdf — página 1 de 3…”</em>.</li>
+            <li>A leitura passa pelas <strong>mesmas regras de colunas</strong> do PDF normal, então o resultado sai no
+              mesmo formato.</li>
+            <li>Dígitos trocados pelo OCR (<code>O</code>↔<code>0</code>, <code>I</code>↔<code>1</code>,
+              <code>S</code>↔<code>5</code>, <code>B</code>↔<code>8</code>) são corrigidos <strong>só em tokens que já
+              têm número</strong>; palavras como <code>SALDO</code> continuam palavras.</li>
+            <li>Data com dia impossível (por exemplo <code>63/01/2026</code>) é corrigida quando existe
+              <strong>uma única</strong> troca plausível — o app nunca “inventa” data.</li>
+            <li>O aviso de importação mostra a <strong>confiança</strong> do reconhecimento. Acima de 90% é sinal de boa
+              leitura; abaixo de 70%, confira os valores com atenção.</li>
+          </ul>
+          <p class="manual-tip">
+            <strong>Para melhorar a leitura:</strong> digitalize com pelo menos <strong>200 dpi</strong>, com a página
+            reta e sem sombra. Se o banco oferecer, o <code>.xlsx</code>/<code>.csv</code> do internet banking é sempre
+            mais fiel que a imagem.
+          </p>
+          <p class="manual-note">
+            O idioma do OCR (<code>por.traineddata</code>, ~1,4 MB) é carregado do próprio site na primeira leitura e
+            fica em cache no navegador — depois disso o OCR funciona até sem rede.
+          </p>
+        </section>
+
+        <section id="ia-layouts" class="card manual-section" aria-labelledby="ia-layouts-title">
+          <h2 id="ia-layouts-title">3. A IA de layouts</h2>
+          <p>
+            A IA <strong>não manda seu arquivo para lugar nenhum</strong>: ela analisa os cabeçalhos e uma amostra das
+            linhas aqui mesmo, combinando dicionário financeiro em português, estatística das colunas e o catálogo de
+            bancos embutido (Itaú, Bradesco, Sicoob, Santander e outros).
+          </p>
+
+          <h3>O que aparece</h3>
+          <ul>
+            <li><strong>Coluna detectada → função</strong>: data, valor, histórico, débito, crédito, saldo ou
+              “ignorar”. Cada linha mostra o motivo da escolha (evidência semântica, padrão de saldo, etc.).</li>
+            <li><strong>Diagnóstico e conferência</strong>: o treinador automático aponta colunas duvidosas, linhas sem
+              data/valor e se o saldo fecha. A barra mostra a nota das conferências.</li>
+            <li><strong>Nome do layout</strong> e <strong>sinal padrão</strong>: como o valor deve ser interpretado
+              quando o extrato não traz sinal.</li>
+          </ul>
+
+          <h3>Como ensinar</h3>
+          <ol>
+            <li>Ajuste as funções que estiverem erradas no <em>Passo 2</em>.</li>
+            <li>Dê um nome ao layout (ex.: <em>Itaú — Recebimentos</em>).</li>
+            <li>Clique em <strong>Treinar IA e Aplicar Layout</strong>. O app memoriza o mapeamento, o vocabulário e a
+              assinatura do layout.</li>
+          </ol>
+          <p>
+            Na próxima vez que um arquivo com as mesmas colunas aparecer, ele já entra mapeado — inclusive quando o
+            banco renomeia uma coluna. Há um catálogo público de bancos que se atualiza sozinho ao abrir o app; ele só
+            <strong>baixa</strong> layouts, nunca envia o seu arquivo.
+          </p>
+        </section>
+
+        <section id="revisar-exportar" class="card manual-section" aria-labelledby="revisar-exportar-title">
+          <h2 id="revisar-exportar-title">4. Revisar e exportar</h2>
+          <p>
+            Abaixo do mapeamento fica a <strong>planilha consolidada</strong>, com todos os arquivos em ordem de data.
+            Cada linha pode ser editada: o histórico é um campo de texto e o valor pode ser corrigido antes de exportar.
+          </p>
+          <ul>
+            <li><strong>Filtros e busca</strong> por data, valor ou histórico, com paginação ajustável (50, 100, 300,
+              1.000 linhas ou todas).</li>
+            <li><strong>Seleção</strong>: marque linhas específicas ou use o cabeçalho para marcar tudo o que está
+              filtrado. A seleção sobrevive à troca de página.</li>
+            <li><strong>Regra de exportação</strong>: com seleção, exporta <strong>só o que está marcado</strong>; sem
+              seleção, exporta <strong>tudo</strong>. A dica ao lado dos botões diz exatamente o que vai sair.</li>
+            <li><strong>Linhas excluídas</strong> podem ser restauradas — nada é apagado de vez sem confirmação.</li>
+          </ul>
+
+          <h3>Formatos</h3>
+          <table class="manual-table">
+            <thead>
+              <tr><th>Formato</th><th>Para quê</th><th>Como sai</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>.xlsx</code></td>
+                <td>Excel e importação contábil</td>
+                <td>Aba única <em>Conciliacao</em>, cabeçalho congelado, filtro automático, data tipada, valor numérico
+                  e histórico como texto.</td>
+              </tr>
+              <tr>
+                <td><code>.pdf</code></td>
+                <td>Conferência e arquivo</td>
+                <td>A4 paisagem, cabeçalho em todas as páginas, totalizadores, negativos destacados e rodapé com
+                  data/hora e numeração.</td>
+              </tr>
+              <tr>
+                <td><code>.csv</code></td>
+                <td>Sistemas que pedem texto</td>
+                <td>Separador <code>;</code> e valores no padrão brasileiro.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="manual-note">
+            O <strong>valor</strong> sai sempre no padrão do sistema contábil: sem símbolo de moeda e
+            <strong>sem separador de milhar</strong> — <code>1234,56</code> e <code>-1234,56</code>. Nos cartões de
+            resumo, os totais aparecem com milhar (<code>1.234.567,89</code>) só para leitura.
+          </p>
+        </section>
+
+        <section id="conciliador" class="card manual-section" aria-labelledby="conciliador-title">
+          <h2 id="conciliador-title">5. Conciliação de clientes e fornecedores</h2>
+          <p>
+            O ícone da marca, na barra superior, abre o <strong>Conciliador</strong> — uma página própria para cruzar o
+            cadastro do Questor com o extrato bancário. As duas telas compartilham a mesma memória da IA.
+          </p>
+
+          <h3>Passo a passo</h3>
+          <ol>
+            <li>Carregue um ou mais <strong>cadastros</strong> (<code>Questor_Exportacao</code> em <code>.pdf</code> ou
+              <code>.xlsx</code>) com <code>contactb</code>, <code>nomepessoa</code> e <code>natureza</code>.</li>
+            <li>Carregue um ou mais <strong>extratos</strong> com data, valor assinado e histórico.</li>
+            <li>Clique em <strong>Conciliar agora</strong>.</li>
+            <li>Confira os cartões (lançamentos, débitos, créditos, valor total), revise o que ficou como
+              <em>para revisar</em> e exporte.</li>
+          </ol>
+
+          <h3>Como o vínculo é decidido</h3>
+          <ul>
+            <li><strong>Pagamento</strong> (saída de caixa) casa com fornecedor de natureza <strong>credora</strong> e
+              vai para a coluna <strong>débito</strong>.</li>
+            <li><strong>Recebimento</strong> (entrada) casa com cliente de natureza <strong>devedora</strong> e vai para
+              <strong>crédito</strong>.</li>
+            <li>O casamento ignora acentos, sufixos (<code>LTDA</code>, <code>S/A</code>, <code>EIRELI</code>…),
+              conectivos, plural e um erro de digitação em palavras longas. Empate vira <strong>revisar</strong>, nunca
+              chute.</li>
+            <li>CPF/CNPJ no histórico vale como identidade: quando bate com o cadastro, o vínculo é aceito na hora.</li>
+          </ul>
+
+          <h3>Corrigir e ensinar</h3>
+          <p>
+            Cada linha tem <strong>Vincular/Trocar</strong>, que sugere candidatos com percentual e permite buscar por
+            nome, código ou documento. O vínculo escolhido é memorizado: na rodada seguinte o mesmo histórico já vem
+            conciliado.
+          </p>
+          <p>
+            As colunas <strong>débito</strong> e <strong>crédito</strong> aceitam digitação <strong>só onde estão
+            vazias</strong> — a conta que veio do cadastro do contato nunca é sobrescrita. Há campos de lote para
+            preencher débitos vazios e créditos vazios de uma vez, e o botão <strong>Aplicar sugeridas</strong> usa o que
+            a IA já aprendeu.
+          </p>
+          <p class="manual-note">
+            Os cartões do conciliador usam o mesmo formato dos resumos do Conversor: <code>3.023.524,00</code>. A tabela
+            e as exportações seguem sem milhar, como o sistema contábil espera.
+          </p>
+        </section>
+
+        <section id="memoria-nuvem" class="card manual-section" aria-labelledby="memoria-nuvem-title">
+          <h2 id="memoria-nuvem-title">6. Memória da IA e nuvem</h2>
+          <p>
+            Tudo o que a IA aprende — layouts, vocabulário, apelidos de histórico, contas memorizadas e leituras de OCR —
+            fica no <code>localStorage</code> deste navegador. Para levar isso a outro computador existem dois caminhos.
+          </p>
+
+          <h3>Backup em arquivo</h3>
+          <p>
+            No menu <strong>Memória da IA</strong>, use <strong>Exportar memória (.json)</strong> e
+            <strong>Importar memória (.json)</strong>. O arquivo sai <strong>sem a chave do LLM</strong>, então pode ser
+            guardado ou versionado sem risco.
+          </p>
+
+          <h3>Chave de acesso (nuvem)</h3>
+          <ol>
+            <li>Abra <strong>Criar chave agora</strong>, no topo, ou o menu <em>Nuvem e conta</em>.</li>
+            <li>Guarde a chave de 8 caracteres. É com ela que você abre seus modelos em outro computador.</li>
+            <li>Pronto: a sincronização é automática — nada de botão de enviar/baixar.</li>
+          </ol>
+          <ul>
+            <li><strong>O que sobe:</strong> perfis de layout, assinaturas, vocabulário, contatos/apelidos, contas
+              memorizadas e o registro das leituras de OCR (arquivo, páginas, confiança, colunas e quantidade de
+              lançamentos).</li>
+            <li><strong>Como sobe:</strong> cifrado (AES-GCM com chave derivada da sua chave de acesso). O banco guarda
+              apenas o <strong>slot + pacote cifrado</strong>; o conteúdo não é legível por quem opera o banco.</li>
+            <li><strong>O que nunca sobe:</strong> a chave do LLM, os arquivos que você importou e os lançamentos.</li>
+            <li><strong>Conflito:</strong> os dois lados são somados. Em conflito vence o mais recente; nada é apagado.</li>
+            <li><strong>Sem chave:</strong> tudo continua funcionando só neste navegador, sem nenhuma requisição.</li>
+          </ul>
+          <p class="manual-note">
+            Quem tiver a chave consegue abrir seus modelos — trate como senha. Se precisar cortar o acesso, o
+            administrador pode bloquear ou excluir o cofre no painel.
+          </p>
+        </section>
+
+        <section id="llm" class="card manual-section" aria-labelledby="llm-title">
+          <h2 id="llm-title">7. Conector LLM (opcional)</h2>
+          <p>
+            O Conversor resolve layouts sozinho, com a IA local. O conector LLM é um <strong>apoio extra</strong> para
+            arquivos muito fora do padrão: ele pede a um modelo de linguagem uma sugestão de mapeamento — e você continua
+            revisando antes de aplicar.
+          </p>
+
+          <h3>Provedores com plano gratuito</h3>
+          <table class="manual-table">
+            <thead>
+              <tr><th>Provedor</th><th>Modelo padrão</th><th>Limite do plano gratuito</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Groq</td><td><code>openai/gpt-oss-120b</code></td><td>~30 pedidos/min e 1.000/dia</td></tr>
+              <tr><td>OpenRouter</td><td><code>openai/gpt-oss-120b:free</code></td><td>50 pedidos/dia (1.000 após US$ 10)</td></tr>
+              <tr><td>Google Gemini</td><td><code>gemini-2.5-flash</code></td><td>cota diária do AI Studio</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Como configurar</h3>
+          <ol>
+            <li>No menu <strong>Backup e chave do LLM</strong>, escolha o provedor.</li>
+            <li>Cole a chave (o campo mostra o prefixo esperado).</li>
+            <li>Se quiser, troque o modelo no campo <strong>Modelo (opcional)</strong> — útil quando um modelo gratuito
+              muda de nome.</li>
+            <li>Salve. No treinador aparece o botão de analisar com o LLM.</li>
+          </ol>
+          <ul>
+            <li>A chave fica <strong>só neste navegador</strong> e não entra no backup nem na nuvem.</li>
+            <li>Ao clicar para analisar, o <strong>cabeçalho e uma pequena amostra de linhas</strong> vão para o
+              provedor escolhido. Se isso não for aceitável, deixe o conector desativado — a IA local não envia nada.</li>
+            <li>Cota esgotada (<em>erro 429</em>) aparece com uma mensagem clara: aguarde, troque de provedor ou siga
+              com a IA local.</li>
+          </ul>
+        </section>
+
+        <section id="painel-admin" class="card manual-section" aria-labelledby="painel-admin-title">
+          <h2 id="painel-admin-title">8. Painel do administrador</h2>
+          <p>
+            Na engrenagem, a opção <strong>Painel do administrador</strong> pede a senha administrativa. Ele reúne, em
+            seis abas:
+          </p>
+          <ul>
+            <li><strong>Visão geral</strong> — tempo desta sessão, tempo total, média por sessão, gráfico dos últimos 14
+              dias, conciliações e últimos eventos.</li>
+            <li><strong>Uso</strong> — contadores de cadastros, extratos, conciliações, vínculos, exportações, contas
+              digitadas, sugestões aceitas, envios/sincronizações e erros.</li>
+            <li><strong>Códigos de acesso</strong> — ver, bloquear e excluir cofres do banco.</li>
+            <li><strong>Memória da IA</strong> — o que foi aprendido neste navegador e o espaço usado.</li>
+            <li><strong>Logs</strong> — até 300 eventos, com filtro por tipo.</li>
+            <li><strong>Dispositivo e conta</strong> — navegador, sistema, tela, fuso e o estado da chave.</li>
+          </ul>
+          <p>
+            O painel se atualiza sozinho enquanto está aberto (relógios de segundo em segundo, redesenho a cada 10 s) e
+            para quando você fecha. Sai um relatório <code>.json</code> completo — com a chave de acesso mascarada e
+            <strong>nunca</strong> a chave do LLM — e os logs em <code>.csv</code>.
+          </p>
+          <p class="manual-note">
+            O tempo só conta com a aba visível. A liberação do painel vale por 1 hora nesta aba do navegador; a senha é
+            conferida no seu computador.
+          </p>
+        </section>
+
+        <section id="atalhos" class="card manual-section" aria-labelledby="atalhos-title">
+          <h2 id="atalhos-title">9. Atalhos e acessibilidade</h2>
+          <ul>
+            <li><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> percorrem a tela em ordem lógica; o foco é sempre
+              visível.</li>
+            <li><kbd>Esc</kbd> fecha o menu da engrenagem, o modal da memória e o painel de vínculo.</li>
+            <li>O menu da engrenagem abre com <kbd>Enter</kbd> e navega com as setas.</li>
+            <li>O link <em>Pular para o conteúdo</em> aparece no primeiro <kbd>Tab</kbd>.</li>
+            <li>Gráficos e animações respeitam a preferência <em>reduzir movimento</em> do sistema.</li>
+            <li>Leitores de tela acompanham o processamento e os avisos por regiões <code>aria-live</code>.</li>
+          </ul>
+        </section>
+
+        <section id="limitacoes" class="card manual-section" aria-labelledby="limitacoes-title">
+          <h2 id="limitacoes-title">10. Limitações conhecidas</h2>
+          <ul>
+            <li>PDF escaneado é lido por OCR: funciona bem a partir de 200 dpi, mas página torta, manchada ou com fonte
+              decorativa pode errar um dígito. Confira a confiança mostrada no aviso.</li>
+            <li>Planilhas com layout realmente atípico podem exigir ajuste manual no <em>Passo 2</em> — é esse ajuste
+              que alimenta o aprendizado.</li>
+            <li>Sem chave de acesso, a memória vale só para este navegador. Com chave, ela viaja cifrada; apagar os dados
+              do site continua apagando o que está aqui.</li>
+            <li>Os provedores de LLM têm cotas gratuitas finitas e o CORS é de cada provedor. Quando a cota acaba, o
+              Conversor segue 100% offline com a IA local.</li>
+            <li>O OCR carrega o idioma (~1,4 MB) na primeira leitura; depois fica em cache no navegador.</li>
+            <li>Arquivos acima de 60 MB não são aceitos, e a leitura de OCR processa até 40 páginas por arquivo.</li>
+          </ul>
+        </section>
+
+        <section id="problemas" class="card manual-section" aria-labelledby="problemas-title">
+          <h2 id="problemas-title">11. Solução de problemas</h2>
+          <div class="manual-table-scroll">
+            <table class="manual-table">
+              <thead>
+                <tr><th>Sintoma</th><th>Causa provável</th><th>O que fazer</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>A página abre sem estilo</td>
+                  <td>Versão antiga em cache</td>
+                  <td>Recarregue com <kbd>Ctrl</kbd>+<kbd>F5</kbd> (ou <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>).</td>
+                </tr>
+                <tr>
+                  <td>“Nenhum texto extraível”</td>
+                  <td>PDF só imagem e OCR não conseguiu ler</td>
+                  <td>Digitalize de novo com 200 dpi ou use o <code>.xlsx</code>/<code>.csv</code> do banco.</td>
+                </tr>
+                <tr>
+                  <td>Valores de entrada e saída com o mesmo sinal</td>
+                  <td>As duas colunas receberam a mesma função</td>
+                  <td>Marque uma como <em>Valor Recebido / Crédito (+)</em> e a outra como <em>Valor Pago / Débito (-)</em>.</td>
+                </tr>
+                <tr>
+                  <td>Muitas linhas ignoradas</td>
+                  <td>Linhas sem data ou sem valor na coluna mapeada</td>
+                  <td>Ajuste o mapeamento no <em>Passo 2</em> e treine a IA.</td>
+                </tr>
+                <tr>
+                  <td>“Cota gratuita esgotada (429)”</td>
+                  <td>Limite diário do provedor de LLM</td>
+                  <td>Aguarde, troque de provedor ou desative o conector.</td>
+                </tr>
+                <tr>
+                  <td>Layouts não aparecem no outro computador</td>
+                  <td>Chave de acesso diferente ou não informada</td>
+                  <td>Informe a mesma chave em <em>Nuvem e conta</em> e aguarde a sincronização automática.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="sobre" class="card manual-section manual-about" aria-labelledby="sobre-title">
+          <h2 id="sobre-title">Sobre</h2>
+          <div class="about-card">
+            <div class="about-mark" aria-hidden="true">
+              <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="36" height="36" rx="9" fill="#0F2744" />
+                <path d="M9 11.5H27M9 18H27M9 24.5H19" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" />
+                <circle cx="25.5" cy="24.5" r="3.5" fill="#10B981" />
+              </svg>
+            </div>
+            <div class="about-text">
+              <p class="about-name">Conversor — Conciliação Financeira</p>
+              <p class="about-line">
+                Versão <strong id="manual-version" class="about-version">v1.30.0</strong>
+              </p>
+              <p class="about-line">
+                Autor: <strong>Ademir Varjão</strong>
+              </p>
+              <p class="about-line">
+                Ano: <strong id="manual-year">2026</strong>
+              </p>
+              <p id="manual-copyright" class="about-line about-license">
+                © 2026 Ademir Varjão. Todos os direitos reservados.
+              </p>
+            </div>
+          </div>
+          <p>
+            Aplicação web <strong>100% client-side</strong>, sem instalação e sem servidor próprio: HTML, CSS e módulos
+            JavaScript nativos, com as bibliotecas vendorizadas no projeto (PDF.js, ExcelJS, jsPDF e Tesseract.js) — sem
+            CDN e sem etapa de build. A sincronização opcional usa o Supabase apenas como cofre de pacotes cifrados.
+          </p>
+          <p class="manual-note">
+            Este manual faz parte do próprio aplicativo: é servido junto com ele, sem depender de páginas externas.
+          </p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container site-footer-inner">
+      <p>
+        Conversor <span id="app-version" class="footer-version">v1.30.0</span> — os arquivos nunca saem do navegador.
+      </p>
+      <p class="footer-privacy">
+        Manual do usuário incluído no app. Sem cookies de rastreamento: suas preferências e os layouts aprendidos ficam
+        no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.
+      </p>
+    </div>
+  </footer>
+
+  <script type="module" src="./src/manual.js?v=1.30.0"></script>
+</body>
+</html>
