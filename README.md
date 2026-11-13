@@ -268,16 +268,28 @@ A migração nova é
 banco ainda não a tiver, a própria aba avisa e pede o **SQL de instalação** da aba **Nuvem** (o mesmo texto de
 [`src/sql-setup.js`](src/sql-setup.js)) — que agora já inclui esse trecho.
 
-### Layout do painel (v1.27.0)
+### Layout do painel (v1.27.0 · corrigido na v1.27.1)
+- **O cartão é uma grade, não uma coluna flex** (v1.27.1): com `display: grid` e
+  `grid-template-rows: auto auto minmax(0, 1fr) auto`, cabeçalho, abas e rodapé ficam na **altura natural**
+  e só a linha do meio rola. Era o flex que encolhia as abas — elas chegaram a ficar com ~12 px de altura e o
+  texto aparecia cortado, coberto pelo corpo do painel.
 - **Abas em uma linha só**: as seis abas não quebram mais em duas fileiras (o que desalinhava o cabeçalho);
-  em tela estreita elas **rolam na horizontal**, com o mesmo comportamento de teclado (`←` `→` `Home` `End`).
-- **Nada mais cortado**: o corpo do painel agora encolhe de verdade (`min-height: 0`) e rola dentro do cartão —
+  em tela estreita elas **rolam na horizontal**, com o mesmo comportamento de teclado (`←` `→` `Home` `End`),
+  piso de altura de 42 px e itens que não encolhem (`flex: 0 0 auto`).
+- **Nada mais cortado**: o corpo do painel encolhe de verdade (`min-height: 0`) e rola dentro do cartão —
   antes o conteúdo longo empurrava a barra de ações para fora e os botões sumiam.
 - **Grade fluida**: `auto-fit` no lugar de 4 colunas fixas — 4 no desktop, 2 no tablet e 1 no celular, sem
   cartão espremido.
 - **Gráfico dos 14 dias**: a barra cresce dentro da coluna e o rótulo fica fora da área medida (antes a barra
   em `%` + o rótulo estouravam o gráfico); no celular os rótulos `dd/mm` saem e ficam no `title`/`aria-label`.
+  A coluna não tem mais fundo: a trilha cinza fazia os dias **sem uso** parecerem barra.
 - **Barra de ações no celular**: dois botões por linha, com **Limpar histórico** ocupando a linha inteira.
+- **Avisos dentro do painel** (v1.27.1): com o painel aberto, o recado da ação (bloqueou, excluiu, atualizou)
+  aparece numa faixa no topo do conteúdo, em vez de um toast flutuante — que caía em cima da barra de ações.
+- **Respiro entre as seções**: o título da seção não cola mais na grade de cartões anterior.
+- **CSS e módulo com a versão na URL** (`styles.css?v=1.27.1`): sem isso o navegador podia servir a folha antiga
+  por até 10 minutos depois do deploy, e a correção de layout parecia não ter entrado. O teste
+  `test/ui-contract.test.mjs` cobra que o `?v=` acompanhe o `APP_VERSION`.
 
 ### Nuvem dos modelos aprendidos (v1.5.0)
 Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**:

@@ -457,6 +457,12 @@ function deviceTab(ctx) {
  * @param {number} ctx.sessionStartedAt
  * @param {number} [ctx.now]
  */
+function flashMarkup(flash) {
+  if (!flash?.text) return '';
+  const kind = ['ok', 'warn', 'error'].includes(flash.kind) ? flash.kind : 'ok';
+  return `<p class="cp-admin-flash is-${kind}" role="status">${escapeHtml(flash.text)}</p>`;
+}
+
 export function renderAdminPanel(ctx) {
   const now = ctx.now || Date.now();
   const summary = usageSummary(ctx.usage, now);
@@ -472,20 +478,24 @@ export function renderAdminPanel(ctx) {
     logFilter: ctx.logFilter || 'all',
   };
 
-  switch (ctx.tab) {
-    case 'usage':
-      return usageTab(full);
-    case 'vaults':
-      return vaultsTab(full);
-    case 'memory':
-      return memoryTab(full);
-    case 'logs':
-      return logsTab(full);
-    case 'device':
-      return deviceTab(full);
-    default:
-      return overviewTab(full);
-  }
+  const tab = (() => {
+    switch (ctx.tab) {
+      case 'usage':
+        return usageTab(full);
+      case 'vaults':
+        return vaultsTab(full);
+      case 'memory':
+        return memoryTab(full);
+      case 'logs':
+        return logsTab(full);
+      case 'device':
+        return deviceTab(full);
+      default:
+        return overviewTab(full);
+    }
+  })();
+
+  return `${flashMarkup(full.flash)}${tab}`;
 }
 
 /** Cabeçalho do painel: resume o estado em uma linha. */

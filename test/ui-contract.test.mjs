@@ -17,6 +17,7 @@ import { APP_VERSION, REQUIRED_ELEMENT_IDS } from '../src/ui-contract.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const html = await readFile(path.join(ROOT, 'index.html'), 'utf8');
+const conciliador = await readFile(path.join(ROOT, 'conciliador.html'), 'utf8');
 const htmlIds = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
 
 describe('index.html x controlador', () => {
@@ -37,7 +38,11 @@ describe('index.html x controlador', () => {
       './vendor/jspdf/jspdf.plugin.autotable.min.js',
       './src/app.js',
     ]) {
-      assert.ok(html.includes(`src="${source}"`), `index.html não referencia ${source}`);
+      // A URL do módulo pode ir com a versão (`?v=1.2.3`) para furar o cache.
+      assert.ok(
+        html.includes(`src="${source}"`) || html.includes(`src="${source}?v=`),
+        `index.html não referencia ${source}`
+      );
     }
     assert.ok(html.includes('type="module"'), 'app.js precisa ser carregado como módulo');
   });
@@ -143,7 +148,9 @@ describe('uso do DOM pelo controlador', () => {
 
 describe('arquivos referenciados', () => {
   it('existe cada arquivo vendorizado do HTML', async () => {
-    const sources = [...html.matchAll(/src="\.\/([^"]+)"/g)].map((match) => match[1]);
+    const sources = [...html.matchAll(/src="\.\/([^"]+)"/g)]
+      .map((match) => match[1])
+      .map((source) => source.split('?')[0]); // `?v=` é cache busting, não faz parte do arquivo
     for (const source of sources) {
       const info = await stat(path.join(ROOT, source));
       assert.ok(info.isFile(), `${source} não existe`);
@@ -168,6 +175,17 @@ describe('arquivos referenciados', () => {
 
     const footerVersion = html.match(/id="app-version"[^>]*>v([\d.]+)</)?.[1];
     assert.equal(footerVersion, APP_VERSION);
+
+    // O CSS e o módulo de entrada vão com a versão na URL: sem isso o navegador
+    // pode servir a folha antiga por até 10 min depois do deploy (foi o que fez
+    // a correção de layout parecer que não tinha entrado).
+    for (const page of [html, conciliador]) {
+      const assets = [
+        page.match(/href="\.\/src\/styles\.css\?v=([\d.]+)"/)?.[1],
+        page.match(/src="\.\/src\/(?:app|counterparty-page)\.js\?v=([\d.]+)"/)?.[1],
+      ];
+      assert.deepEqual(assets, [APP_VERSION, APP_VERSION], 'as URLs de CSS/JS precisam da versão atual');
+    }
   });
 
   it('não depende de nenhum recurso externo (funciona offline)', () => {

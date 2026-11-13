@@ -47,9 +47,9 @@ describe('página do conciliador', () => {
     ]) {
       assert.ok(page.includes(`src="${source}"`), `falta ${source}`);
     }
-    assert.ok(page.includes('src="./src/counterparty-page.js"'));
+    assert.match(page, /src="\.\/src\/counterparty-page\.js(\?v=[\d.]+)?"/);
     assert.ok(page.includes('type="module"'));
-    assert.ok(page.includes('href="./src/styles.css"'));
+    assert.match(page, /href="\.\/src\/styles\.css(\?v=[\d.]+)?"/);
   });
 
   it('tem os controles que o módulo procura', () => {

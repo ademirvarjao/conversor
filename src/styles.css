@@ -1671,6 +1671,19 @@ body {
   flex-direction: column;
   gap: 8px;
   z-index: 200;
+  /* O aviso nunca rouba o clique de quem está embaixo. */
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+}
+
+/* Painel do administrador aberto: os avisos aparecem **dentro** do painel
+   (`.cp-admin-flash`), então o toast flutuante sai de cena — ele caía em cima
+   dos botões do rodapé. */
+body:has(#cp-admin-panel:not(.hidden)) .toast-container {
+  display: none;
 }
 
 .toast {
@@ -2732,10 +2745,15 @@ body {
 /*                    Painel do administrador (só com a senha)                */
 /* -------------------------------------------------------------------------- */
 
+/* O cartão do painel é montado em GRADE, não em coluna flex: no flex os itens
+   encolhem para caber (as abas chegaram a ficar com 12 px de altura e o texto
+   era coberto pelo corpo). Na grade, cabeçalho/abas/rodapé são `auto` — altura
+   natural, sem aperto — e só a linha do meio é `minmax(0, 1fr)`, que rola. */
 .cp-admin-panel-card {
   max-width: 980px;
-  /* O cartão é uma coluna flex com altura máxima: sem isto, o corpo (que rola)
-     empurra a barra de ações para fora e os botões são cortados. */
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -2743,10 +2761,13 @@ body {
 /* Abas: uma linha só, com rolagem lateral quando não couberem. Antes elas
    quebravam em duas fileiras e desalinhavam o cabeçalho. */
 .cp-admin-tabs {
+  display: flex;
   flex-wrap: nowrap;
+  align-items: stretch;
   gap: 2px;
   padding: 0 14px;
   margin-bottom: 0;
+  min-height: 42px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -2758,6 +2779,7 @@ body {
   flex: 0 0 auto;
   white-space: nowrap;
   padding: 9px 12px;
+  line-height: 1.3;
   scroll-snap-align: start;
   border-radius: 8px 8px 0 0;
 }
@@ -2772,12 +2794,13 @@ body {
   outline-offset: -2px;
 }
 
-/* Área que rola: `min-height: 0` é o que permite o flex diminuir o corpo. */
+/* A única linha que rola. `min-height: 0` libera o item da grade a encolher
+   abaixo do conteúdo — é o que mantém cabeçalho, abas e rodapé no lugar. */
 #cp-admin-body {
   padding-top: 14px;
-  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
 }
 
@@ -2801,6 +2824,12 @@ body {
   margin-bottom: 18px;
 }
 
+/* Respiro entre o bloco anterior (cartões, resumo, aviso) e o título da seção:
+   antes o "ATIVIDADE DOS ÚLTIMOS 14 DIAS" colava na grade de cartões. */
+.cp-admin-section:not(:first-child) {
+  margin-top: 18px;
+}
+
 .cp-admin-section h3 {
   margin: 0 0 2px;
   font-size: 0.86rem;
@@ -2820,7 +2849,7 @@ body {
    depender de medidas fixas (que deixavam os cartões espremidos). */
 .cp-admin-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 168px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 142px), 1fr));
   gap: 8px;
 }
 
@@ -2884,14 +2913,14 @@ body {
 }
 
 /* A coluna medida: a barra cresce dentro dela e o rótulo fica embaixo, fora
-   da altura percentual (antes a barra em % + o rótulo estouravam o gráfico). */
+   da altura percentual (antes a barra em % + o rótulo estouravam o gráfico).
+   Sem fundo na coluna: a trilha cinza fazia os dias sem uso parecerem barra. */
 .cp-admin-bar-col {
   flex: 1 1 auto;
   display: flex;
   align-items: flex-end;
   min-height: 0;
   border-radius: 3px;
-  background: rgba(148, 163, 184, 0.16);
 }
 
 .cp-admin-bar-col i {
@@ -3060,6 +3089,7 @@ body {
 .cp-vault-toolbar .cp-vault-stats {
   flex: 1 1 320px;
   min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr));
 }
 
 .cp-vault-toolbar > .btn {
@@ -3222,6 +3252,7 @@ body {
   #btn-cp-admin-reset {
     grid-column: 1 / -1;
   }
+
 
   .cp-vault-actions {
     flex: 1 1 100%;
@@ -3498,6 +3529,36 @@ body {
 }
 
 /* Resumo da memória dentro do painel + espaçador da barra de ações */
+/* Recado das ações feitas dentro do painel (substitui o toast flutuante). */
+.cp-admin-flash {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.cp-admin-flash.is-ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.cp-admin-flash.is-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.cp-admin-flash.is-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
 .cp-admin-summary {
   display: flex;
   flex-direction: column;

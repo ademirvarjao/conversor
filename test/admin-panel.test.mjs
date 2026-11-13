@@ -213,6 +213,64 @@ describe('painel do administrador: segurança do conteúdo', () => {
   });
 });
 
+describe('painel do administrador: layout do cartão', () => {
+  it('o cartão é uma grade de quatro linhas (cabeçalho, abas, corpo, ações)', () => {
+    const card = styles.slice(styles.indexOf('.cp-admin-panel-card {'));
+    const rule = card.slice(0, card.indexOf('}'));
+    assert.match(rule, /display: grid/, 'grid: no flex as abas encolhiam e ficavam cobertas');
+    assert.match(
+      rule,
+      /grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto/,
+      'só o corpo é 1fr — cabeçalho, abas e rodapé ficam na altura natural'
+    );
+    assert.match(rule, /grid-template-columns:\s*minmax\(0, 1fr\)/);
+  });
+
+  it('as abas não encolhem nem quebram em duas fileiras', () => {
+    const tabs = styles.slice(styles.indexOf('.cp-admin-tabs {'));
+    const rule = tabs.slice(0, tabs.indexOf('}'));
+    assert.match(rule, /flex-wrap: nowrap/);
+    assert.match(rule, /min-height: 42px/, 'piso de altura: o texto não pode ser cortado');
+    assert.match(rule, /overflow-x: auto/);
+    assert.match(tabs.slice(0, tabs.indexOf('#cp-admin-body')), /\.cp-admin-tabs \.mtab \{[^}]*flex: 0 0 auto/);
+  });
+
+  it('a marcação segue a ordem das linhas da grade', () => {
+    const markup = adminPanelMarkup();
+    const order = ['class="modal-header"', 'class="modal-tabs cp-admin-tabs"', 'id="cp-admin-body"', 'class="cp-admin-actions"'];
+    let cursor = -1;
+    for (const token of order) {
+      const position = markup.indexOf(token, cursor + 1);
+      assert.ok(position > cursor, `"${token}" precisa vir na ordem da grade`);
+      cursor = position;
+    }
+  });
+
+  it('o recado da ação aparece dentro do painel, em qualquer aba', () => {
+    for (const tab of ADMIN_TABS.map((entry) => entry.id)) {
+      const body = renderAdminPanel(baseCtx({ tab, flash: { kind: 'ok', text: 'Código bloqueado no banco.' } }));
+      assert.match(body.slice(0, 400), /class="cp-admin-flash is-ok"/, `a aba ${tab} precisa mostrar o recado`);
+      assert.match(body.slice(0, 400), /Código bloqueado no banco\./);
+    }
+    const semRecado = renderAdminPanel(baseCtx());
+    assert.equal(semRecado.includes('cp-admin-flash'), false, 'sem recado, sem faixa');
+  });
+
+  it('o toast flutuante não cobre o painel aberto', () => {
+    assert.match(
+      styles,
+      /body:has\(#cp-admin-panel:not\(\.hidden\)\) \.toast-container \{[^}]*display: none/,
+      'com o painel aberto o aviso é interno; o toast não pode ficar por cima'
+    );
+  });
+
+  it('o gráfico não desenha trilha nos dias sem uso', () => {
+    const barCol = styles.slice(styles.indexOf('.cp-admin-bar-col {'));
+    const rule = barCol.slice(0, barCol.indexOf('}'));
+    assert.equal(/background/.test(rule), false, 'fundo na coluna parecia uma barra em todo dia');
+  });
+});
+
 describe('painel do administrador: porta de entrada universal', () => {
   it('a marcação entrega o painel fechado e com todos os controles', () => {
     const markup = adminPanelMarkup();
