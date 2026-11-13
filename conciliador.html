@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Conciliador de clientes/fornecedores — Conversor</title>
-  <meta name="description" content="Concilie o cadastro de contatos do Questor (contactb, nomepessoa, natureza) com o extrato bancário e exporte data | débito | crédito | valor | histórico em .xlsx, .pdf ou .csv. Tudo no navegador." />
+  <meta name="description" content="Concilie o cadastro de clientes e fornecedores do Questor (contactb, nomepessoa, natureza, CPF/CNPJ) com a conciliação bancária e exporte data | débito | crédito | valor | histórico em .xlsx, .pdf ou .csv. Tudo no navegador." />
   <meta name="color-scheme" content="light" />
   <meta name="theme-color" content="#0f2744" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E" />
@@ -30,7 +30,7 @@
         </a>
         <div>
           <h1 class="brand-title">Conciliador</h1>
-          <p class="brand-sub">Clientes e fornecedores — cadastro Questor × extrato bancário</p>
+          <p class="brand-sub">Clientes e fornecedores — cadastro Questor × conciliação bancária</p>
         </div>
       </div>
 
@@ -60,14 +60,14 @@
       <div class="section-header">
         <div>
           <span class="step-tag">PASSO 1 • ARQUIVOS</span>
-          <h2 id="cp-files-title">Carregue o cadastro e o extrato</h2>
+          <h2 id="cp-files-title">Carregue o cadastro e a conciliação bancária</h2>
         </div>
       </div>
 
     <div class="cp-files">
     <label class="cp-file" for="cp-contacts-input">
       <span class="cp-file-step">1</span>
-      <span class="cp-file-title">Cadastro de contatos</span>
+      <span class="cp-file-title">Cadastro Cliente e Fornecedores</span>
       <span class="cp-file-hint">Um ou mais PDF/.xlsx do Questor (<code>contactb</code>, <code>nomepessoa</code>, <code>natureza</code>) — pode juntar vários cadastros</span>
       <input id="cp-contacts-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-contacts-status" class="cp-file-status">Nenhum arquivo selecionado</span>
@@ -75,7 +75,7 @@
 
     <label class="cp-file" for="cp-ledger-input">
       <span class="cp-file-step">2</span>
-      <span class="cp-file-title">Extrato / conciliação bancária</span>
+      <span class="cp-file-title">Conciliação bancária Conversor</span>
       <span class="cp-file-hint">Um ou mais PDF/.xlsx com data, valor (com sinal) e histórico — pode juntar vários extratos</span>
       <input id="cp-ledger-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-ledger-status" class="cp-file-status">Nenhum arquivo selecionado</span>
@@ -212,6 +212,7 @@
           <button class="pill" data-cp-filter="matched" type="button" aria-pressed="false">Conciliados</button>
           <button class="pill" data-cp-filter="review" type="button" aria-pressed="false">Revisar</button>
           <button class="pill" data-cp-filter="unmatched" type="button" aria-pressed="false">Sem contato</button>
+          <button class="pill" data-cp-filter="document" type="button" aria-pressed="false" title="Lançamentos vinculados pelo CPF/CNPJ que veio no histórico">CPF/CNPJ</button>
         </div>
       </div>
 
@@ -307,7 +308,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.21.0</span> — os arquivos nunca saem do navegador.
+        Conversor <span id="app-version" class="footer-version">v1.22.0</span> — os arquivos nunca saem do navegador.
       </p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>

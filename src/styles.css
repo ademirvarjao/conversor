@@ -2337,6 +2337,13 @@ body {
   color: #991b1b;
 }
 
+/* Vínculo pelo CPF/CNPJ que veio no histórico: identidade, não semelhança. */
+.cp-badge.is-doc {
+  background: #ede9fe;
+  color: #5b21b6;
+  margin-left: 4px;
+}
+
 .cp-link-panel {
   margin-top: 16px;
   padding: 16px;
