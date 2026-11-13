@@ -199,6 +199,134 @@ export function isPayloadNewer(candidate, reference) {
   return candidateTime > referenceTime;
 }
 
+/** Data em milissegundos (0 quando ausente ou inválida). */
+function stamp(value) {
+  const time = Date.parse(String(value ?? ''));
+  return Number.isFinite(time) ? time : 0;
+}
+
+/** Une dois mapas `chave -> { hits, updatedAt }`, ficando com o mais recente. */
+function mergeAccountBucket(local = {}, remote = {}) {
+  const merged = { ...remote };
+  for (const [key, info] of Object.entries(local)) {
+    const other = merged[key];
+    if (!other || stamp(info?.updatedAt) >= stamp(other?.updatedAt)) merged[key] = info;
+  }
+  return merged;
+}
+
+/**
+ * Junta as memórias de contrapartida dos dois lados: o que foi aprendido aqui e
+ * o que foi aprendido em outra máquina. Nada é descartado — em conflito ganha o
+ * lado com a data mais recente.
+ */
+function mergeCounterparties(local, remote) {
+  const left = local && typeof local === 'object' ? local : {};
+  const right = remote && typeof remote === 'object' ? remote : {};
+  const remoteIsNewer = stamp(right.updatedAt) > stamp(left.updatedAt);
+
+  // Em conflito, o lado mais recente sobrescreve o outro.
+  const prefer = remoteIsNewer ? { ...(left.aliases || {}), ...(right.aliases || {}) } : { ...(right.aliases || {}), ...(left.aliases || {}) };
+
+  const tokenWeights = {};
+  for (const source of [right.tokenWeights || {}, left.tokenWeights || {}]) {
+    for (const [code, tokens] of Object.entries(source)) {
+      const entry = { ...(tokenWeights[code] || {}) };
+      for (const [token, weight] of Object.entries(tokens || {})) {
+        entry[token] = Math.max(Number(entry[token]) || 0, Number(weight) || 0);
+      }
+      tokenWeights[code] = entry;
+    }
+  }
+
+  const contacts = { ...(right.contacts || {}) };
+  for (const [code, info] of Object.entries(left.contacts || {})) {
+    const other = contacts[code];
+    if (!other) {
+      contacts[code] = info;
+      continue;
+    }
+    const winner = remoteIsNewer ? other : info;
+    contacts[code] = { ...winner, hits: Math.max(Number(other.hits) || 0, Number(info.hits) || 0) };
+  }
+
+  return {
+    version: 2,
+    aliases: prefer,
+    tokenWeights,
+    contacts,
+    accounts: {
+      byHistory: mergeAccountBucket(left.accounts?.byHistory, right.accounts?.byHistory),
+      byContact: mergeAccountBucket(left.accounts?.byContact, right.accounts?.byContact),
+    },
+    uses: Math.max(Number(left.uses) || 0, Number(right.uses) || 0),
+    updatedAt: remoteIsNewer ? right.updatedAt : left.updatedAt,
+  };
+}
+
+/**
+ * Aplica o pacote da nuvem **somando** ao que já existe neste navegador.
+ *
+ * É o que a sincronização automática usa: com o envio e o download acontecendo
+ * sem o usuário pedir, substituir a memória local poderia apagar um treinamento
+ * feito offline. Aqui os dois lados são unidos (perfis e histórico por `id`,
+ * pesos e contas pelo maior/mais recente) e as preferências locais — chave do
+ * LLM, assinaturas de layout e catálogo da comunidade — são preservadas.
+ */
+export function mergeVaultPayload(currentMemory, payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Pacote da nuvem inválido.');
+  }
+
+  const local = normalizeMemory(currentMemory || {});
+  const remote = applyVaultPayload(local, payload);
+
+  // Perfis de layout: união por id; em conflito fica o usado por último.
+  const profiles = new Map();
+  for (const profile of remote.learnedProfiles) profiles.set(profile.id, profile);
+  for (const profile of local.learnedProfiles) {
+    const existing = profiles.get(profile.id);
+    if (!existing || stamp(profile.lastUsedAt) > stamp(existing.lastUsedAt)) {
+      profiles.set(profile.id, profile);
+    }
+  }
+  const learnedProfiles = [...profiles.values()].sort((a, b) => stamp(b.lastUsedAt) - stamp(a.lastUsedAt));
+
+  // Histórico de aprendizado: união por id, do mais recente para o mais antigo.
+  const entries = new Map();
+  for (const entry of remote.learningLog) entries.set(entry.id, entry);
+  for (const entry of local.learningLog) {
+    if (!entries.has(entry.id)) entries.set(entry.id, entry);
+  }
+  const learningLog = [...entries.values()].sort((a, b) => stamp(b.timestamp) - stamp(a.timestamp));
+
+  // Pesos semânticos: cada token/papel fica com o maior peso dos dois lados.
+  const tokenWeights = { ...remote.tokenWeights };
+  for (const [token, roles] of Object.entries(local.tokenWeights || {})) {
+    const merged = { ...(tokenWeights[token] || {}) };
+    for (const [role, weight] of Object.entries(roles || {})) {
+      merged[role] = Math.max(Number(merged[role]) || 0, Number(weight) || 0);
+    }
+    tokenWeights[token] = merged;
+  }
+
+  return normalizeMemory({
+    tokenWeights,
+    learnedProfiles,
+    learningLog,
+    stats: {
+      totalFilesProcessed: Math.max(local.stats.totalFilesProcessed, remote.stats.totalFilesProcessed),
+      autoMatchedCount: Math.max(local.stats.autoMatchedCount, remote.stats.autoMatchedCount),
+      correctionsLearned: Math.max(local.stats.correctionsLearned, remote.stats.correctionsLearned),
+    },
+    counterparties: mergeCounterparties(local.counterparties, remote.counterparties),
+    // Preferências que nunca sobem para a nuvem continuam sendo as daqui.
+    optionalLlm: local.optionalLlm,
+    layoutSignatures: local.layoutSignatures,
+    settings: local.settings,
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                Sincronização                               */
 /* -------------------------------------------------------------------------- */

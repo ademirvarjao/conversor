@@ -389,7 +389,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.22.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.23.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>
   </footer>
@@ -598,15 +598,20 @@
           </div>
 
           <div class="settings-block">
-            <h3>2. Sincronizar</h3>
-            <div class="btn-row">
-              <button id="btn-cloud-push" class="btn btn-sm btn-primary" type="button">Enviar modelos</button>
-              <button id="btn-cloud-pull" class="btn btn-sm btn-secondary" type="button">Baixar modelos</button>
-            </div>
+            <h3>2. Sincronização automática</h3>
             <p class="cloud-hint">
-              O envio acontece automaticamente depois de cada treinamento e também ao criar a chave.
-              O download substitui os modelos deste navegador pelos da nuvem (a chave do LLM continua só aqui).
+              Não há nada para clicar: seus modelos sobem para a nuvem sozinhos depois de cada
+              treinamento e descem para este navegador quando você abre o app com a chave acima
+              (ou quando volta para esta aba). O que chega é <strong>somado</strong> ao que já
+              existe aqui — nenhum aprendizado é apagado, e a chave do LLM continua só neste
+              navegador.
             </p>
+            <!-- Sem botões na tela: o envio e o download são automáticos. Os ids
+                 continuam existindo para o controlador e para os testes de contrato. -->
+            <div hidden aria-hidden="true">
+              <button id="btn-cloud-push" class="btn btn-sm btn-primary" type="button" hidden tabindex="-1">Enviar modelos</button>
+              <button id="btn-cloud-pull" class="btn btn-sm btn-secondary" type="button" hidden tabindex="-1">Baixar modelos</button>
+            </div>
           </div>
 
           <div class="settings-block cloud-admin">
