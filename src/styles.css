@@ -47,6 +47,14 @@ body {
   display: none !important;
 }
 
+/**
+ * O atributo `hidden` vale para qualquer elemento, inclusive `button`/`.btn`,
+ * cujo `display` é declarado aqui e venceria a regra do navegador.
+ */
+[hidden] {
+  display: none !important;
+}
+
 .container {
   width: 100%;
   max-width: 1320px;

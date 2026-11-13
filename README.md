@@ -240,8 +240,11 @@ e partirem sozinhos.
 - **O que é local continua local**: a chave do LLM, as assinaturas de layout e a preferência do catálogo
   da comunidade nunca sobem e nunca são sobrescritas pelo que vem da nuvem.
 - **Interface discreta**: a aba Nuvem mostra só o estado ("Modelos em dia com a nuvem", "Sincronizando…")
-  e o painel do conciliador mantém a chave e o estado no topo. Os botões ficaram `hidden` no HTML
-  (fora da ordem de tabulação), para não haver controle inútil na tela.
+  e o painel do conciliador mantém a chave e o estado no topo. Na v1.23.1 os botões foram **removidos do
+  HTML** de vez (antes ficaram com o atributo `hidden`, que o `display: inline-flex` do `.btn` vencia e
+  eles continuavam aparecendo no topo do conciliador) — junto com os ids, os ouvintes de clique e o
+  CSS `[hidden] { display: none !important }` passou a garantir que o atributo funcione em qualquer
+  elemento.
 
 #### Trava da conexão do banco (v1.11.0 · reescopada na v1.13.0)
 A aba **Nuvem** é aberta para todo mundo: consultar a chave de acesso, criar/recuperar chave,

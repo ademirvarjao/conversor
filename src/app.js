@@ -2549,10 +2549,6 @@ function renderCloudPanel() {
 
   renderTopKey();
 
-  const disableActions = !hasConfig || !identity || cloud.busy;
-  for (const id of ['btn-cloud-push', 'btn-cloud-pull']) {
-    if (dom[id]) dom[id].disabled = disableActions;
-  }
   // A chave de acesso é local: pode ser criada/informada mesmo antes de o
   // administrador publicar a URL do banco.
   if (dom['btn-cloud-create']) dom['btn-cloud-create'].disabled = cloud.busy;
@@ -3023,8 +3019,6 @@ function bindCloudEvents() {
     showToast('Chave removida deste dispositivo.', 'warn');
   });
 
-  dom['btn-cloud-push']?.addEventListener('click', () => cloudPush());
-  dom['btn-cloud-pull']?.addEventListener('click', () => cloudPull());
 }
 
 function bindGlobalEvents() {
