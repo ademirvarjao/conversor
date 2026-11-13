@@ -278,9 +278,8 @@ function handleGearAction(id) {
   else if (id === 'admin-usage') adminConsole.open('usage');
   else if (id === 'memory') adminConsole.open('memory');
   else if (id === 'lock') adminConsole.lock();
-  else if (id === 'docs') {
-    window.open('https://github.com/ademirvarjao/conversor#readme', '_blank', 'noopener');
-  }
+  else if (id === 'docs') window.open('./manual.html', '_blank', 'noopener');
+  else if (id === 'about') window.open('./manual.html#sobre', '_blank', 'noopener');
 }
 
 /**

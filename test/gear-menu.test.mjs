@@ -158,7 +158,7 @@ describe('modelo do menu da engrenagem', () => {
   it('a página com o modal da memória ganha as opções de backup e nuvem', () => {
     const completo = gearSections({ hasMemoryModal: true, profiles: 3, accessCode: 'ABCD-EFGH' });
     const ids = completo.sections.flatMap((section) => section.items.map((item) => item.id));
-    for (const id of ['admin', 'admin-usage', 'memory', 'memory-export', 'memory-import', 'settings', 'cloud', 'docs']) {
+    for (const id of ['admin', 'admin-usage', 'memory', 'memory-export', 'memory-import', 'settings', 'cloud', 'docs', 'about']) {
       assert.ok(ids.includes(id), `falta a opção ${id}`);
     }
     const memoria = completo.sections.find((section) => section.id === 'memory');
@@ -170,9 +170,17 @@ describe('modelo do menu da engrenagem', () => {
   it('a página sem o modal (conciliador) não inventa opções que não existem', () => {
     const simples = gearSections({ hasMemoryModal: false });
     const ids = simples.sections.flatMap((section) => section.items.map((item) => item.id));
-    assert.deepEqual(ids, ['admin', 'admin-usage', 'memory', 'docs']);
+    assert.deepEqual(ids, ['admin', 'admin-usage', 'memory', 'docs', 'about']);
     assert.equal(ids.includes('memory-export'), false);
     assert.equal(ids.includes('settings'), false);
+  });
+
+  it('leva a ajuda para o manual do próprio app, sem link de repositório', () => {
+    const ajuda = gearSections({ hasMemoryModal: true }).sections.find((section) => section.id === 'help');
+    const items = ajuda.items.map((item) => `${item.label} ${item.hint}`).join(' ');
+    assert.match(items, /manual/i);
+    assert.equal(/reposit[óo]rio|github/i.test(items), false, 'a ajuda não pode depender de página externa');
+    assert.ok(ajuda.items.some((item) => item.id === 'about'), 'o menu tem a opção Sobre');
   });
 
   it('toda opção tem ícone conhecido', () => {

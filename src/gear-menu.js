@@ -96,8 +96,11 @@ export function gearSections(ctx = {}) {
     });
   }
 
+  // Ajuda e créditos ficam dentro do próprio site: o manual é uma página do
+  // app (manual.html), sem link para repositório ou página externa.
   const help = [
-    { id: 'docs', icon: 'book', label: 'Como funciona', hint: 'Manual e limitações no repositório' },
+    { id: 'docs', icon: 'book', label: 'Como funciona', hint: 'Manual completo, limitações e dicas' },
+    { id: 'about', icon: 'info', label: 'Sobre o Conversor', hint: 'Nome, versão, autor e ano' },
   ];
   sections.push({ id: 'help', label: 'Ajuda', items: help });
 

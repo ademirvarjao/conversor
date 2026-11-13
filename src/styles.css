@@ -3675,3 +3675,336 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
 #btn-gear[data-state='unlocked'] {
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.55);
 }
+
+/* ------------------------------------------------------------------------- */
+/* Manual do usuário (página própria, manual.html)                            */
+/* ------------------------------------------------------------------------- */
+
+.manual-main {
+  padding-bottom: 56px;
+}
+
+/* Atalhos do manual no rodapé das páginas do app. */
+.footer-manual {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  color: var(--text-light);
+}
+
+.footer-manual a {
+  color: var(--navy-mid);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.footer-manual a:hover {
+  color: var(--primary);
+}
+
+.manual-hero h2 {
+  margin: 6px 0 10px;
+  font-size: 1.35rem;
+  color: var(--navy);
+}
+
+.manual-hero p {
+  margin: 0 0 10px;
+  max-width: 78ch;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.manual-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+  padding: 0;
+}
+
+.manual-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+}
+
+.manual-steps strong {
+  color: var(--navy);
+  font-size: 0.92rem;
+}
+
+.manual-steps span {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.manual-privacy {
+  margin: 6px 0 0 !important;
+  padding: 10px 12px;
+  border-left: 3px solid var(--emerald);
+  border-radius: 8px;
+  background: #ecfdf5;
+  font-size: 0.86rem !important;
+  color: var(--text) !important;
+}
+
+.manual-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.manual-nav {
+  position: sticky;
+  top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.manual-nav-title {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-light);
+}
+
+.manual-nav ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.manual-nav a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  line-height: 1.35;
+}
+
+.manual-nav a:hover {
+  background: var(--surface-alt);
+  color: var(--navy);
+}
+
+.manual-nav a.is-current {
+  background: #eff6ff;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.manual-nav a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.manual-body {
+  min-width: 0;
+}
+
+.manual-section {
+  margin-bottom: 18px;
+  scroll-margin-top: 16px;
+}
+
+.manual-section h2 {
+  margin: 0 0 10px;
+  font-size: 1.12rem;
+  color: var(--navy);
+}
+
+.manual-section h3 {
+  margin: 18px 0 6px;
+  font-size: 0.95rem;
+  color: var(--navy-mid);
+}
+
+.manual-section p,
+.manual-section li {
+  font-size: 0.89rem;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.manual-section p {
+  margin: 0 0 10px;
+}
+
+.manual-section ul,
+.manual-section ol {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.manual-section a {
+  color: var(--primary);
+}
+
+.manual-section code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.manual-section kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.manual-tip,
+.manual-note {
+  margin: 12px 0 0 !important;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem !important;
+  line-height: 1.6;
+}
+
+.manual-tip {
+  border-left: 3px solid var(--primary);
+  background: #eff6ff;
+}
+
+.manual-note {
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-alt);
+}
+
+.manual-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 14px;
+  font-size: 0.85rem;
+}
+
+.manual-table th,
+.manual-table td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.manual-table th {
+  background: var(--surface-alt);
+  color: var(--navy);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.manual-table td {
+  color: var(--text-muted);
+}
+
+.manual-table code {
+  white-space: normal;
+}
+
+.manual-table-scroll {
+  overflow-x: auto;
+}
+
+.about-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #f8fafc, #eff6ff);
+}
+
+.about-mark svg {
+  width: 56px;
+  height: 56px;
+  display: block;
+}
+
+.about-text {
+  min-width: 0;
+}
+
+.about-name {
+  margin: 0 0 4px !important;
+  font-size: 1.02rem !important;
+  font-weight: 700;
+  color: var(--navy) !important;
+}
+
+.about-line {
+  margin: 2px 0 !important;
+  font-size: 0.86rem !important;
+  color: var(--text-muted) !important;
+}
+
+.about-line strong {
+  color: var(--text);
+}
+
+.about-version {
+  color: var(--primary) !important;
+  font-family: var(--font-mono);
+}
+
+.about-license {
+  margin-top: 6px !important;
+  color: var(--text-light) !important;
+  font-size: 0.78rem !important;
+}
+
+@media (max-width: 900px) {
+  .manual-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-nav {
+    position: static;
+    order: -1;
+  }
+
+  .manual-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .about-card {
+    align-items: flex-start;
+  }
+}

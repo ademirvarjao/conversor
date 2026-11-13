@@ -247,7 +247,12 @@ function handleGearAction(id) {
       adminConsole.lock();
       break;
     case 'docs':
-      window.open('https://github.com/ademirvarjao/conversor#readme', '_blank', 'noopener');
+      // O manual é uma página do próprio app (aberta em outra aba para não
+      // perder os arquivos já importados, que vivem só na memória).
+      window.open('./manual.html', '_blank', 'noopener');
+      break;
+    case 'about':
+      window.open('./manual.html#sobre', '_blank', 'noopener');
       break;
     default:
       break;
