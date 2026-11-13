@@ -1,21 +1,74 @@
-MIT License
+Licença de uso restrito — Todos os direitos reservados
+=======================================================
 
-Copyright (c) 2026 Custódio Soluções em Construções
+Copyright (c) 2026 Ademir Varjão. Todos os direitos reservados.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Este software, incluindo código-fonte, textos, imagens, planilhas, layouts,
+documentação e demais arquivos deste repositório (em conjunto, o "Software"),
+é obra de Ademir Varjão e está protegido pelas leis de direito autoral
+(Lei nº 9.610/1998 e Lei nº 9.609/1998, no Brasil, e legislação equivalente
+em outros países).
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. O que é permitido sem autorização
+------------------------------------
+   a) **Visualizar** o Software e o seu código-fonte neste repositório
+      público (ou na página publicada), para leitura, consulta e estudo.
+   b) Compartilhar o **link** deste repositório ou da aplicação publicada.
+   c) Citar o projeto e o autor em textos, aulas ou trabalhos, com o devido
+      crédito e o endereço do repositório.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+   A visualização é livre; o **uso** não é. Ver o item 2.
+
+2. O que exige autorização prévia, expressa e por escrito do autor
+------------------------------------------------------------------
+   Sem essa autorização, é proibido, no todo ou em parte:
+
+   a) **usar** o Software, em qualquer finalidade — pessoal, interna,
+      comercial ou institucional —, inclusive executá-lo para processar
+      arquivos próprios ou de terceiros;
+   b) **copiar**, baixar, clonar, fazer fork, arquivar ou espelhar o Software;
+   c) **modificar**, adaptar, traduzir, desmontar ou criar obras derivadas;
+   d) **distribuir**, publicar, sublicenciar, vender, alugar, emprestar ou
+      incorporar o Software a outro produto ou serviço (inclusive SaaS);
+   e) **remover, alterar ou ocultar** este aviso de copyright, o nome do autor
+      ou qualquer indicação de titularidade;
+   f) usar o Software ou o seu código-fonte para **treinar modelos** de
+      inteligência artificial sem autorização específica.
+
+   Pedidos de autorização devem ser feitos ao titular: **Ademir Varjão**
+   (perfil no GitHub: https://github.com/ademirvarjao). A autorização vale
+   apenas para o que constar por escrito e nas condições ali definidas.
+
+3. Ausência de garantias
+------------------------
+O Software é fornecido "COMO ESTÁ", sem garantia de qualquer espécie, expressa
+ou implícita, incluindo, mas não se limitando a, garantias de comercialização,
+adequação a um propósito específico e não violação. O acesso ao código é
+oferecido apenas para consulta, sem qualquer compromisso de suporte,
+manutenção, correção ou disponibilidade.
+
+4. Responsabilidade
+-------------------
+Em nenhuma hipótese o autor será responsável por qualquer dano, prejuízo,
+lucro cessante ou reclamação decorrente do acesso, da leitura ou de qualquer
+uso não autorizado do Software.
+
+5. Vigência
+-----------
+Estes termos valem enquanto o Software estiver publicado e podem ser
+alterados pelo autor a qualquer momento. O uso não autorizado sujeita o
+infrator às sanções civis e criminais cabíveis.
+
+------------------------------------------------------------------------------
+Restricted-use license — All rights reserved (English summary)
+------------------------------------------------------------------------------
+
+Copyright (c) 2026 Ademir Varjão. All rights reserved.
+
+You may read and study this source code and share its link. You may **not**
+use, run, copy, download, fork, modify, distribute, sublicense, sell or
+incorporate this software into any product or service, nor use it to train
+AI models, without the prior written permission of the copyright holder
+(Ademir Varjão — https://github.com/ademirvarjao). The software is provided
+"AS IS", without warranty of any kind. This English text is a summary; the
+Portuguese text above is the binding version.

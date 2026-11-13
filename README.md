@@ -411,4 +411,13 @@ conversor/
 
 ## Licença
 
-MIT — veja [`LICENSE`](./LICENSE).
+**Uso restrito — todos os direitos reservados.** © 2026 **Ademir Varjão**.
+
+O código é público **para leitura e estudo**, e o link pode ser compartilhado à vontade. O **uso** não é
+livre: sem autorização prévia e por escrito do autor, não é permitido executar o app para processar
+arquivos (próprios ou de terceiros), copiar, clonar, fazer fork, modificar, redistribuir, vender,
+incorporar a outro produto ou serviço, nem usar o código para treinar modelos de IA. Também não se pode
+remover o aviso de copyright do repositório.
+
+Pedidos de autorização: **Ademir Varjão** — <https://github.com/ademirvarjao>. O texto completo, com as
+condições e a ausência de garantias, está em [`LICENSE`](./LICENSE).
