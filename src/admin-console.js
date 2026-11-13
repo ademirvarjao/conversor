@@ -182,13 +182,15 @@ export function createAdminConsole(options = {}) {
     page = 'conversor',
     getMemory = () => ({}),
     getCloud = () => ({}),
-    notify = () => {},
+    notify: notifyPage = () => {},
     onAccessChange = null,
   } = options;
 
   const usage = loadUsage();
   const state = {
     tab: 'overview',
+    /** Último recado dado com o painel aberto (aparece dentro do painel). */
+    flash: null,
     open: false,
     logFilter: 'all',
     sessionStartedAt: Date.now(),
@@ -237,6 +239,19 @@ export function createAdminConsole(options = {}) {
     ]) {
       dom[id] = document.getElementById(id);
     }
+  }
+
+  /**
+   * Aviso ao usuário. Com o painel aberto ele aparece **dentro** do painel: um
+   * toast flutuante caía em cima dos botões do rodapé (layout quebrado).
+   */
+  function notify(message, kind = 'success') {
+    if (state.open) {
+      state.flash = { kind, text: message };
+      render();
+      return;
+    }
+    notifyPage(message, kind);
   }
 
   function persistUsage() {
@@ -415,6 +430,7 @@ export function createAdminConsole(options = {}) {
       logFilter: state.logFilter,
       sessionStartedAt: state.sessionStartedAt,
       vaults: state.vaults,
+      flash: state.flash,
     });
     if (dom['cp-admin-headline']) dom['cp-admin-headline'].textContent = adminPanelHeadline(usage);
     document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
@@ -461,6 +477,7 @@ export function createAdminConsole(options = {}) {
   function setTab(tab) {
     if (!ADMIN_TABS.some((entry) => entry.id === tab)) return;
     state.tab = tab;
+    state.flash = null;
     render();
     if (tab === 'vaults') void reloadVaults();
   }
