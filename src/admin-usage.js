@@ -22,6 +22,8 @@ export const MAX_DAYS = 60;
 
 /** Contadores exibidos no painel (sempre todos presentes, mesmo em zero). */
 export const COUNTER_KEYS = [
+  'filesLoaded',
+  'rowsProcessed',
   'contactsFiles',
   'ledgerFiles',
   'reconciliations',

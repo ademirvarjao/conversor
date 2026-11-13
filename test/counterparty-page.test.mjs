@@ -21,12 +21,10 @@ describe('página do conciliador', () => {
     assert.match(page, /<title>[^<]*Conciliador/i);
     assert.match(page, /<a[^>]+href="\.\/index\.html"/, 'falta o caminho de volta');
     assert.equal(page.includes('cp-drawer'), false, 'a página não usa a barra lateral');
-    // A página continua sendo uma página (não virou modal). A única exceção é o
-    // painel do administrador, que abre por cima depois do login e já vem
-    // escondido na entrega.
-    const modals = [...page.matchAll(/class="modal-backdrop[^"]*"/g)];
-    assert.equal(modals.length, 1, 'só o painel do administrador usa modal');
-    assert.match(page, /id="cp-admin-panel"\s+class="modal-backdrop hidden"/, 'o painel começa fechado');
+    // Nem modal: o painel do administrador é injetado pelo JS (universal, igual
+    // nas duas páginas) e só existe no DOM depois que a página carrega.
+    assert.equal(page.includes('modal-backdrop'), false, 'a entrega é só a página');
+    assert.match(page, /id="btn-gear"/, 'as opções ficam na engrenagem');
   });
 
   it('carrega as bibliotecas offline e o módulo da página como módulo', () => {
@@ -100,11 +98,11 @@ describe('página do conciliador', () => {
   });
 
   it('treina a IA com as contas preenchidas e mostra as sugestões', () => {
-    for (const id of ['btn-cp-apply-suggestions', 'cp-memory-state', 'cp-link-memory']) {
+    for (const id of ['btn-cp-apply-suggestions', 'cp-link-memory', 'btn-gear']) {
       assert.ok(pageIds.includes(id), `falta #${id}`);
     }
-    // O resumo da memória só aparece para o administrador (login + senha).
-    assert.match(module, /Memória: /);
+    // O resumo da memória saiu da página: vive no painel do administrador.
+    assert.equal(/Memória: /.test(module), false, 'nada de resumo na barra do conciliador');
     assert.match(module, /learnRowAccount/);
     assert.match(module, /data-cp-suggest/);
     assert.match(module, /function applySuggestion/);

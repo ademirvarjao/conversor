@@ -6,14 +6,14 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.25.0';
+export const APP_VERSION = '1.26.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
   'file-input',
   'files-list',
   'btn-clear-files',
-  'btn-ai-memory',
+  'btn-gear',
   'ai-profiles-badge',
   'ai-trainer-section',
   'trainer-title',
