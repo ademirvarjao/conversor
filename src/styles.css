@@ -2130,24 +2130,6 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
   outline-offset: 3px;
 }
 
-.brand-plus {
-  position: absolute;
-  right: -5px;
-  bottom: -5px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #38bdf8;
-  color: #08243c;
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 0 2px #0f2744;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .brand-icon.brand-back {
     transition: none;

@@ -86,6 +86,22 @@ describe('index.html x controlador', () => {
     assert.equal(html.includes('action-tile'), false, 'o cartão antigo saiu do topo da página');
   });
 
+  it('usa o mesmo ícone da marca nas três páginas, sem selo extra', async () => {
+    const manualPage = await readFile(path.join(ROOT, 'manual.html'), 'utf8');
+    const brandSvg = (doc) => {
+      const anchor = doc.indexOf('class="brand-icon');
+      const svg = doc.slice(doc.indexOf('<svg', anchor), doc.indexOf('</svg>', anchor) + 6);
+      return svg.replace(/\s+/g, ' ').trim();
+    };
+    const icons = [html, conciliador, manualPage].map(brandSvg);
+    assert.match(icons[0], /<svg viewBox="0 0 36 36"/, 'o ícone da marca precisa ser o SVG padrão');
+    assert.equal(new Set(icons).size, 1, 'as três páginas mostram exatamente o mesmo ícone');
+
+    for (const [name, doc] of [['index.html', html], ['conciliador.html', conciliador], ['manual.html', manualPage]]) {
+      assert.equal(doc.includes('brand-plus'), false, `${name} não tem mais o selo redondo com "+"`);
+    }
+  });
+
   it('não expõe mais o botão de exemplo simulado', async () => {
     const app = await readFile(path.join(ROOT, 'src/app.js'), 'utf8');
     assert.equal(html.includes('btn-demo'), false, 'o botão de demonstração saiu do HTML');
