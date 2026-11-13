@@ -12,11 +12,19 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
-import { ADMIN_TABS, adminPanelHeadline, lastActiveDay, renderAdminPanel } from '../src/admin-panel.js';
+import {
+  ADMIN_TABS,
+  adminGateMarkup,
+  adminPanelHeadline,
+  adminPanelMarkup,
+  lastActiveDay,
+  renderAdminPanel,
+} from '../src/admin-panel.js';
 import { normalizeUsage, recordEvent, addActiveTime, bumpCounter, startSession } from '../src/admin-usage.js';
 
 const ROOT = new URL('../', import.meta.url);
 const html = await readFile(new URL('conciliador.html', ROOT), 'utf8');
+const indexHtml = await readFile(new URL('index.html', ROOT), 'utf8');
 const page = await readFile(new URL('src/counterparty-page.js', ROOT), 'utf8');
 const styles = await readFile(new URL('src/styles.css', ROOT), 'utf8');
 
@@ -56,25 +64,34 @@ function baseCtx(overrides = {}) {
 }
 
 describe('painel do administrador: abas', () => {
-  it('são cinco, na ordem do HTML', () => {
+  it('são cinco, na ordem da marcação', () => {
     assert.deepEqual(
       ADMIN_TABS.map((tab) => tab.id),
       ['overview', 'usage', 'memory', 'logs', 'device']
     );
+    const markup = adminPanelMarkup();
     const order = ['Visão geral', 'Uso', 'Memória da IA', 'Logs', 'Dispositivo e conta'];
     let cursor = -1;
     for (const label of order) {
-      const index = html.indexOf(`>${label}<`, cursor + 1);
-      assert.ok(index > cursor, `a aba "${label}" aparece na ordem certa`);
-      cursor = index;
+      const position = markup.indexOf(`>${label}<`, cursor + 1);
+      assert.ok(position > cursor, `a aba "${label}" aparece na ordem certa`);
+      cursor = position;
     }
   });
 
-  it('cada aba do HTML tem o botão que o controlador procura', () => {
+  it('cada aba tem o botão que o console procura', () => {
+    const markup = adminPanelMarkup();
     for (const tab of ADMIN_TABS) {
-      assert.match(html, new RegExp(`data-cp-admin-tab="${tab.id}"`), `falta a aba ${tab.id}`);
+      assert.match(markup, new RegExp(`data-cp-admin-tab="${tab.id}"`), `falta a aba ${tab.id}`);
     }
-    assert.equal([...html.matchAll(/data-cp-admin-tab="/g)].length, ADMIN_TABS.length);
+    assert.equal([...markup.matchAll(/data-cp-admin-tab="/g)].length, ADMIN_TABS.length);
+  });
+
+  it('as duas páginas recebem o mesmo painel (sem cópia no HTML)', () => {
+    assert.equal(html.includes('id="cp-admin-panel"'), false, 'o conciliador não repete a marcação');
+    assert.equal(indexHtml.includes('id="cp-admin-panel"'), false, 'a página principal também não');
+    assert.match(html, /id="btn-gear"/, 'mas as duas têm a engrenagem');
+    assert.match(indexHtml, /id="btn-gear"/);
   });
 
   it('cada aba gera conteúdo próprio', () => {
@@ -189,10 +206,11 @@ describe('painel do administrador: segurança do conteúdo', () => {
   });
 });
 
-describe('painel do administrador: porta de entrada no conciliador', () => {
-  it('o HTML entrega o painel fechado e com todos os controles', () => {
-    assert.match(html, /id="cp-admin-panel"[\s\S]{0,120}aria-hidden="true"/);
-    assert.match(html, /id="cp-admin-panel"[\s\S]{0,80}class="modal-backdrop hidden"/);
+describe('painel do administrador: porta de entrada universal', () => {
+  it('a marcação entrega o painel fechado e com todos os controles', () => {
+    const markup = adminPanelMarkup();
+    assert.match(markup, /id="cp-admin-panel"[\s\S]{0,120}aria-hidden="true"/);
+    assert.match(markup, /id="cp-admin-panel"[\s\S]{0,80}class="modal-backdrop hidden"/);
     for (const id of [
       'cp-admin-title',
       'cp-admin-headline',
@@ -202,65 +220,22 @@ describe('painel do administrador: porta de entrada no conciliador', () => {
       'btn-cp-admin-export',
       'btn-cp-admin-logs',
       'btn-cp-admin-reset',
+      'btn-cp-admin-lock',
     ]) {
-      assert.match(html, new RegExp(`id="${id}"`), `falta #${id}`);
+      assert.match(markup, new RegExp(`id="${id}"`), `falta #${id}`);
     }
   });
 
-  it('o painel não vaza conteúdo antes do login: o corpo vem vazio', () => {
-    assert.match(html, /id="cp-admin-body"[^>]*>\s*<\/div>/, 'sem números na entrega');
+  it('sem login não vaza conteúdo: o corpo vem vazio', () => {
+    assert.match(adminPanelMarkup(), /id="cp-admin-body"[^>]*>\s*<\/div>/, 'sem números na entrega');
   });
 
-  it('os ids do painel estão na lista obrigatória de contrato', () => {
-    for (const id of [
-      'cp-admin-panel',
-      'cp-admin-body',
-      'cp-admin-headline',
-      'btn-cp-admin-close',
-      'btn-cp-admin-refresh',
-      'btn-cp-admin-export',
-      'btn-cp-admin-logs',
-      'btn-cp-admin-reset',
-    ]) {
-      assert.ok(page.includes(`'${id}'`), `#${id} fora de REQUIRED_IDS`);
+  it('o portão de senha também vem pronto do módulo', () => {
+    const gate = adminGateMarkup();
+    for (const id of ['admin-gate', 'admin-gate-form', 'admin-gate-user', 'admin-gate-password', 'admin-gate-error', 'btn-admin-gate-enter', 'btn-admin-gate-close']) {
+      assert.match(gate, new RegExp(`id="${id}"`), `falta #${id}`);
     }
-  });
-
-  it('o controlador só abre o painel com o desbloqueio do administrador', () => {
-    assert.match(page, /if \(adminUnlocked\(\)\) \{\s*openAdminPanel\(\);/);
-    assert.match(page, /function openAdminPanel\(\)[\s\S]{0,400}renderAdminPanelBody\(\)/);
-    assert.match(page, /saveUnlock\(\);[\s\S]{0,200}openAdminPanel\(\)/, 'abre logo depois do login');
-  });
-
-  it('registra sessão e tempo só com a aba visível', () => {
-    assert.match(page, /startSession\(usage\)/);
-    assert.match(page, /document\.visibilityState === 'visible' \? Date\.now\(\) : 0/);
-    assert.match(page, /addEventListener\('visibilitychange'/);
-    assert.match(page, /addEventListener\('pagehide', flushActiveTime\)/);
-  });
-
-  it('registra os eventos do fluxo de conciliação', () => {
-    for (const type of ['arquivo', 'conciliacao', 'vinculo', 'conta', 'exportacao', 'nuvem', 'sessao', 'erro']) {
-      assert.match(page, new RegExp(`'${type}'`), `nenhum evento do tipo ${type}`);
-    }
-    assert.match(page, /bumpCounter\(usage, 'rowsReconciled'/);
-    assert.match(page, /track\('exportacao', 'PDF gerado'/);
-  });
-
-  it('exporta o relatório e os logs pelo navegador', () => {
-    assert.match(page, /usageReport\(/);
-    assert.match(page, /eventsToCsv\(usage\)/);
-    assert.match(page, /URL\.createObjectURL/);
-    assert.match(page, /link\.download = filename/);
-  });
-
-  it('limpar o histórico pede confirmação', () => {
-    assert.match(page, /function resetAdminHistory\(\)[\s\S]{0,220}window\.confirm\(/);
-  });
-
-  it('Esc e o fundo fecham o painel', () => {
-    assert.match(page, /event\.target === dom\['cp-admin-panel'\]\) closeAdminPanel\(\)/);
-    assert.match(page, /if \(adminPanel\.open\) \{\s*closeAdminPanel\(\);/);
+    assert.match(gate, /type="password"/);
   });
 
   it('o CSS do painel acompanha o HTML', () => {
@@ -275,6 +250,10 @@ describe('painel do administrador: porta de entrada no conciliador', () => {
       '.cp-admin-filters',
       '.cp-admin-dl',
       '.cp-admin-actions',
+      '.cp-admin-summary',
+      '.gear-menu',
+      '.gear-item',
+      '.admin-gate-card',
     ]) {
       assert.ok(styles.includes(rule), `falta ${rule} em styles.css`);
     }

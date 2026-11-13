@@ -17,6 +17,8 @@ import { summarizeRecords } from './summary.js';
 import { applyRowEdits, forgetFileEdits, recordKey, setHistoryOverride } from './row-edits.js';
 import { escapeHtml } from './html.js';
 import { installGlobalErrorReporting, reportStartupFailure } from './ui-errors.js';
+import { createAdminConsole } from './admin-console.js';
+import { mountGearMenu } from './gear-menu.js';
 import { exportToPdf, exportToXlsx } from './exporters.js';
 import {
   applyCoachFixes,
@@ -155,6 +157,96 @@ function cacheDom() {
       console.warn(`[Conversor] Elemento #${id} não encontrado no HTML.`);
     }
     dom[id] = element;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                    Painel do administrador (universal)                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * O mesmo painel do conciliador — aberto pela **engrenagem** da barra superior.
+ * Aqui ele mostra o uso de **todo o site** (as duas páginas gravam no mesmo
+ * registro local), a memória da IA, os logs e o aparelho.
+ */
+let gear = null;
+
+const adminConsole = createAdminConsole({
+  page: 'conversor',
+  getMemory: () => state.memory,
+  getCloud: () => ({
+    accessCode: cloud.identity ? formatAccessCode(cloud.identity.code) : '',
+    lastSync: cloud.identity?.lastSyncAt ? formatLocalDateTime(cloud.identity.lastSyncAt) : '—',
+    host: cloudHostLabel(),
+    account: cloud.session?.user?.email || 'sem conta',
+    remote: cloud.locked ? 'conexão bloqueada' : cloud.identity ? 'sincronizado' : 'não verificado',
+  }),
+  notify: (message, kind) => showToast(message, kind || 'success'),
+  // Entrou ou bloqueou: o menu (e o ícone da engrenagem) mudam na hora.
+  onAccessChange: () => gear?.refresh(),
+});
+
+/** Registra um evento no histórico do painel. */
+function track(type, message, details = '', counter = null, amount = 1) {
+  adminConsole.track(type, message, details, counter, amount);
+}
+
+/** Só soma contador (importações e exportações em série). */
+function trackCount(counter, amount = 1) {
+  adminConsole.count(counter, amount);
+}
+
+/** Abre o painel do administrador na aba pedida (o console cuida da senha). */
+function openAdminPanel(tab) {
+  adminConsole.open(tab);
+}
+
+/** Contexto do menu da engrenagem nesta página. */
+function gearContext() {
+  return {
+    unlocked: adminConsole.isUnlocked(),
+    hasMemoryModal: true,
+    profiles: Array.isArray(state.memory.learnedProfiles) ? state.memory.learnedProfiles.length : 0,
+    accessCode: cloud.identity ? formatAccessCode(cloud.identity.code) : '',
+    version: APP_VERSION,
+  };
+}
+
+/** O que cada opção do menu faz. */
+function handleGearAction(id) {
+  switch (id) {
+    case 'admin':
+      openAdminPanel('overview');
+      break;
+    case 'admin-usage':
+      openAdminPanel('usage');
+      break;
+    case 'memory':
+      openAiModal();
+      activateModalTab('profiles');
+      break;
+    case 'memory-export':
+      dom['btn-export-memory']?.click();
+      break;
+    case 'memory-import':
+      dom['import-memory-input']?.click();
+      break;
+    case 'settings':
+      openAiModal();
+      activateModalTab('settings');
+      break;
+    case 'cloud':
+      openAiModal();
+      activateModalTab('cloud');
+      break;
+    case 'lock':
+      adminConsole.lock();
+      break;
+    case 'docs':
+      window.open('https://github.com/ademirvarjao/conversor#readme', '_blank', 'noopener');
+      break;
+    default:
+      break;
   }
 }
 
@@ -1416,6 +1508,13 @@ async function processUploadedFiles(fileList) {
       showToast(
         `${added} arquivo(s) processado(s) com sucesso${duplicates ? ` • ${duplicates} duplicado(s) ignorado(s)` : ''}.`
       );
+      track(
+        'arquivo',
+        `Importação: ${added} arquivo(s) processado(s)`,
+        `${duplicates} duplicado(s) ignorado(s) • ${failures.length} falha(s)`,
+        'filesLoaded'
+      );
+      trackCount('rowsProcessed', state.unifiedRows?.length || 0);
     }
     if (unknownLayouts.length > 0) maybeRefreshCatalog(unknownLayouts);
 
@@ -2040,6 +2139,7 @@ function bindOutputEvents() {
         `Conciliacao_${stamp}.xlsx`,
         typeof window !== 'undefined' ? window.ExcelJS : undefined
       );
+      track('exportacao', 'Planilha .xlsx gerada', `${rows.length} lançamento(s)`, 'exports');
       showToast(`${rows.length} lançamento(s) exportado(s) em .xlsx.`);
     } catch (error) {
       showToast(`Erro ao exportar .xlsx: ${error.message}`, 'error');
@@ -2062,6 +2162,7 @@ function bindOutputEvents() {
       const summary =
         scope === 'all' ? state.summary : summarizeRecords(rows, { skippedCount: state.summary.skippedCount });
       exportToPdf(rows, summary, `Conciliacao_${stamp}.pdf`);
+      track('exportacao', 'PDF gerado', `${rows.length} lançamento(s)`, 'exports');
       showToast(`${rows.length} lançamento(s) exportado(s) em .pdf.`);
     } catch (error) {
       showToast(`Erro ao exportar .pdf: ${error.message}`, 'error');
@@ -2089,7 +2190,9 @@ function bindOutputEvents() {
 }
 
 function bindModalEvents() {
-  dom['btn-ai-memory']?.addEventListener('click', openAiModal);
+  // Engrenagem: menu universal (painel do administrador, memória, backup, nuvem).
+  gear = mountGearMenu({ ctx: gearContext, onAction: handleGearAction });
+
   dom['btn-close-modal']?.addEventListener('click', closeAiModal);
 
   dom['ai-modal']?.addEventListener('click', (event) => {
@@ -2141,6 +2244,7 @@ function bindModalEvents() {
     link.download = 'conversor-ia-memoria.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
+    track('memoria', 'Memória exportada', `${state.memory.learnedProfiles?.length || 0} perfil(is)`, 'exports');
     showToast('Memória exportada em conversor-ia-memoria.json.');
   });
 
@@ -2167,6 +2271,7 @@ function bindModalEvents() {
       updateAiBadge();
       renderAiModal();
       if (state.selectedFileId) openTrainerForFile(state.selectedFileId);
+      track('memoria', 'Memória importada', `${state.memory.learnedProfiles.length} perfil(is)`);
       showToast(
         `Memória importada: ${state.memory.learnedProfiles.length} perfil(is) de layout.`
       );
@@ -2183,6 +2288,7 @@ function bindModalEvents() {
     updateAiBadge();
     renderAiModal();
     scheduleCloudPush();
+    track('memoria', 'Memória da IA restaurada para o padrão inicial', '', null);
     showToast('Memória da IA restaurada para o padrão inicial.', 'warn');
   });
 
@@ -2197,6 +2303,8 @@ function bindModalEvents() {
 
     state.memory.optionalLlm = { provider, apiKey, model: '' };
     const saved = saveAiMemory(state.memory);
+    // O painel registra só o provedor — a chave nunca entra no histórico.
+    track('memoria', 'Provedor de IA configurado', provider === 'none' ? 'desativado' : provider);
     if (state.selectedFileId) openTrainerForFile(state.selectedFileId);
     showToast(
       saved
@@ -3056,7 +3164,17 @@ function bindGlobalEvents() {
 function init() {
   cacheDom();
   updateAiBadge();
-  installGlobalErrorReporting({ notify: showToast, scope: 'Conversor' });
+
+  // Painel do administrador: marcação, sessão de uso e tempo com a aba visível.
+  adminConsole.mount();
+
+  installGlobalErrorReporting({
+    scope: 'Conversor',
+    notify: (message, kind, options) => {
+      if (kind === 'error') track('erro', 'Aviso de erro na tela', String(message).slice(0, 180), 'errors');
+      showToast(message, kind, options);
+    },
+  });
 
   // Tamanho da página vem do seletor; valor estranho cai no padrão.
   const initialSize = dom['preview-page-size']?.value;

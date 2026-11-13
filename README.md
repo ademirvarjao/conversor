@@ -209,12 +209,29 @@ O **ícone da marca** na barra superior leva para uma **página própria** (`con
 - **Conta de contrapartida digitada à mão**: a barra do lote tem **dois campos** — **Débitos vazios** e **Créditos vazios** —, cada um preenchendo só a sua coluna, e só onde ela está vazia (com ou sem pontos: `500046`, `5.00.046`). A aplicação vale para os lançamentos marcados, para todos os filtrados ou só para os que ainda estão sem contrapartida; um campo em branco não mexe na coluna do outro e, com os dois em branco, a ação limpa o que foi digitado à mão. Cada linha também tem o seu próprio campo, no painel de vínculo. A contrapartida **não substitui** a conta do contato: ela completa a **coluna oposta** (pagamento: débito tem o fornecedor → contrapartida no crédito; recebimento: crédito tem o cliente → contrapartida no débito). As colunas **debito** e **credito** da tabela também são editáveis **somente onde estão vazias** — clique na célula e digite a conta (com ou sem pontos) para completar o lançamento; contas que vieram do cadastro do contato não são sobrescritas por ali e o que foi digitado à mão continua reeditável para correção. O valor entra normalmente nas exportações.
 - **Seleção em massa e tamanho da página**: o checkbox do cabeçalho marca **todos os lançamentos do filtro atual** (não só os da página) e o botão **Limpar seleção** desfaz tudo de uma vez; ao lado da paginação há o seletor **Linhas por página** — **50**, **100**, **300**, **1000** ou **todas**. O contador `selecionados (N)` acompanha a seleção, que sobrevive à troca de página e de tamanho.
 - **Treino de contas no conciliador**: toda conta digitada — em lote, célula a célula ou no painel de vínculo — é memorizada **pelo histórico e pelo contato**. Na conciliação seguinte, o histórico já conhecido vem com a conta aplicada (2+ confirmações) ou como **chip de sugestão** clicável (1 confirmação), e o botão **Aplicar sugeridas** resolve o filtro inteiro. As sugestões aparecem também no painel de vínculo. O memorizado viaja no pacote cifrado da nuvem (`accounts`), então outra máquina com a mesma chave já recebe as contas.
-- **Painel da memória só para o administrador** (v1.24.0): o resumo “Memória: N históricos • N contatos com conta • N contatos conciliados” deixou de aparecer para todo mundo. No topo do conciliador fica só o botão **Administrador**; ao entrar com login e senha (a **mesma trava** da conexão do banco, em [`src/cloud-lock.js`](src/cloud-lock.js)), o resumo aparece por 1 hora naquela aba. Sem o desbloqueio o texto nem existe no DOM — quem abre o código-fonte da página não encontra os números. O limite de tentativas (5) e a espera de 30 s são os mesmos da aba Nuvem, e o desbloqueio feito na página principal vale aqui (mesma sessão).
+- **Resumo da memória só para o administrador** (v1.24.0 · movido para o painel na v1.26.0): o resumo “Memória: N históricos • N contatos com conta • N contatos conciliados” deixou de aparecer para todo mundo. Desde a v1.26.0 ele **existe apenas dentro do painel do administrador** — a barra do conciliador não mostra número nenhum, e sem o desbloqueio o painel não abre. O limite de tentativas (5) e a espera de 30 s são os mesmos da aba Nuvem, e o desbloqueio feito em qualquer página vale para o site inteiro (mesma aba).
 - **Painel do administrador** (v1.25.0): com o desbloqueio do administrador, o botão **Administrador** abre um painel com cinco abas — **Visão geral** (tempo nesta sessão, tempo total, média por sessão, gráfico dos últimos 14 dias, conciliações e últimos eventos), **Uso** (13 contadores: cadastros e extratos carregados, conciliações, lançamentos vinculados/para revisar/sem contato, exportações, vínculos à mão, contas digitadas, sugestões aceitas, envios e sincronizações da nuvem, erros), **Memória da IA** (perfis, vocabulário, assinaturas, contatos, apelidos, contas memorizadas, espaço usado no navegador e o histórico de aprendizado), **Logs** (até 300 eventos com filtro por tipo) e **Dispositivo e conta** (navegador, sistema, tela, fuso e o estado da chave/nuvem). O tempo só conta com a aba visível; nada sai do navegador. Sai um **relatório `.json`** completo (a chave de acesso à nuvem vai mascarada e a chave do LLM nunca aparece) e os **logs em `.csv`** com separador `;`, prontos para o Excel — e **Limpar histórico** (com confirmação) zera só o uso, sem tocar na memória da IA. O código está em [`src/admin-usage.js`](src/admin-usage.js) (dados) e [`src/admin-panel.js`](src/admin-panel.js) (telas).
 - **Backup sem segredo**: a exportação da memória (`.json`) sai **sem a chave do LLM** e a importação não sobrescreve a configuração local do provedor — o arquivo pode ir para o GitHub sem vazar chave.
 - **Edição e exclusão na planilha consolidada**: o **histórico é editável** linha a linha (clique no texto, Enter confirma, Esc cancela) e o texto corrigido vale para as exportações; o **✕** exclui um lançamento e o checkbox do cabeçalho marca **todos os lançamentos do filtro** (não só os da página) para **Excluir selecionados**. Nada é definitivo: **Restaurar excluídas (N)** devolve as linhas e as edições de histórico sobrevivem a remapear/treinar a IA. O seletor **Linhas por página** oferece **50**, **100** (padrão), **300**, **1000** ou **todas**, e os totais do resumo saem com separador de milhar — `1.128.118,12`.
 - **Exportação ao concluir**: **`.xlsx`**, **`.pdf`** e **`.csv`** no mesmo layout de cinco colunas, com linha de `TOTAIS` (soma só do `valor`). As contas saem como **texto** no Excel, para não perder zeros à esquerda. O CSV usa `;` como separador e vírgula decimal (abre direto no Excel em português), com BOM UTF-8 para preservar acentos.
 - **Tudo local**: os contatos e os lançamentos ficam no navegador. Só os modelos aprendidos (apelidos/pesos dessa conciliação) entram no pacote cifrado da nuvem, junto com o restante da memória da IA.
+
+### Engrenagem e painel do administrador em todo o site (v1.26.0)
+A **engrenagem** (⚙) fica na barra superior das **duas páginas** — Conversor e Conciliador — e abre o mesmo menu flutuante, com seções, ícone e uma linha de explicação em cada opção:
+
+| Seção | Opções | Onde |
+| --- | --- | --- |
+| **Administração** | Painel do administrador • atalho para Uso, tempo e logs | as duas |
+| **Memória da IA** | Memória e aprendizado • Exportar `.json` • Importar `.json` | as duas (backup só no Conversor) |
+| **Configurações** | Backup e chave do LLM • Nuvem e conta | Conversor |
+| **Ajuda** | Como funciona (README) | as duas |
+| **Sessão** | Bloquear administrador (só aparece quando está liberado) | as duas |
+
+- **Um painel, duas páginas**: a marcação do painel vem de `src/admin-panel.js` e o comportamento de `src/admin-console.js` — nenhuma página repete HTML. O menu é o mesmo: `src/gear-menu.js`.
+- **Acesso universal, com senha**: o painel abre pela engrenagem em qualquer página, mas só depois do login do administrador (a **mesma trava** da conexão do banco): 1 hora por aba, 5 tentativas e espera de 30 s. Quem entrou numa página já entra na outra; o ícone ganha um anel verde e a opção **Bloquear administrador** devolve o pedido de senha.
+- **Layout do menu**: `340 px` (ou a largura da tela no celular), posicionado abaixo do botão e nunca fora da janela; navegação por `↑` `↓` `Home` `End` `Esc` e clique fora para fechar, com foco devolvido à engrenagem.
+- **O uso agora é do site inteiro**: as duas páginas gravam no mesmo registro local — arquivos importados, lançamentos gerados, exportações, memória, nuvem e erros aparecem juntos nos contadores e no histórico.
+- **O resumo da memória vive no painel**: a visão geral e a aba **Memória da IA** mostram “Memória: N históricos • N contatos com conta • N contatos conciliados” — e a barra do conciliador não tem mais o texto.
 
 ### Nuvem dos modelos aprendidos (v1.5.0)
 Compartilhar o que a IA aprendeu entre computadores **sem senha e sem cadastro**:
@@ -342,7 +359,7 @@ npm test             # suíte completa (node:test), sem dependências externas
 npm run test:watch   # modo observador durante o desenvolvimento
 ```
 
-A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitura real de `.xlsx` gerados em memória, geometria de reconstrução de tabelas de PDF (com coordenadas sintéticas), motor de IA (classificação, treino, memória, importação de backups) e exportação (ida e volta `.xlsx` + geração de `.pdf` com jsPDF real).
+A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitura real de `.xlsx` gerados em memória, geometria de reconstrução de tabelas de PDF (com coordenadas sintéticas), motor de IA (classificação, treino, memória, importação de backups), exportação (ida e volta `.xlsx` + geração de `.pdf` com jsPDF real) e a área do administrador (registro de uso, painel, menu da engrenagem — inclusive teclado e foco — e a trava de acesso).
 
 ---
 
@@ -395,6 +412,8 @@ conversor/
 │   ├── sync-config.js            # URL + chave anônima padrão (públicas)
 │   ├── admin-usage.js            # Uso do navegador: sessões, tempo, contadores e logs
 │   ├── admin-panel.js            # Painel do administrador (dashboard, abas, tabelas)
+│   ├── admin-console.js          # Monta o painel em qualquer página + senha do administrador
+│   ├── gear-menu.js              # Menu da engrenagem (universal, com teclado e foco)
 │   └── styles.css                # Estilos responsivos + acessibilidade
 ├── layouts/
 │   └── comunidade.json           # Catálogo público de bancos (contribuição por PR)

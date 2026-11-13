@@ -68,6 +68,8 @@ function activityChart(days) {
 
 function counterList(counters) {
   const labels = [
+    ['filesLoaded', 'Arquivos importados'],
+    ['rowsProcessed', 'Lançamentos gerados'],
     ['contactsFiles', 'Cadastros carregados'],
     ['ledgerFiles', 'Extratos carregados'],
     ['reconciliations', 'Conciliações rodadas'],
@@ -137,6 +139,19 @@ function logFilters(events, active = 'all') {
 /*                                   Abas                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Resumo da memória da IA — o texto que antes ficava na barra do conciliador e
+ * agora aparece **só aqui dentro** do painel.
+ */
+function memorySummaryCard(ctx) {
+  const summary = ctx.memorySummary || { byHistory: 0, byContact: 0, contacts: 0, text: '' };
+  return `<div class="cp-admin-summary" role="note">
+      <span>Memória da IA</span>
+      <strong>${escapeHtml(summary.text || 'Memória: nenhuma conta memorizada ainda')}</strong>
+      <small>${summary.byHistory} conta(s) por histórico • ${summary.byContact} por contato • ${summary.contacts} contato(s) no cadastro</small>
+    </div>`;
+}
+
 /** Data/hora de um instante em ms, sem estourar quando o valor não existe. */
 function clockOf(ms) {
   const time = Number(ms);
@@ -149,6 +164,7 @@ function overviewTab(ctx) {
   const startedAt = Number(ctx.sessionStartedAt);
   const atual = Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : 0;
   return `
+    ${memorySummaryCard(ctx)}
     <div class="cp-admin-grid">
       ${info('Tempo nesta sessão', formatDuration(atual), `aberta em ${clockOf(startedAt)}`)}
       ${info('Tempo total de uso', formatDuration(summary.activeMs), `em ${summary.sessions} sessão(ões)`)}
@@ -214,6 +230,7 @@ function memoryTab(ctx) {
     .join('');
 
   return `
+    ${memorySummaryCard(ctx)}
     ${section(
       'O que a IA aprendeu',
       `<div class="cp-admin-grid cp-admin-grid-3">
@@ -331,4 +348,102 @@ export function lastActiveDay(usage, now = Date.now()) {
   const summary = usageSummary(usage, now);
   const active = summary.days.filter((day) => day.events > 0 || day.ms > 0);
   return active.length ? shortDay(active[active.length - 1].key) : '—';
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Marcação do painel (qualquer página)                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * HTML do painel. Fica aqui — e não nas páginas — para o painel ser **o mesmo**
+ * no Conversor e no Conciliador, sem duas cópias para manter sincronizadas.
+ * A página só injeta este texto e liga os botões (ver `src/admin-console.js`).
+ */
+export function adminPanelMarkup() {
+  const tabs = ADMIN_TABS.map(
+    (tab, index) =>
+      `<button class="mtab${index === 0 ? ' active' : ''}" type="button" role="tab" ` +
+      `data-cp-admin-tab="${tab.id}" aria-selected="${index === 0 ? 'true' : 'false'}" ` +
+      `id="tab-cp-admin-${tab.id}" aria-controls="cp-admin-body">${escapeHtml(tab.label)}</button>`
+  ).join('\n        ');
+
+  return `<div
+    id="cp-admin-panel"
+    class="modal-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="cp-admin-title"
+    aria-hidden="true"
+  >
+    <div class="modal-card cp-admin-panel-card">
+      <div class="modal-header">
+        <div>
+          <h2 id="cp-admin-title">Painel do administrador</h2>
+          <p class="modal-sub" id="cp-admin-headline">—</p>
+        </div>
+        <button id="btn-cp-admin-close" class="icon-btn" type="button" aria-label="Fechar painel">✕</button>
+      </div>
+
+      <div class="modal-tabs cp-admin-tabs" role="tablist" aria-label="Seções do painel">
+        ${tabs}
+      </div>
+
+      <div class="modal-body" id="cp-admin-body" role="tabpanel" tabindex="0"></div>
+
+      <div class="cp-admin-actions">
+        <button id="btn-cp-admin-lock" class="btn btn-sm btn-outline-dark" type="button" title="Pedir a senha de novo">Bloquear acesso</button>
+        <span class="cp-admin-spacer"></span>
+        <button id="btn-cp-admin-refresh" class="btn btn-sm btn-outline-dark" type="button">Atualizar</button>
+        <button id="btn-cp-admin-export" class="btn btn-sm btn-navy" type="button">Relatório .json</button>
+        <button id="btn-cp-admin-logs" class="btn btn-sm btn-outline-dark" type="button">Logs .csv</button>
+        <button id="btn-cp-admin-reset" class="btn btn-sm btn-danger-outline" type="button">Limpar histórico</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/**
+ * Diálogo de senha do administrador. Só aparece quando alguém tenta abrir o
+ * painel sem o desbloqueio válido (1 hora por aba, `src/cloud-lock.js`).
+ */
+export function adminGateMarkup() {
+  return `<div
+    id="admin-gate"
+    class="modal-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="admin-gate-title"
+    aria-hidden="true"
+  >
+    <form id="admin-gate-form" class="modal-card admin-gate-card" autocomplete="off" novalidate>
+      <div class="modal-header">
+        <div>
+          <h2 id="admin-gate-title">Acesso do administrador</h2>
+          <p class="modal-sub">Painel de uso, memória da IA e logs — liberado por 1 hora nesta aba</p>
+        </div>
+        <button id="btn-admin-gate-close" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="admin-gate-fields">
+          <div class="field-group">
+            <label for="admin-gate-user">Login</label>
+            <input id="admin-gate-user" type="text" autocomplete="username" spellcheck="false" placeholder="login do administrador" />
+          </div>
+          <div class="field-group">
+            <label for="admin-gate-password">Senha</label>
+            <input id="admin-gate-password" type="password" autocomplete="current-password" placeholder="senha" />
+          </div>
+        </div>
+        <p id="admin-gate-error" class="cloud-lock-error hidden" role="alert"></p>
+        <p class="admin-gate-note">
+          É a mesma senha da conexão do banco. Quem não é administrador pode usar o app inteiro — só este painel fica fechado.
+        </p>
+      </div>
+
+      <div class="admin-gate-actions">
+        <button id="btn-admin-gate-enter" class="btn btn-primary" type="submit">Entrar</button>
+      </div>
+    </form>
+  </div>`;
 }

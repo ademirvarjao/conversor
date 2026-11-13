@@ -64,9 +64,9 @@ test('os cliques na chave e a sincronização não passam pela trava', () => {
   const pullBody = conciliador.slice(conciliador.indexOf('async function pullModels'), conciliador.indexOf('function describeIdentity'));
   for (const [nome, corpo] of [['envio', pushBody], ['download', pullBody]]) {
     assert.ok(corpo.length > 200, `corpo do ${nome} encontrado`);
-    assert.doesNotMatch(corpo, /admin\.|loadUnlock|verifyCloudCredentials/, `${nome} não passa pela senha`);
+    assert.doesNotMatch(corpo, /adminConsole|loadUnlock|verifyCloudCredentials/, `${nome} não passa pela senha`);
   }
-  assert.match(conciliador, /function adminUnlocked\(\)/, 'a trava do conciliador é só do painel da memória');
+  assert.match(conciliador, /createAdminConsole\(/, 'a trava do conciliador é só do painel do administrador');
 });
 
 test('a configuração da trava continua sendo só hash (sem senha em texto puro)', () => {

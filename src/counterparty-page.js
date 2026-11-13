@@ -11,22 +11,9 @@
 
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
 import { STORAGE_KEY as AI_MEMORY_KEY, loadAiMemory, saveAiMemory } from './ai-engine.js';
-import {
-  MAX_EVENTS,
-  USAGE_KEY,
-  addActiveTime,
-  bumpCounter,
-  eventsToCsv,
-  formatDateTime,
-  formatDuration,
-  loadUsage,
-  recordEvent,
-  resetUsage,
-  saveUsage,
-  startSession,
-  usageReport,
-} from './admin-usage.js';
-import { adminPanelHeadline, renderAdminPanel } from './admin-panel.js';
+import { formatDateTime } from './admin-usage.js';
+import { createAdminConsole } from './admin-console.js';
+import { mountGearMenu } from './gear-menu.js';
 import { escapeHtml } from './html.js';
 import { installGlobalErrorReporting, reportStartupFailure } from './ui-errors.js';
 import {
@@ -67,7 +54,6 @@ import {
 import { formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
-import { LOCKOUT_MS, MAX_ATTEMPTS, loadUnlock, saveUnlock, verifyCloudCredentials } from './cloud-lock.js';
 import { loadSession } from './cloud-auth.js';
 import {
   loadCloudConfig,
@@ -140,7 +126,6 @@ const REQUIRED_IDS = [
   'cp-selected-count',
   'cp-account-hint',
   'btn-cp-apply-suggestions',
-  'cp-memory-state',
   'cp-link-memory',
   'cp-select-all',
   'cp-page-size',
@@ -162,20 +147,7 @@ const REQUIRED_IDS = [
   'btn-cp-export-pdf',
   'btn-cp-export-csv',
   'cp-cloud-state',
-  'btn-cp-admin',
-  'cp-admin-gate',
-  'cp-admin-user',
-  'cp-admin-password',
-  'btn-cp-admin-enter',
-  'cp-admin-error',
-  'cp-admin-panel',
-  'cp-admin-body',
-  'cp-admin-headline',
-  'btn-cp-admin-close',
-  'btn-cp-admin-refresh',
-  'btn-cp-admin-export',
-  'btn-cp-admin-logs',
-  'btn-cp-admin-reset',
+  'btn-gear',
   'toast-container',
   'app-version',
 ];
@@ -242,385 +214,73 @@ function cpAlert(message, tone = 'info') {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                 Uso, logs e painel do administrador                        */
+/*            Painel do administrador (universal, pela engrenagem)            */
 /* -------------------------------------------------------------------------- */
 
 /**
- * O painel do administrador é local: mostra o uso **deste navegador** (sessões,
- * tempo com a aba visível, conciliações, exportações), a memória da IA, os logs
- * de eventos e os dados do dispositivo. Nada aqui consulta servidor nem guarda
- * conteúdo de arquivo.
+ * O painel (uso, tempo, memória, logs) e o menu da engrenagem são **os mesmos**
+ * do resto do site — vêm de `admin-console.js` e `gear-menu.js`. Aqui só ligamos
+ * os dois à memória e à nuvem desta página.
  */
-const usage = loadUsage();
-const adminPanel = { tab: 'overview', open: false, logFilter: 'all', sessionStartedAt: Date.now() };
-const USAGE_TICK_MS = 30000;
-let activeAnchor = 0;
+let gear = null;
 
-function persistUsage() {
-  saveUsage(usage);
+const adminConsole = createAdminConsole({
+  page: 'conciliador',
+  getMemory: () => state.memory,
+  getCloud: () => ({
+    accessCode: cloud.identity ? formatAccessCode(cloud.identity.code) : '',
+    lastSync: cloud.identity?.lastSyncAt ? formatDateTime(cloud.identity.lastSyncAt) : '—',
+    host: cloud.config?.url ? cloud.config.url.replace(/^https?:\/\//i, '') : '',
+    account: sessionEmail(),
+    remote: cloud.identity ? 'sincronizado' : 'não verificado',
+  }),
+  notify: (message, kind) => showToast(message, kind || 'success'),
+  // Entrou ou bloqueou: o menu (e o ícone da engrenagem) mudam na hora.
+  onAccessChange: () => gear?.refresh(),
+});
+
+/** E-mail da conta na nuvem (ou "sem conta"), sem estourar se não houver sessão. */
+function sessionEmail() {
+  try {
+    return loadSession()?.email || 'sem conta';
+  } catch {
+    return 'sem conta';
+  }
 }
 
-/** Registra um evento no histórico (e, se pedido, soma um contador). */
+/** Atalhos usados no meio do fluxo de conciliação. */
 function track(type, message, details = '', counter = null, amount = 1) {
-  recordEvent(usage, { type, message, details }, Date.now());
-  if (counter) bumpCounter(usage, counter, amount, Date.now());
-  persistUsage();
+  adminConsole.track(type, message, details, counter, amount);
 }
 
 /** Só soma contador (edições em série não viram um evento cada). */
 function trackCount(counter, amount = 1) {
-  bumpCounter(usage, counter, amount, Date.now());
-  persistUsage();
+  adminConsole.count(counter, amount);
 }
 
-/**
- * Tempo de uso = tempo com a aba visível. Fecha o período quando a aba sai de
- * foco, ao trocar de página e a cada 30 s enquanto ela está aberta.
- */
-function flushActiveTime() {
-  if (!activeAnchor) return;
-  const now = Date.now();
-  addActiveTime(usage, now - activeAnchor, now);
-  activeAnchor = now;
-  persistUsage();
+/** Abre o painel na aba pedida (o console cuida da senha). */
+function openAdminPanel(tab) {
+  adminConsole.open(tab);
 }
 
-function watchActiveTime() {
-  activeAnchor = document.visibilityState === 'visible' ? Date.now() : 0;
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      activeAnchor = Date.now();
-      return;
-    }
-    flushActiveTime();
-    activeAnchor = 0;
-  });
-  window.addEventListener('pagehide', flushActiveTime);
-  setInterval(flushActiveTime, USAGE_TICK_MS);
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes) || 0;
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1).replace('.', ',')} KB`;
-  return `${(value / (1024 * 1024)).toFixed(2).replace('.', ',')} MB`;
-}
-
-/** Quanto cada coisa ocupa no navegador (só o tamanho, nunca o conteúdo). */
-function storageSizes() {
-  const sizes = { memory: 0, usage: 0, total: 0, keys: 0 };
-  try {
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key) continue;
-      const size = key.length + (localStorage.getItem(key) || '').length;
-      sizes.total += size;
-      sizes.keys += 1;
-      if (key === AI_MEMORY_KEY) sizes.memory = size;
-      if (key === USAGE_KEY) sizes.usage = size;
-    }
-  } catch {
-    /* modo privado: mostra "—" */
-  }
+/** Menu da engrenagem: as opções desta página. */
+function gearContext() {
   return {
-    memory: sizes.memory ? formatBytes(sizes.memory) : '—',
-    usage: sizes.usage ? formatBytes(sizes.usage) : '—',
-    total: sizes.total ? formatBytes(sizes.total) : '—',
-    keys: sizes.keys,
+    unlocked: adminConsole.isUnlocked(),
+    hasMemoryModal: false,
+    profiles: Array.isArray(state.memory.learnedProfiles) ? state.memory.learnedProfiles.length : 0,
+    version: APP_VERSION,
   };
 }
 
-/** Navegador, sistema e tela — o que o app consegue saber sem pedir permissão. */
-function deviceRows() {
-  const nav = typeof navigator !== 'undefined' ? navigator : {};
-  const ua = String(nav.userAgent || '');
-  const browser =
-    /Edg\//.test(ua) ? 'Edge'
-    : /OPR\//.test(ua) ? 'Opera'
-    : /Firefox\//.test(ua) ? 'Firefox'
-    : /Chrome\//.test(ua) ? 'Chrome'
-    : /Safari\//.test(ua) ? 'Safari'
-    : 'não identificado';
-  const system =
-    /Windows/.test(ua) ? 'Windows'
-    : /Android/.test(ua) ? 'Android'
-    : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
-    : /Mac OS X/.test(ua) ? 'macOS'
-    : /Linux/.test(ua) ? 'Linux'
-    : 'não identificado';
-  const screenInfo =
-    typeof screen !== 'undefined' ? `${screen.width}×${screen.height} (janela ${window.innerWidth}×${window.innerHeight})` : '—';
-  const tz = (() => {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || '—';
-    } catch {
-      return '—';
-    }
-  })();
-
-  return [
-    ['Navegador', browser],
-    ['Sistema', system],
-    ['Idioma', nav.language || '—'],
-    ['Fuso horário', tz],
-    ['Tela', screenInfo],
-    ['Densidade', `${window.devicePixelRatio || 1}×`],
-    ['Núcleos de CPU', nav.hardwareConcurrency ? String(nav.hardwareConcurrency) : '—'],
-    ['Memória do aparelho', nav.deviceMemory ? `${nav.deviceMemory} GB` : 'não informado'],
-    ['Conexão', nav.connection?.effectiveType ? nav.connection.effectiveType.toUpperCase() : 'não informada'],
-    ['Toque', nav.maxTouchPoints > 0 ? `sim (${nav.maxTouchPoints} ponto(s))` : 'não'],
-  ];
-}
-
-/** Resumo da nuvem já formatado para o painel. */
-function cloudSummary() {
-  const identity = cloud.identity;
-  let account = 'sem conta';
-  try {
-    const saved = loadSession();
-    account = saved?.email || 'sem conta';
-  } catch {
-    /* sem sessão guardada */
+function handleGearAction(id) {
+  if (id === 'admin') adminConsole.open('overview');
+  else if (id === 'admin-usage') adminConsole.open('usage');
+  else if (id === 'memory') adminConsole.open('memory');
+  else if (id === 'lock') adminConsole.lock();
+  else if (id === 'docs') {
+    window.open('https://github.com/ademirvarjao/conversor#readme', '_blank', 'noopener');
   }
-  return {
-    accessCode: identity ? formatAccessCode(identity.code) : '',
-    lastSync: identity?.lastSyncAt ? formatDateTime(identity.lastSyncAt) : '—',
-    host: cloud.config?.url ? cloud.config.url.replace(/^https?:\/\//i, '') : '',
-    account,
-    remote: identity ? 'sincronizado' : 'não verificado',
-    auto: true,
-  };
-}
-
-/** Redesenha o corpo do painel (aba atual). */
-function renderAdminPanelBody() {
-  const body = dom['cp-admin-body'];
-  if (!body) return;
-
-  body.innerHTML = renderAdminPanel({
-    tab: adminPanel.tab,
-    usage,
-    memory: state.memory,
-    device: { rows: deviceRows() },
-    cloud: cloudSummary(),
-    storage: storageSizes(),
-    logFilter: adminPanel.logFilter,
-    sessionStartedAt: adminPanel.sessionStartedAt,
-  });
-  if (dom['cp-admin-headline']) dom['cp-admin-headline'].textContent = adminPanelHeadline(usage);
-
-  document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
-    const active = button.dataset.cpAdminTab === adminPanel.tab;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-selected', String(active));
-  });
-}
-
-function openAdminPanel() {
-  const panel = dom['cp-admin-panel'];
-  if (!panel) return;
-  flushActiveTime();
-  adminPanel.open = true;
-  renderAdminPanelBody();
-  panel.classList.remove('hidden');
-  panel.setAttribute('aria-hidden', 'false');
-  dom['btn-cp-admin-close']?.focus();
-  track('sessao', 'Painel do administrador aberto');
-}
-
-function closeAdminPanel() {
-  const panel = dom['cp-admin-panel'];
-  if (!panel || panel.classList.contains('hidden')) return;
-  adminPanel.open = false;
-  panel.classList.add('hidden');
-  panel.setAttribute('aria-hidden', 'true');
-  dom['btn-cp-admin']?.focus();
-}
-
-/** Baixa um arquivo de texto gerado no navegador. */
-function downloadTextFile(content, filename, mime) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function adminFileName(extension) {
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  return `painel-administrador-${stamp}.${extension}`;
-}
-
-function exportAdminReport() {
-  flushActiveTime();
-  const report = usageReport(
-    {
-      usage,
-      memory: state.memory,
-      device: Object.fromEntries(deviceRows()),
-      cloud: cloudSummary(),
-      appVersion: APP_VERSION,
-    },
-    Date.now()
-  );
-  downloadTextFile(JSON.stringify(report, null, 2), adminFileName('json'), 'application/json');
-  track('exportacao', 'Relatório do painel exportado', '.json');
-  showToast('Relatório do painel exportado em .json.');
-}
-
-function exportAdminLogs() {
-  const csv = `\ufeff${eventsToCsv(usage)}`;
-  downloadTextFile(csv, adminFileName('csv'), 'text/csv;charset=utf-8');
-  track('exportacao', 'Logs do painel exportados', '.csv');
-  showToast('Logs exportados em .csv (separador ";" — abre direto no Excel).');
-}
-
-function resetAdminHistory() {
-  if (!window.confirm('Apagar o histórico de uso e os logs deste navegador? A memória da IA não é afetada.')) return;
-  const fresh = resetUsage();
-  Object.assign(usage, fresh);
-  persistUsage();
-  adminPanel.sessionStartedAt = Date.now();
-  renderAdminPanelBody();
-  showToast('Histórico de uso apagado.', 'warn');
-}
-
-/* -------------------------------------------------------------------------- */
-/*                    Painel da memória (só administrador)                    */
-/* -------------------------------------------------------------------------- */
-
-/**
- * O resumo "Memória: N históricos • N contatos…" é informação de administração.
- * Ele só aparece depois de o dono entrar com login e senha, usando **a mesma
- * trava da conexão do banco** (`cloud-lock.js`): o desbloqueio fica na sessão da
- * aba por 1 hora, então quem liberou na página principal já encontra liberado
- * aqui, e quem nunca entrou não vê número nenhum.
- */
-const admin = {
-  unlocked: Boolean(loadUnlock()),
-  attempts: 0,
-  cooldownUntil: 0,
-};
-
-/** `true` só enquanto o desbloqueio vale; expirou, volta a esconder. */
-function adminUnlocked() {
-  if (!admin.unlocked) return false;
-  if (loadUnlock()) return true;
-  admin.unlocked = false;
-  return false;
-}
-
-function setAdminError(message) {
-  const box = dom['cp-admin-error'];
-  if (!box) return;
-  box.textContent = message;
-  box.classList.toggle('hidden', !message);
-}
-
-/**
- * Estado do acesso administrativo: o botão fica sempre no topo (é ele que abre
- * o login ou, já liberado, o painel completo), o formulário só aparece quando
- * ainda falta entrar e o resumo da memória só com o desbloqueio válido.
- */
-function renderAdminState() {
-  const unlocked = adminUnlocked();
-  const toggle = dom['btn-cp-admin'];
-  if (toggle) {
-    toggle.hidden = false;
-    toggle.title = unlocked
-      ? 'Abrir o painel do administrador (uso, memória, logs)'
-      : 'Entrar como administrador para ver o painel';
-    toggle.dataset.state = unlocked ? 'unlocked' : 'locked';
-    toggle.setAttribute('aria-label', unlocked ? 'Abrir o painel do administrador' : 'Entrar como administrador');
-  }
-  if (unlocked) {
-    dom['cp-admin-gate']?.classList.add('hidden');
-    toggle?.setAttribute('aria-expanded', 'false');
-    setAdminError('');
-  }
-  renderMemoryState();
-}
-
-async function submitAdminGate(event) {
-  event?.preventDefault();
-  const now = Date.now();
-  if (admin.cooldownUntil > now) {
-    setAdminError(`Muitas tentativas. Aguarde ${Math.ceil((admin.cooldownUntil - now) / 1000)}s.`);
-    return;
-  }
-
-  const user = dom['cp-admin-user']?.value || '';
-  const password = dom['cp-admin-password']?.value || '';
-  if (!user.trim() || !password) {
-    setAdminError('Informe login e senha.');
-    return;
-  }
-
-  const button = dom['btn-cp-admin-enter'];
-  if (button) button.disabled = true;
-  try {
-    const ok = await verifyCloudCredentials(user, password);
-    if (!ok) {
-      admin.attempts += 1;
-      if (admin.attempts >= MAX_ATTEMPTS) {
-        admin.attempts = 0;
-        admin.cooldownUntil = Date.now() + LOCKOUT_MS;
-        setAdminError('Muitas tentativas erradas. Aguarde 30 segundos.');
-      } else {
-        setAdminError(`Login ou senha incorretos (${admin.attempts}/${MAX_ATTEMPTS}).`);
-      }
-      if (dom['cp-admin-password']) dom['cp-admin-password'].value = '';
-      return;
-    }
-
-    admin.attempts = 0;
-    admin.cooldownUntil = 0;
-    admin.unlocked = true;
-    saveUnlock();
-    if (dom['cp-admin-password']) dom['cp-admin-password'].value = '';
-    renderAdminState();
-    openAdminPanel();
-    showToast('Painel do administrador liberado nesta aba por 1 hora.', 'success');
-  } catch (error) {
-    setAdminError(error?.message || 'Não foi possível validar a senha.');
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-/**
- * Mostra o quanto a memória já sabe sobre contas (treino do conciliador).
- * Sem o desbloqueio do administrador o resumo fica oculto e o texto é limpo,
- * para não sobrar número no DOM.
- */
-function renderMemoryState() {
-  const element = dom['cp-memory-state'];
-  if (!element) return;
-
-  const show = adminUnlocked();
-  element.classList.toggle('hidden', !show);
-  element.hidden = !show;
-  if (!show) {
-    element.textContent = '';
-    // Se o desbloqueio venceu com a página aberta, o acesso volta a aparecer.
-    if (dom['btn-cp-admin']) dom['btn-cp-admin'].hidden = false;
-    return;
-  }
-
-  const summary = accountMemorySummary(state.memory);
-  const contacts = Object.keys(sanitizeCounterparties(state.memory.counterparties).contacts).length;
-  if (summary.total === 0 && contacts === 0) {
-    element.textContent = 'Memória: nenhuma conta memorizada ainda';
-    return;
-  }
-
-  element.textContent =
-    `Memória: ${summary.byHistory} histórico(s) • ${summary.byContact} contato(s) com conta` +
-    (contacts > 0 ? ` • ${contacts} contato(s) conciliado(s)` : '');
 }
 
 /**
@@ -639,7 +299,6 @@ function rememberAccount(row, side, account, { persist = true } = {}) {
 
   if (persist) {
     persistMemory();
-    renderMemoryState();
     scheduleCloudPush();
   }
 }
@@ -739,7 +398,6 @@ async function pullModels({ silent = true } = {}) {
     const before = state.memory;
     state.memory = mergeVaultPayload(state.memory, remote.payload);
     persistMemory();
-    renderMemoryState();
     cloud.identity = touchIdentitySync({ ...cloud.identity }, remote.updatedAt);
 
     const novos = Math.max(0, (state.memory.counterparties?.uses || 0) - (before.counterparties?.uses || 0));
@@ -1052,7 +710,6 @@ async function runReconciliation() {
     state.memory.stats.correctionsLearned =
       (state.memory.stats.correctionsLearned || 0) + Math.max(0, after - before);
     persistMemory();
-    renderMemoryState();
     scheduleCloudPush();
 
     render();
@@ -1064,10 +721,9 @@ async function runReconciliation() {
       'reconciliations'
     );
     // Soma os números da rodada (linhas, não eventos).
-    bumpCounter(usage, 'rowsReconciled', stats.matched, Date.now());
-    bumpCounter(usage, 'rowsReview', stats.ambiguous, Date.now());
-    bumpCounter(usage, 'rowsUnmatched', stats.unmatched, Date.now());
-    persistUsage();
+    trackCount('rowsReconciled', stats.matched);
+    trackCount('rowsReview', stats.ambiguous);
+    trackCount('rowsUnmatched', stats.unmatched);
 
     const suggested = rows.filter((row) => row.accountSuggestion).length;
     const fromMemory = rows.filter((row) => row.counterpartSource === 'memory').length;
@@ -1476,7 +1132,6 @@ function applySuggestionsBatch() {
   }
 
   persistMemory();
-  renderMemoryState();
   scheduleCloudPush();
 
   state.stats = summarizeReconciliation(state.rows);
@@ -1538,7 +1193,6 @@ function applyAccountBatch() {
   }
 
   persistMemory();
-  renderMemoryState();
   scheduleCloudPush();
 
   state.stats = summarizeReconciliation(state.rows);
@@ -1787,7 +1441,6 @@ function applyLink(code) {
   if (row.debitAccount) rememberAccount(row, 'debit', row.debitAccount, { persist: false });
   if (row.creditAccount) rememberAccount(row, 'credit', row.creditAccount, { persist: false });
   persistMemory();
-  renderMemoryState();
   scheduleCloudPush();
 
   state.stats = summarizeReconciliation(state.rows);
@@ -1888,62 +1541,8 @@ function bindEvents() {
 
   dom['btn-cp-apply-suggestions']?.addEventListener('click', applySuggestionsBatch);
 
-  // Administrador: sem desbloqueio abre o login; com desbloqueio abre o painel.
-  dom['btn-cp-admin']?.addEventListener('click', () => {
-    if (adminUnlocked()) {
-      openAdminPanel();
-      return;
-    }
-    const gate = dom['cp-admin-gate'];
-    if (!gate) return;
-    const open = gate.classList.toggle('hidden') === false;
-    dom['btn-cp-admin'].setAttribute('aria-expanded', String(open));
-    setAdminError('');
-    if (open) dom['cp-admin-user']?.focus();
-  });
-  dom['cp-admin-gate']?.addEventListener('submit', (event) => void submitAdminGate(event));
-
-  // ---- painel do administrador ----
-  dom['btn-cp-admin-close']?.addEventListener('click', closeAdminPanel);
-  dom['btn-cp-admin-refresh']?.addEventListener('click', () => {
-    flushActiveTime();
-    renderAdminPanelBody();
-    showToast('Painel atualizado.');
-  });
-  dom['btn-cp-admin-export']?.addEventListener('click', exportAdminReport);
-  dom['btn-cp-admin-logs']?.addEventListener('click', exportAdminLogs);
-  dom['btn-cp-admin-reset']?.addEventListener('click', resetAdminHistory);
-
-  dom['cp-admin-panel']?.addEventListener('click', (event) => {
-    // Clique no fundo escuro fecha o painel (clique no cartão, não).
-    if (event.target === dom['cp-admin-panel']) closeAdminPanel();
-  });
-
-  document.querySelectorAll('[data-cp-admin-tab]').forEach((button) => {
-    button.addEventListener('click', () => {
-      adminPanel.tab = button.dataset.cpAdminTab;
-      renderAdminPanelBody();
-    });
-  });
-
-  // Filtro dos logs: guarda o tipo escolhido e redesenha a aba.
-  dom['cp-admin-body']?.addEventListener('click', (event) => {
-    const chip = event.target.closest('[data-cp-admin-log]');
-    if (!chip) return;
-    adminPanel.logFilter = chip.dataset.cpAdminLog || 'all';
-    renderAdminPanelBody();
-  });
-
-  // Esc fecha o painel e o login do administrador.
-  document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
-    if (adminPanel.open) {
-      closeAdminPanel();
-      return;
-    }
-    dom['cp-admin-gate']?.classList.add('hidden');
-    dom['btn-cp-admin']?.setAttribute('aria-expanded', 'false');
-  });
+  // Engrenagem: menu universal com o painel do administrador, a memória e a ajuda.
+  gear = mountGearMenu({ ctx: gearContext, onAction: handleGearAction });
 
   dom['cp-tbody']?.addEventListener('change', (event) => {
     const cell = event.target.closest('[data-cp-cell]');
@@ -2030,14 +1629,6 @@ function bindEvents() {
 function init() {
   cacheDom();
 
-  // Uso deste navegador: sessão nova + um contador de aberturas por dia.
-  startSession(usage);
-  bumpCounter(usage, 'sessions', 1, Date.now());
-  persistUsage();
-  watchActiveTime();
-  recordEvent(usage, { type: 'sessao', message: 'Conciliação aberta' }, Date.now());
-  persistUsage();
-
   installGlobalErrorReporting({
     scope: 'Conciliador',
     notify: (message, kind, options) => {
@@ -2059,18 +1650,15 @@ function init() {
 
   counterpartyMemory();
   renderCloudState(describeIdentity(), 'idle');
-  // Quem já entrou como administrador na página principal (mesma aba do
-  // navegador) não digita a senha de novo para ver o painel.
-  if (loadUnlock()) admin.unlocked = true;
-  renderAdminState();
+  // Painel do administrador: marcação, sessão de uso e tempo ativo. O
+  // desbloqueio feito na página principal (mesma aba) vale aqui também.
+  adminConsole.mount();
   bindEvents();
   render();
   // Sem botão de sincronizar: puxa a nuvem sozinho na abertura e ao voltar o foco.
   scheduleCloudPull();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    renderAdminState(); // o desbloqueio do administrador expira em 1 hora
-    if (adminPanel.open) renderAdminPanelBody();
     scheduleCloudPull(1500);
   });
 
