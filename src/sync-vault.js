@@ -170,6 +170,11 @@ export function buildVaultPayload(memory, options = {}) {
     learningLog: safe.learningLog,
     stats: safe.stats,
     counterparties: safe.counterparties,
+    // Layouts memorizados e leituras de OCR sobem junto: é o que faz a memória
+    // sobreviver à troca de navegador/computador. Vai cifrado no mesmo
+    // envelope (o banco continua guardando só o slot + pacote cifrado).
+    layoutSignatures: safe.layoutSignatures,
+    ocrRuns: safe.ocrRuns,
   };
 }
 
@@ -188,6 +193,8 @@ export function applyVaultPayload(currentMemory, payload) {
     learningLog: payload.learningLog,
     stats: payload.stats,
     counterparties: payload.counterparties,
+    layoutSignatures: payload.layoutSignatures,
+    ocrRuns: payload.ocrRuns,
   });
 
   const localLlm = currentMemory?.optionalLlm;
@@ -332,6 +339,40 @@ export function mergeVaultPayload(currentMemory, payload) {
     tokenWeights[token] = merged;
   }
 
+  // Layouts: união pela assinatura das colunas; soma de usos e a data mais
+  // recente. Um layout aprendido em outra máquina passa a valer aqui.
+  const signatures = new Map();
+  for (const signature of [...remote.layoutSignatures, ...local.layoutSignatures]) {
+    const key = signature.signature;
+    const existing = signatures.get(key);
+    if (!existing) {
+      signatures.set(key, signature);
+      continue;
+    }
+    signatures.set(key, {
+      ...(stamp(signature.lastUsedAt) >= stamp(existing.lastUsedAt) ? signature : existing),
+      usageCount: Math.max(Number(existing.usageCount) || 1, Number(signature.usageCount) || 1),
+      createdAt:
+        stamp(existing.createdAt) > 0 && stamp(existing.createdAt) < stamp(signature.createdAt)
+          ? existing.createdAt
+          : signature.createdAt,
+    });
+  }
+  const layoutSignatures = [...signatures.values()].sort(
+    (a, b) => stamp(b.lastUsedAt) - stamp(a.lastUsedAt)
+  );
+
+  // Leituras de OCR: união por arquivo (mantém a mais recente).
+  const ocrByFile = new Map();
+  for (const run of [...remote.ocrRuns, ...local.ocrRuns]) {
+    const key = String(run.fileName || '').toLowerCase();
+    const existing = ocrByFile.get(key);
+    if (!existing || stamp(run.createdAt) >= stamp(existing.createdAt)) ocrByFile.set(key, run);
+  }
+  const ocrRuns = [...ocrByFile.values()].sort(
+    (a, b) => stamp(b.createdAt) - stamp(a.createdAt)
+  );
+
   return normalizeMemory({
     tokenWeights,
     learnedProfiles,
@@ -344,7 +385,8 @@ export function mergeVaultPayload(currentMemory, payload) {
     counterparties: mergeCounterparties(local.counterparties, remote.counterparties),
     // Preferências que nunca sobem para a nuvem continuam sendo as daqui.
     optionalLlm: local.optionalLlm,
-    layoutSignatures: local.layoutSignatures,
+    layoutSignatures,
+    ocrRuns,
     settings: local.settings,
   });
 }

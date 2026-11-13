@@ -6,7 +6,7 @@
  * que todos os IDs existem de fato no HTML).
  */
 
-export const APP_VERSION = '1.28.0';
+export const APP_VERSION = '1.29.0';
 
 export const REQUIRED_ELEMENT_IDS = [
   'dropzone',
@@ -85,7 +85,10 @@ export const REQUIRED_ELEMENT_IDS = [
   'btn-reset-memory',
   'llm-provider',
   'llm-apikey',
+  'llm-model',
+  'llm-hint',
   'btn-save-llm',
+  'cloud-memory-note',
   'toast-container',
   'processing-banner',
   'processing-text',

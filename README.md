@@ -22,6 +22,7 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Relatórios de contas recebidas/pagas**: validação cruzada em julho/2026 — o arquivo "Contas Recebidas por Cliente" e o extrato de recebimentos do mesmo período geram **99 lançamentos, R$ 1.180.552,88 e as mesmas 99 combinações data+valor** (diferença zero).
 - **Extratos paginados**: o cabeçalho/rodapé repetido em cada página é descartado (inclusive a linha `Conta Corrente :`), sem contaminar a última linha da página anterior — validado em extrato real de 6 páginas com reconciliação total contra o saldo (293 lançamentos, diferença zero).
 - Vários arquivos ao mesmo tempo (ex.: Pagamentos + Recebimentos), com detecção de duplicados, limite de tamanho e progresso de leitura por página.
+- **PDF escaneado (imagem)**: quando o PDF não tem camada de texto, o app rasteriza as páginas e lê por **OCR offline** (Tesseract.js vendorizado, idioma `por`), refazendo a tabela com as mesmas regras geométricas do PDF normal — ver *OCR de PDFs digitalizados* abaixo.
 
 ### Padronização em 3 colunas
 | Coluna | Formato |
@@ -295,6 +296,62 @@ botão), então nenhuma regra de navegador/extensão consegue deixar as seis aba
 foco do teclado virou uma **caixa** em volta da aba — antes ele desenhava um risco embaixo e se
 confundia com "selecionada".
 
+### OCR de PDFs digitalizados (v1.29.0)
+A limitação "PDF escaneado não tem texto" deixou de ser um beco sem saída. Se a camada de texto do PDF
+não rende nenhum lançamento, o Conversor:
+
+1. rasteriza cada página em um canvas (**escala 3×**, fundo branco) com o PDF.js que já estava no app —
+   medido: em 2× um `03` de data saiu `63`; em 3× a leitura ficou limpa. Páginas gigantes são reduzidas
+   automaticamente para não estourar a memória do celular;
+2. lê a página com o **Tesseract.js 7** e o idioma **português** (`por.traineddata`, variante *best*),
+   ambos servidos do próprio site em [`vendor/tesseract/`](vendor/tesseract) — **sem CDN** e sem chave;
+3. converte as palavras reconhecidas (com as coordenadas de cada uma) para o mesmo formato de linhas
+   do PDF.js — invertendo o eixo Y, porque no OCR ele cresce para baixo — e deixa a reconstrução de
+   colunas por conta do `buildTableFromTextLines`, que é o mesmo código do PDF normal;
+4. conserta os dígitos que o OCR costuma confundir (`O`→`0`, `I`→`1`, `S`→`5`, `B`→`8`, `Z`→`2`),
+   **apenas em tokens que já têm número** — `SALDO` e `HISTORICO` continuam palavras — e, quando o
+   dia/mês da data é impossível (`63/01/2026`), testa a troca de **um** dígito por um parecido e só
+   aceita se houver uma única correção possível (nunca inventa data).
+
+O core SIMD é o preferido (duas vezes mais rápido) e o core sem SIMD entra como plano B. O progresso
+aparece na tela de upload página por página ("PDF escaneado: aplicando OCR…"). O reconhecimento é
+local: nenhuma página sai do navegador. Validado com um PDF só-imagem de um extrato de 4 colunas:
+**94,2% de confiança e os cinco lançamentos com data, valor e histórico exatos** — inclusive a linha
+que o OCR lia errado antes do ajuste de escala.
+
+### Memória de layout no banco (v1.29.0)
+A memória da IA deixou de ser só do navegador. O pacote que sobe para o Supabase agora leva, além dos
+perfis e do vocabulário:
+
+- **`layoutSignatures`** — as assinaturas de layout (colunas + papéis + banco) que reconhecem variações;
+- **`ocrRuns`** — um registro por PDF escaneado lido: arquivo, páginas lidas, **confiança do OCR**,
+  colunas reconhecidas e quantidade de lançamentos.
+
+Na sincronização automática os dois lados são **somados**: assinaturas pela chave (ficando o uso mais
+recente e a maior contagem) e leituras de OCR por arquivo (ficando a mais recente). Nada é apagado, e a
+**chave do LLM continua só no navegador**. O pacote inteiro vai **cifrado** (AES-GCM com a chave de
+acesso): o banco segue guardando apenas o **slot + pacote fechado**, e a chave anônima continua sem
+poder de `DELETE` — a exclusão só existe na função `SECURITY DEFINER`. O aviso na aba **Nuvem** mostra o
+que está guardado: layouts treinados, assinaturas e PDFs lidos por OCR.
+
+### Conector LLM com plano gratuito (v1.29.0)
+O conector deixou de depender de um provedor pago. A lista agora começa pelos gratuitos:
+
+| Provedor | Modelo padrão | Limite do plano gratuito |
+| --- | --- | --- |
+| **Groq** | `openai/gpt-oss-120b` | ~30 pedidos/min, 1.000/dia |
+| **OpenRouter** | `openai/gpt-oss-120b:free` | 50 pedidos/dia (1.000/dia após US$ 10) |
+| **Google Gemini** | `gemini-2.5-flash` | cota diária do AI Studio |
+| OpenAI (paga) | `gpt-4o-mini` | exige crédito |
+
+Groq, OpenRouter e OpenAI falam o **mesmo protocolo** (compatível com a OpenAI), então é uma única
+chamada com URL/modelo trocados; Gemini mantém o `generateContent`. Quando o modelo gratuito recusa o
+modo JSON (`response_format`), a chamada é repetida sem ele e o JSON é extraído do texto. Erro **429**
+vira uma mensagem que explica a cota e lembra que a **IA local** continua funcionando sem chave. O
+campo **Modelo (opcional)** permite trocar o modelo sem atualizar o app — necessário porque o catálogo
+gratuito muda com o tempo. Nenhum desses planos é ilimitado; o caminho sem cota continua sendo a IA
+local, que não faz requisição nenhuma.
+
 ### Layout do painel (v1.27.0 · corrigido na v1.27.1)
 - **O cartão é uma grade, não uma coluna flex** (v1.27.1): com `display: grid` e
   `grid-template-rows: auto auto minmax(0, 1fr) auto`, cabeçalho, abas e rodapé ficam na **altura natural**
@@ -480,7 +537,8 @@ conversor/
 ├── scripts/serve.mjs             # Servidor estático de desenvolvimento
 ├── src/
 │   ├── app.js                    # Controlador de UI, upload, filtros, modal
-│   ├── parsers.js                # PDF (extração + geometria) e XLSX
+│   ├── parsers.js                # PDF (extração + geometria), OCR e XLSX
+│   ├── ocr.js                    # OCR offline de PDFs digitalizados (Tesseract.js)
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
 │   ├── seed-profiles.js          # Perfis de fábrica (extratos Itaú e Bradesco)
 │   ├── training-coach.js         # Treinador automático (diagnóstico + conferência de saldo)
@@ -509,7 +567,7 @@ conversor/
 │   ├── migrations/               # Migração aplicada sozinha pela integração Supabase + GitHub
 │   └── schema.sql                # Mesmo schema, para aplicação manual de emergência
 ├── test/                         # Suíte node:test
-├── vendor/                       # PDF.js, ExcelJS, jsPDF (offline, sem CDN)
+├── vendor/                       # PDF.js, ExcelJS, jsPDF, Tesseract (offline, sem CDN)
 └── .github/workflows/            # deploy (Pages) + testes
 ```
 
@@ -530,16 +588,24 @@ conversor/
 | --- | --- | --- |
 | O workflow de deploy falha em **“Configurar GitHub Pages”** com `Get Pages site failed ... Not Found` | O site do Pages nunca foi habilitado no repositório | **Settings → Pages → Source: GitHub Actions** e rode o workflow novamente |
 | A página do Pages abre sem estilo / sem funcionar | O deploy publicou apenas parte dos arquivos | Rode o workflow novamente; ele publica `index.html`, `src/` e `vendor/` (incluindo `src/parsers.js`) |
-| “Nenhum texto extraível encontrado” ao importar PDF | PDF escaneado (sem camada de texto) | Use um PDF exportado do sistema de origem ou aplique OCR antes |
+| PDF escaneado converte com valores trocados | Resolução baixa na digitalização | Use um PDF com pelo menos 200 dpi; o app informa a confiança do OCR no aviso de importação |
+| “O leitor de OCR também foi acionado, mas não conseguiu ler…” | Página ilegível (foto torta, baixa resolução) | Digitalize de novo ou use o `.xlsx`/`.csv` do internet banking |
+| “Cota gratuita do … esgotada agora (429)” | Limite diário do provedor de LLM | Aguarde, troque de provedor ou deixe o conector desativado (a IA local resolve) |
 | Valores de entrada e saída aparecem com o mesmo sinal | As duas colunas foram marcadas com a mesma função | Marque uma como *Valor Recebido / Crédito (+)* e a outra como *Valor Pago / Débito (-)* no Passo 2 |
 | Planilha importa muitas linhas ignoradas | Linhas sem data ou sem valor na coluna mapeada | Ajuste o mapeamento no **Passo 2** — a IA aprende com a correção |
 
 ## Limitações conhecidas
 
-- PDFs **escaneados (imagem)** não possuem camada de texto e precisam de OCR — a aplicação informa isso com uma mensagem clara.
+- PDFs **escaneados (imagem)**: lidos por OCR offline (Tesseract vendorizado). Funciona bem em extratos
+  digitalizados a partir de 200 dpi; página torta, manchada ou com fonte decorativa ainda pode errar um
+  dígito — o aviso de importação traz a **confiança** do reconhecimento e vale conferir o total.
 - Planilhas com layout realmente atípico podem exigir ajuste manual no **Passo 2** (é justamente esse ajuste que alimenta o aprendizado).
-- A memória da IA é **por navegador**: use exportar/importar JSON para compartilhar entre máquinas.
-- O conector LLM depende de CORS e da cota da sua conta no provedor; sem ele, tudo continua funcionando offline.
+- A memória da IA deixou de ser só do navegador: com uma **chave de acesso** os layouts e as leituras de
+  OCR vão cifrados para o Supabase e voltam em outro computador. Sem chave (ou offline), vale o
+  `localStorage` deste navegador e o exportar/importar JSON.
+- O conector LLM usa os planos gratuitos de **Groq**, **OpenRouter** e **Gemini**. O CORS é dos próprios
+  provedores e as cotas gratuitas são finitas: quando acabam, o Conversor segue 100% offline com a IA local.
+- O OCR carrega o idioma (`por.traineddata`, ~1,4 MB) na primeira leitura; depois fica em cache no navegador.
 
 ## Licença
 

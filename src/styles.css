@@ -1652,8 +1652,35 @@ body {
 
 .llm-grid {
   display: grid;
-  grid-template-columns: 1fr 1.4fr;
+  /* `minmax(0, …)` impede o campo de estourar o cartão: sem isso o input
+     empurra a terceira coluna para fora do modal. */
+  grid-template-columns: 1.2fr minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+}
+
+.llm-grid > .field-group {
+  min-width: 0;
+}
+
+.llm-grid input,
+.llm-grid select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.llm-grid input:disabled,
+.llm-grid select:disabled {
+  background: var(--bg-soft, #f3f4f6);
+  color: var(--text-muted);
+}
+
+/* Aviso do conector: qual provedor é grátis e o que acontece sem chave. */
+.llm-hint {
+  margin: 10px 0 0 !important;
+  font-size: 0.76rem !important;
+  color: var(--text-muted);
+  line-height: 1.45;
 }
 
 .btn-row {

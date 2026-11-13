@@ -8,7 +8,7 @@
   <meta name="color-scheme" content="light" />
   <meta name="theme-color" content="#0f2744" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="./src/styles.css?v=1.28.0" />
+  <link rel="stylesheet" href="./src/styles.css?v=1.29.0" />
 </head>
 <body>
   <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
@@ -398,7 +398,7 @@
 
   <footer class="site-footer">
     <div class="container site-footer-inner">
-      <p>Conversor <span id="app-version" class="footer-version">v1.28.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
+      <p>Conversor <span id="app-version" class="footer-version">v1.29.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.</p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>
   </footer>
@@ -458,22 +458,29 @@
           </div>
 
           <div class="settings-block">
-            <h3>Conector LLM Opcional (OpenAI / Gemini)</h3>
-            <p>O Conversor funciona 100% offline com IA local. Opcionalmente, informe uma chave própria para analisar layouts inéditos via nuvem. A chave fica salva apenas neste navegador.</p>
+            <h3>Conector LLM Opcional (Groq / OpenRouter / Gemini)</h3>
+            <p>O Conversor funciona 100% offline com IA local. Se precisar de ajuda em um layout inédito, escolha um provedor com <strong>plano gratuito</strong>: Groq e OpenRouter usam modelos abertos (gpt-oss-120b) e o Gemini tem cota diária grátis. Nenhum deles é ilimitado — quando a cota do dia acaba, a IA local continua resolvendo. A chave fica salva apenas neste navegador.</p>
             <div class="llm-grid">
               <div class="field-group">
                 <label for="llm-provider">Provedor</label>
                 <select id="llm-provider">
                   <option value="none">Desativado (IA Local apenas)</option>
-                  <option value="openai">OpenAI (gpt-4o-mini)</option>
-                  <option value="gemini">Google Gemini (2.0 Flash)</option>
+                  <option value="groq">Groq — grátis (gpt-oss-120b)</option>
+                  <option value="openrouter">OpenRouter — modelos :free</option>
+                  <option value="gemini">Google Gemini — cota grátis (2.5 Flash)</option>
+                  <option value="openai">OpenAI — paga (gpt-4o-mini)</option>
                 </select>
               </div>
               <div class="field-group">
                 <label for="llm-apikey">API Key</label>
-                <input id="llm-apikey" type="password" placeholder="sk-... ou AIza..." autocomplete="off" spellcheck="false" />
+                <input id="llm-apikey" type="password" placeholder="gsk_... / sk-or-v1-... / AIza..." autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="field-group">
+                <label for="llm-model">Modelo (opcional)</label>
+                <input id="llm-model" type="text" placeholder="padrão do provedor" autocomplete="off" spellcheck="false" />
               </div>
             </div>
+            <p id="llm-hint" class="llm-hint">Sem chave e sem cota: o Conversor usa a IA local do navegador.</p>
             <div class="btn-row modal-row-spaced">
               <button id="btn-save-llm" class="btn btn-sm btn-primary" type="button">Salvar Configuração</button>
             </div>
@@ -615,6 +622,9 @@
               existe aqui — nenhum aprendizado é apagado, e a chave do LLM continua só neste
               navegador.
             </p>
+            <p id="cloud-memory-note" class="cloud-hint">
+              Na memória guardada no banco: 0 layout(s) e 0 PDF(s) escaneado(s) lido(s) por OCR.
+            </p>
           </div>
 
           <div class="settings-block cloud-admin">
@@ -704,6 +714,6 @@
   <script src="./vendor/exceljs/exceljs.min.js"></script>
   <script src="./vendor/jspdf/jspdf.umd.min.js"></script>
   <script src="./vendor/jspdf/jspdf.plugin.autotable.min.js"></script>
-  <script type="module" src="./src/app.js?v=1.28.0"></script>
+  <script type="module" src="./src/app.js?v=1.29.0"></script>
 </body>
 </html>

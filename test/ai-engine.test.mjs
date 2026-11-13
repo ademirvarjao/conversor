@@ -7,6 +7,11 @@ import {
   analyzeFileLayout,
   analyzeWithOptionalLlm,
   computeColumnProfiles,
+  LLM_PROVIDER_IDS,
+  FREE_LLM_PROVIDER_IDS,
+  MAX_OCR_RUNS,
+  defaultLlmModel,
+  registerOcrRun,
   loadAiMemory,
   normalizeMemory,
   resetAiMemory,
@@ -812,5 +817,222 @@ describe('analyzeWithOptionalLlm', () => {
       /Nenhum provedor LLM externo configurado/
     );
     await assert.rejects(() => analyzeWithOptionalLlm(statementFile, null), /Nenhum provedor/);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                    Memória de OCR e provedores gratuitos                   */
+/* -------------------------------------------------------------------------- */
+
+describe('memória de OCR', () => {
+  it('começa vazia e sobrevive à normalização', () => {
+    const memory = normalizeMemory({});
+    assert.deepEqual(memory.ocrRuns, []);
+  });
+
+  it('descarta registros inválidos e mantém o formato', () => {
+    const memory = normalizeMemory({
+      ocrRuns: [
+        { fileName: 'extrato.pdf', confidence: 92.66, pageCount: 2, pagesRead: 2, headers: ['Data', 'Valor'], rowCount: 10 },
+        { fileName: '' },
+        'lixo',
+        { fileName: 'outro.pdf', confidence: -5, pageCount: -1 },
+      ],
+    });
+    assert.equal(memory.ocrRuns.length, 2);
+    assert.equal(memory.ocrRuns[0].confidence, 92.7);
+    assert.deepEqual(memory.ocrRuns[0].headers, ['Data', 'Valor']);
+    assert.equal(memory.ocrRuns[1].confidence, 0);
+    assert.equal(memory.ocrRuns[1].pageCount, 0);
+  });
+
+  it('registra a leitura sem mutar a memória original', () => {
+    const original = normalizeMemory({});
+    const updated = registerOcrRun(original, {
+      fileName: 'Extrato escaneado.pdf',
+      confidence: 94.5,
+      pageCount: 3,
+      pagesRead: 3,
+      headers: ['Data', 'Historico', 'Valor'],
+      rowCount: 42,
+    });
+
+    assert.equal(original.ocrRuns.length, 0);
+    assert.equal(updated.ocrRuns.length, 1);
+    assert.equal(updated.ocrRuns[0].fileType, 'pdf');
+    assert.equal(updated.ocrRuns[0].rowCount, 42);
+    assert.ok(updated.ocrRuns[0].id.startsWith('ocr-'));
+  });
+
+  it('atualiza o registro do mesmo arquivo em vez de duplicar', () => {
+    const first = registerOcrRun(normalizeMemory({}), { fileName: 'Extrato.pdf', rowCount: 5 });
+    const second = registerOcrRun(first, { fileName: 'extrato.pdf', rowCount: 9 });
+
+    assert.equal(second.ocrRuns.length, 1);
+    assert.equal(second.ocrRuns[0].rowCount, 9);
+    assert.equal(second.ocrRuns[0].id, first.ocrRuns[0].id);
+  });
+
+  it('guarda no máximo MAX_OCR_RUNS leituras', () => {
+    let memory = normalizeMemory({});
+    for (let index = 0; index < MAX_OCR_RUNS + 5; index++) {
+      memory = registerOcrRun(memory, {
+        fileName: `extrato-${index}.pdf`,
+        createdAt: new Date(2026, 0, index + 1).toISOString(),
+      });
+    }
+    assert.equal(memory.ocrRuns.length, MAX_OCR_RUNS);
+  });
+});
+
+describe('conector LLM com plano gratuito', () => {
+  const withFetch = async (impl, task) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = impl;
+    try {
+      return await task();
+    } finally {
+      globalThis.fetch = original;
+    }
+  };
+
+  it('oferece Groq e OpenRouter com modelo padrão', () => {
+    assert.ok(LLM_PROVIDER_IDS.includes('groq'));
+    assert.ok(LLM_PROVIDER_IDS.includes('openrouter'));
+    assert.ok(FREE_LLM_PROVIDER_IDS.includes('groq'));
+    assert.ok(FREE_LLM_PROVIDER_IDS.includes('openrouter'));
+    assert.equal(FREE_LLM_PROVIDER_IDS.includes('openai'), false);
+    assert.equal(defaultLlmModel('groq'), 'openai/gpt-oss-120b');
+    assert.equal(defaultLlmModel('openrouter'), 'openai/gpt-oss-120b:free');
+    // Gemini 2.0 saiu do ar: o padrão precisa ser um modelo atual.
+    assert.notEqual(defaultLlmModel('gemini'), 'gemini-2.0-flash');
+  });
+
+  it('aceita os novos provedores na memória salva', () => {
+    const memory = normalizeMemory({ optionalLlm: { provider: 'groq', apiKey: 'gsk_123', model: '' } });
+    assert.equal(memory.optionalLlm.provider, 'groq');
+    assert.equal(memory.optionalLlm.apiKey, 'gsk_123');
+  });
+
+  it('chama a API da Groq com o modelo aberto padrão', async () => {
+    let captured = null;
+    const result = await withFetch(
+      async (url, init) => {
+        captured = { url: String(url), init };
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    layoutName: 'Extrato Groq',
+                    defaultSign: 'auto',
+                    roles: ['date', 'ignore', 'history', 'value_in', 'value_out', 'ignore'],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+      () => analyzeWithOptionalLlm(statementFile, { provider: 'groq', apiKey: 'gsk_teste' })
+    );
+
+    assert.equal(captured.url, 'https://api.groq.com/openai/v1/chat/completions');
+    assert.equal(captured.init.headers.Authorization, 'Bearer gsk_teste');
+    const body = JSON.parse(captured.init.body);
+    assert.equal(body.model, 'openai/gpt-oss-120b');
+    assert.equal(body.response_format.type, 'json_object');
+    assert.equal(result.layoutName, 'Extrato Groq');
+    assert.equal(result.roles.length, statementFile.headers.length);
+  });
+
+  it('repete sem response_format quando o modelo gratuito recusa o modo JSON', async () => {
+    const bodies = [];
+    const result = await withFetch(
+      async (_url, init) => {
+        bodies.push(JSON.parse(init.body));
+        if (bodies.length === 1) {
+          return new Response('{"error":"response_format not supported"}', { status: 400 });
+        }
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '```json\n{"layoutName":"Sem modo JSON","defaultSign":"auto","roles":["date","ignore","history","value_in","value_out","ignore"]}\n```',
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      },
+      () =>
+        analyzeWithOptionalLlm(statementFile, {
+          provider: 'openrouter',
+          apiKey: 'sk-or-v1-teste',
+          model: 'modelo/custom:free',
+        })
+    );
+
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0].response_format.type, 'json_object');
+    assert.equal('response_format' in bodies[1], false);
+    assert.equal(bodies[1].model, 'modelo/custom:free');
+    assert.equal(result.layoutName, 'Sem modo JSON');
+  });
+
+  it('explica a cota gratuita esgotada', async () => {
+    await withFetch(
+      async () => new Response('rate limit', { status: 429 }),
+      async () => {
+        await assert.rejects(
+          () => analyzeWithOptionalLlm(statementFile, { provider: 'groq', apiKey: 'gsk_teste' }),
+          (error) => {
+            assert.match(error.message, /Cota gratuita/);
+            assert.match(error.message, /IA local/);
+            return true;
+          }
+        );
+      }
+    );
+  });
+
+  it('usa o modelo padrão atualizado no Gemini', async () => {
+    let url = '';
+    let body = null;
+    await withFetch(
+      async (target, init) => {
+        url = String(target);
+        body = JSON.parse(init.body);
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        layoutName: 'Gemini',
+                        defaultSign: 'auto',
+                        roles: ['date', 'ignore', 'history', 'value_in', 'value_out', 'ignore'],
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      },
+      () => analyzeWithOptionalLlm(statementFile, { provider: 'gemini', apiKey: 'AIza-teste' })
+    );
+
+    assert.match(url, /models\/gemini-2\.5-flash:generateContent/);
+    assert.equal(body.generationConfig.responseMimeType, 'application/json');
   });
 });
