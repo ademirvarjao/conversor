@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Conversor web de conciliações financeiras (.pdf e .xlsx) com IA adaptativa de layouts",
+  "author": "Ademir Varjão",
   "keywords": [
     "conciliacao",
     "financeiro",
@@ -22,5 +23,5 @@
   "engines": {
     "node": ">=20"
   },
-  "license": "MIT"
+  "license": "SEE LICENSE IN LICENSE"
 }
