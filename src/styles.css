@@ -427,15 +427,6 @@ body {
   background: #e0e7ff;
 }
 
-.btn-outline-light {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-.btn-outline-light:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
-
 .btn-ghost {
   background: transparent;
   color: #e2e8f0;
