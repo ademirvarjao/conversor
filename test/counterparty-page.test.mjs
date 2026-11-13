@@ -161,6 +161,26 @@ describe('página do conciliador', () => {
     assert.ok(page.includes('.cp-cell-account') === false, 'o estilo fica no CSS');
   });
 
+  it('mostra os totais dos cartões com separador de milhar, como no conversor', () => {
+    for (const id of ['cp-kpi-debit', 'cp-kpi-credit', 'cp-kpi-value']) {
+      assert.match(
+        module,
+        new RegExp(`set\\('${id}', formatValueGroupedBr\\(`),
+        `o cartão ${id} precisa do formato com milhar`
+      );
+    }
+    assert.equal(
+      /set\('cp-kpi-(?:debit|credit|value)', formatValuePlainBr/.test(module),
+      false,
+      'nenhum total de cartão pode ficar sem o ponto de milhar'
+    );
+    assert.match(
+      module,
+      /import \{[^}]*formatValueGroupedBr[^}]*\} from '\.\/format\.js'/,
+      'o módulo precisa importar o formatador com milhar'
+    );
+  });
+
   it('mostra o estado dos modelos da nuvem no topo, sem botões de sincronizar', () => {
     assert.ok(page.includes('id="cp-cloud-state"'), 'o estado continua visível');
     // A sincronização é automática: nenhum botão de enviar/baixar no topo.
