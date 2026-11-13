@@ -51,7 +51,7 @@ import {
   exportCounterpartiesPdf,
   exportCounterpartiesXlsx,
 } from './exporters.js';
-import { formatValuePlainBr } from './format.js';
+import { formatValueGroupedBr, formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
 import { loadSession } from './cloud-auth.js';
@@ -971,11 +971,13 @@ function render() {
     `${stats.matched} conciliados • ${stats.ambiguous} para revisar` +
       (stats.byDocument ? ` • ${stats.byDocument} por CPF/CNPJ` : '')
   );
-  set('cp-kpi-debit', formatValuePlainBr(stats.debitCents / 100));
+  // Totais dos cartões no mesmo formato do conversor: com separador de milhar
+  // (3.023.524,00). A tabela continua sem milhar, como a planilha do conversor.
+  set('cp-kpi-debit', formatValueGroupedBr(stats.debitCents / 100));
   set('cp-kpi-suppliers', `${stats.suppliers} fornecedores`);
-  set('cp-kpi-credit', formatValuePlainBr(stats.creditCents / 100));
+  set('cp-kpi-credit', formatValueGroupedBr(stats.creditCents / 100));
   set('cp-kpi-customers', `${stats.customers} clientes`);
-  set('cp-kpi-value', formatValuePlainBr(stats.valueCents / 100));
+  set('cp-kpi-value', formatValueGroupedBr(stats.valueCents / 100));
   set('cp-kpi-review', `${stats.unmatched} sem contato`);
 
   if (dom['cp-learned']) {
