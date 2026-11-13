@@ -27,6 +27,18 @@ describe('página do conciliador', () => {
     assert.match(page, /id="btn-gear"/, 'as opções ficam na engrenagem');
   });
 
+  it('o caminho de volta é só o ícone da marca (sem botão redundante)', () => {
+    const topbar = page.slice(page.indexOf('class="topbar-actions"'), page.indexOf('</header>'));
+    assert.equal([...topbar.matchAll(/<a\b/g)].length, 0, 'nada de link de texto no canto direito');
+    assert.equal(page.includes('>Conversor</a>'), false, 'o botão "Conversor" saiu');
+    assert.match(
+      page,
+      /class="brand-icon brand-back"\s+href="\.\/index\.html"/,
+      'o ícone da marca é o caminho de volta'
+    );
+    assert.match(page, /aria-label="Voltar para a conciliação unificada"/, 'e continua acessível');
+  });
+
   it('carrega as bibliotecas offline e o módulo da página como módulo', () => {
     for (const source of [
       './vendor/exceljs/exceljs.min.js',
