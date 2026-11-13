@@ -325,13 +325,51 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.24.0</span> — os arquivos nunca saem do navegador.
+        Conversor <span id="app-version" class="footer-version">v1.25.0</span> — os arquivos nunca saem do navegador.
       </p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>
   </footer>
 
   <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Painel do administrador: dashboard, uso, memória, logs e dispositivo.
+       Só abre depois do login do administrador (src/cloud-lock.js). -->
+  <div
+    id="cp-admin-panel"
+    class="modal-backdrop hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="cp-admin-title"
+    aria-hidden="true"
+  >
+    <div class="modal-card cp-admin-panel-card">
+      <div class="modal-header">
+        <div>
+          <h2 id="cp-admin-title">Painel do administrador</h2>
+          <p class="modal-sub" id="cp-admin-headline">Carregando…</p>
+        </div>
+        <button id="btn-cp-admin-close" class="icon-btn" type="button" aria-label="Fechar painel">✕</button>
+      </div>
+
+      <div class="modal-tabs cp-admin-tabs" role="tablist" aria-label="Seções do painel">
+        <button class="mtab active" type="button" role="tab" data-cp-admin-tab="overview" aria-selected="true">Visão geral</button>
+        <button class="mtab" type="button" role="tab" data-cp-admin-tab="usage" aria-selected="false">Uso</button>
+        <button class="mtab" type="button" role="tab" data-cp-admin-tab="memory" aria-selected="false">Memória da IA</button>
+        <button class="mtab" type="button" role="tab" data-cp-admin-tab="logs" aria-selected="false">Logs</button>
+        <button class="mtab" type="button" role="tab" data-cp-admin-tab="device" aria-selected="false">Dispositivo e conta</button>
+      </div>
+
+      <div class="modal-body" id="cp-admin-body" role="tabpanel" tabindex="0"></div>
+
+      <div class="cp-admin-actions">
+        <button id="btn-cp-admin-refresh" class="btn btn-sm btn-outline-dark" type="button">Atualizar</button>
+        <button id="btn-cp-admin-export" class="btn btn-sm btn-navy" type="button">Relatório .json</button>
+        <button id="btn-cp-admin-logs" class="btn btn-sm btn-outline-dark" type="button">Logs .csv</button>
+        <button id="btn-cp-admin-reset" class="btn btn-sm btn-danger-outline" type="button">Limpar histórico</button>
+      </div>
+    </div>
+  </div>
 
   <script src="./vendor/exceljs/exceljs.min.js"></script>
   <script src="./vendor/jspdf/jspdf.umd.min.js"></script>

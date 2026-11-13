@@ -1,0 +1,283 @@
+/**
+ * Painel do administrador (`src/admin-panel.js`) e a porta de entrada dele no
+ * conciliador.
+ *
+ * O painel é a entrega da tarefa: dashboard, uso, memória da IA, logs e dados do
+ * dispositivo — tudo local e só depois do login do administrador. Aqui testamos
+ * o HTML gerado (inclusive o escape do que o usuário digitou) e o que o
+ * controlador precisa fazer para ele funcionar.
+ */
+
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { describe, it } from 'node:test';
+
+import { ADMIN_TABS, adminPanelHeadline, lastActiveDay, renderAdminPanel } from '../src/admin-panel.js';
+import { normalizeUsage, recordEvent, addActiveTime, bumpCounter, startSession } from '../src/admin-usage.js';
+
+const ROOT = new URL('../', import.meta.url);
+const html = await readFile(new URL('conciliador.html', ROOT), 'utf8');
+const page = await readFile(new URL('src/counterparty-page.js', ROOT), 'utf8');
+const styles = await readFile(new URL('src/styles.css', ROOT), 'utf8');
+
+const NOW = Date.parse('2026-11-11T14:30:00.000Z');
+
+function sampleUsage() {
+  const usage = normalizeUsage(null, NOW);
+  startSession(usage, NOW);
+  addActiveTime(usage, 90 * 60_000, NOW);
+  bumpCounter(usage, 'reconciliations', 3, NOW);
+  bumpCounter(usage, 'rowsReconciled', 120, NOW);
+  bumpCounter(usage, 'exports', 2, NOW);
+  recordEvent(usage, { type: 'conciliacao', message: 'Conciliação: 120 de 180', details: '12 para revisar' }, NOW);
+  recordEvent(usage, { type: 'exportacao', message: 'PDF gerado', details: '180 lançamento(s)' }, NOW);
+  return usage;
+}
+
+function baseCtx(overrides = {}) {
+  return {
+    tab: 'overview',
+    usage: sampleUsage(),
+    memory: {
+      learnedProfiles: [{ id: 'a' }, { id: 'b', builtIn: true }],
+      tokenWeights: { banco: 2 },
+      layoutSignatures: [{ id: 'x' }],
+      learningLog: [{ timestamp: new Date(NOW).toISOString(), message: 'Layout aprendido', details: 'Itaú' }],
+      counterparties: { contacts: { 1: {} }, aliases: { x: '1' }, accounts: { byHistory: {}, byContact: { a: '1' } } },
+    },
+    device: { rows: [['Navegador', 'Chrome'], ['Sistema', 'Linux']] },
+    cloud: { accessCode: 'GOG•••', lastSync: '11/11/2026, 14:00', host: 'abc.supabase.co', account: 'a@b.c', remote: 'sincronizado', auto: true },
+    storage: { memory: '12,3 KB', usage: '4,1 KB', total: '40 KB', keys: 7 },
+    sessionStartedAt: NOW - 10 * 60_000,
+    logFilter: 'all',
+    now: NOW,
+    ...overrides,
+  };
+}
+
+describe('painel do administrador: abas', () => {
+  it('são cinco, na ordem do HTML', () => {
+    assert.deepEqual(
+      ADMIN_TABS.map((tab) => tab.id),
+      ['overview', 'usage', 'memory', 'logs', 'device']
+    );
+    const order = ['Visão geral', 'Uso', 'Memória da IA', 'Logs', 'Dispositivo e conta'];
+    let cursor = -1;
+    for (const label of order) {
+      const index = html.indexOf(`>${label}<`, cursor + 1);
+      assert.ok(index > cursor, `a aba "${label}" aparece na ordem certa`);
+      cursor = index;
+    }
+  });
+
+  it('cada aba do HTML tem o botão que o controlador procura', () => {
+    for (const tab of ADMIN_TABS) {
+      assert.match(html, new RegExp(`data-cp-admin-tab="${tab.id}"`), `falta a aba ${tab.id}`);
+    }
+    assert.equal([...html.matchAll(/data-cp-admin-tab="/g)].length, ADMIN_TABS.length);
+  });
+
+  it('cada aba gera conteúdo próprio', () => {
+    const rendered = ADMIN_TABS.map((tab) => renderAdminPanel(baseCtx({ tab: tab.id })));
+    rendered.forEach((body, index) => {
+      assert.ok(body.length > 200, `a aba ${ADMIN_TABS[index].id} tem conteúdo`);
+      assert.equal(/undefined|NaN|\[object Object\]/.test(body), false, `a aba ${ADMIN_TABS[index].id} não mostra undefined`);
+    });
+    assert.equal(new Set(rendered).size, ADMIN_TABS.length, 'as abas não repetem o mesmo conteúdo');
+  });
+
+  it('aba desconhecida cai na visão geral', () => {
+    assert.equal(renderAdminPanel(baseCtx({ tab: 'inventada' })), renderAdminPanel(baseCtx({ tab: 'overview' })));
+  });
+
+  it('a visão geral traz os números do dashboard', () => {
+    const body = renderAdminPanel(baseCtx());
+    assert.match(body, /Tempo total de uso/);
+    assert.match(body, /1 h 30 min/, 'tempo acumulado');
+    assert.match(body, /Tempo nesta sessão/);
+    assert.match(body, /10 min/, 'tempo da sessão aberta');
+    assert.match(body, /Atividade dos últimos 14 dias/);
+    assert.equal([...body.matchAll(/class="cp-admin-bar"/g)].length, 14, '14 barras no gráfico');
+    assert.match(body, /Conciliações rodadas/);
+    assert.match(body, /Últimos eventos/);
+  });
+
+  it('a aba de uso mostra contadores e o tempo por período', () => {
+    const body = renderAdminPanel(baseCtx({ tab: 'usage' }));
+    for (const label of [
+      'Cadastros carregados',
+      'Extratos carregados',
+      'Conciliações rodadas',
+      'Lançamentos vinculados',
+      'Exportações geradas',
+      'Erros registrados',
+    ]) {
+      assert.ok(body.includes(label), `falta o contador "${label}"`);
+    }
+    assert.match(body, /Últimos 7 dias/);
+    assert.match(body, /Por tipo de evento/);
+  });
+
+  it('a aba da memória mostra o que a IA aprendeu e o espaço usado', () => {
+    const body = renderAdminPanel(baseCtx({ tab: 'memory' }));
+    assert.match(body, /O que a IA aprendeu/);
+    assert.match(body, /Perfis de layout/);
+    assert.match(body, /1 aprendido\(s\) aqui/, 'conta só os perfis não nativos');
+    assert.match(body, /Armazenamento neste navegador/);
+    assert.match(body, /12,3 KB/);
+    assert.match(body, /Layout aprendido/);
+    assert.match(body, /Só o tamanho dos dados/, 'avisa que o conteúdo não é guardado');
+  });
+
+  it('a aba de logs traz filtros e a tabela de eventos', () => {
+    const body = renderAdminPanel(baseCtx({ tab: 'logs' }));
+    assert.match(body, /id="cp-admin-log-table"/);
+    assert.match(body, /data-cp-admin-log="all"/);
+    assert.match(body, /data-cp-admin-log="conciliacao"/);
+    assert.match(body, /data-cp-admin-log="exportacao"/);
+    assert.equal([...body.matchAll(/<tr data-cp-admin-type=/g)].length, 2);
+  });
+
+  it('o filtro escolhido volta marcado e filtra as linhas', () => {
+    const body = renderAdminPanel(baseCtx({ tab: 'logs', logFilter: 'exportacao' }));
+    assert.match(body, /data-cp-admin-log="exportacao" aria-pressed="true"/);
+    assert.match(body, /data-cp-admin-log="all" aria-pressed="false"/);
+    const rows = [...body.matchAll(/<tr data-cp-admin-type="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(rows, ['exportacao'], 'só a exportação aparece');
+  });
+
+  it('a aba do dispositivo mostra navegador, nuvem e conta', () => {
+    const body = renderAdminPanel(baseCtx({ tab: 'device' }));
+    assert.match(body, /Este dispositivo/);
+    assert.match(body, /Chrome/);
+    assert.match(body, /Nuvem e conta/);
+    assert.match(body, /abc\.supabase\.co/);
+    assert.match(body, /sincronizado/);
+  });
+
+  it('aguenta dados vazios (primeiro uso)', () => {
+    for (const tab of ADMIN_TABS.map((entry) => entry.id)) {
+      const body = renderAdminPanel({ tab, usage: null });
+      assert.ok(body.length > 100);
+      assert.equal(/undefined|\bNaN\b/.test(body), false, `aba ${tab} limpa no primeiro uso`);
+    }
+    assert.match(renderAdminPanel({ tab: 'logs', usage: null }), /Nenhum evento registrado ainda/);
+  });
+});
+
+describe('painel do administrador: segurança do conteúdo', () => {
+  it('escapa o que veio do arquivo do usuário', () => {
+    const usage = normalizeUsage(null, NOW);
+    recordEvent(usage, { type: 'arquivo', message: '<img src=x onerror=alert(1)>', details: '"aspas" & <b>' }, NOW);
+    const body = renderAdminPanel(baseCtx({ tab: 'logs', usage }));
+    assert.equal(body.includes('<img src=x'), false, 'a mensagem não vira HTML');
+    assert.ok(body.includes('&lt;img src=x'), 'o texto aparece escapado');
+    assert.equal(body.includes('<b>'), false, 'os detalhes também são escapados');
+  });
+
+  it('escapa o nome do navegador e do aparelho', () => {
+    const body = renderAdminPanel(
+      baseCtx({ tab: 'device', device: { rows: [['Navegador', '<script>x</script>']] } })
+    );
+    assert.equal(body.includes('<script>'), false);
+  });
+
+  it('o cabeçalho resume sessões e tempo', () => {
+    assert.equal(adminPanelHeadline(sampleUsage(), NOW), '1 sessão(ões) • 1 h 30 min de uso • 1 dia(s) com atividade');
+    assert.equal(lastActiveDay(sampleUsage(), NOW), '11/11');
+    assert.equal(lastActiveDay(normalizeUsage(null, NOW), NOW), '—');
+  });
+});
+
+describe('painel do administrador: porta de entrada no conciliador', () => {
+  it('o HTML entrega o painel fechado e com todos os controles', () => {
+    assert.match(html, /id="cp-admin-panel"[\s\S]{0,120}aria-hidden="true"/);
+    assert.match(html, /id="cp-admin-panel"[\s\S]{0,80}class="modal-backdrop hidden"/);
+    for (const id of [
+      'cp-admin-title',
+      'cp-admin-headline',
+      'cp-admin-body',
+      'btn-cp-admin-close',
+      'btn-cp-admin-refresh',
+      'btn-cp-admin-export',
+      'btn-cp-admin-logs',
+      'btn-cp-admin-reset',
+    ]) {
+      assert.match(html, new RegExp(`id="${id}"`), `falta #${id}`);
+    }
+  });
+
+  it('o painel não vaza conteúdo antes do login: o corpo vem vazio', () => {
+    assert.match(html, /id="cp-admin-body"[^>]*>\s*<\/div>/, 'sem números na entrega');
+  });
+
+  it('os ids do painel estão na lista obrigatória de contrato', () => {
+    for (const id of [
+      'cp-admin-panel',
+      'cp-admin-body',
+      'cp-admin-headline',
+      'btn-cp-admin-close',
+      'btn-cp-admin-refresh',
+      'btn-cp-admin-export',
+      'btn-cp-admin-logs',
+      'btn-cp-admin-reset',
+    ]) {
+      assert.ok(page.includes(`'${id}'`), `#${id} fora de REQUIRED_IDS`);
+    }
+  });
+
+  it('o controlador só abre o painel com o desbloqueio do administrador', () => {
+    assert.match(page, /if \(adminUnlocked\(\)\) \{\s*openAdminPanel\(\);/);
+    assert.match(page, /function openAdminPanel\(\)[\s\S]{0,400}renderAdminPanelBody\(\)/);
+    assert.match(page, /saveUnlock\(\);[\s\S]{0,200}openAdminPanel\(\)/, 'abre logo depois do login');
+  });
+
+  it('registra sessão e tempo só com a aba visível', () => {
+    assert.match(page, /startSession\(usage\)/);
+    assert.match(page, /document\.visibilityState === 'visible' \? Date\.now\(\) : 0/);
+    assert.match(page, /addEventListener\('visibilitychange'/);
+    assert.match(page, /addEventListener\('pagehide', flushActiveTime\)/);
+  });
+
+  it('registra os eventos do fluxo de conciliação', () => {
+    for (const type of ['arquivo', 'conciliacao', 'vinculo', 'conta', 'exportacao', 'nuvem', 'sessao', 'erro']) {
+      assert.match(page, new RegExp(`'${type}'`), `nenhum evento do tipo ${type}`);
+    }
+    assert.match(page, /bumpCounter\(usage, 'rowsReconciled'/);
+    assert.match(page, /track\('exportacao', 'PDF gerado'/);
+  });
+
+  it('exporta o relatório e os logs pelo navegador', () => {
+    assert.match(page, /usageReport\(/);
+    assert.match(page, /eventsToCsv\(usage\)/);
+    assert.match(page, /URL\.createObjectURL/);
+    assert.match(page, /link\.download = filename/);
+  });
+
+  it('limpar o histórico pede confirmação', () => {
+    assert.match(page, /function resetAdminHistory\(\)[\s\S]{0,220}window\.confirm\(/);
+  });
+
+  it('Esc e o fundo fecham o painel', () => {
+    assert.match(page, /event\.target === dom\['cp-admin-panel'\]\) closeAdminPanel\(\)/);
+    assert.match(page, /if \(adminPanel\.open\) \{\s*closeAdminPanel\(\);/);
+  });
+
+  it('o CSS do painel acompanha o HTML', () => {
+    for (const rule of [
+      '.cp-admin-panel-card',
+      '.cp-admin-grid',
+      '.cp-admin-card',
+      '.cp-admin-chart',
+      '.cp-admin-bar',
+      '.cp-admin-table',
+      '.cp-admin-tag',
+      '.cp-admin-filters',
+      '.cp-admin-dl',
+      '.cp-admin-actions',
+    ]) {
+      assert.ok(styles.includes(rule), `falta ${rule} em styles.css`);
+    }
+    assert.match(styles, /@media \(max-width: 720px\)[\s\S]{0,400}cp-admin-grid/);
+  });
+});

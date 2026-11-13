@@ -21,7 +21,12 @@ describe('página do conciliador', () => {
     assert.match(page, /<title>[^<]*Conciliador/i);
     assert.match(page, /<a[^>]+href="\.\/index\.html"/, 'falta o caminho de volta');
     assert.equal(page.includes('cp-drawer'), false, 'a página não usa a barra lateral');
-    assert.equal(page.includes('modal-backdrop'), false, 'a página não usa modal');
+    // A página continua sendo uma página (não virou modal). A única exceção é o
+    // painel do administrador, que abre por cima depois do login e já vem
+    // escondido na entrega.
+    const modals = [...page.matchAll(/class="modal-backdrop[^"]*"/g)];
+    assert.equal(modals.length, 1, 'só o painel do administrador usa modal');
+    assert.match(page, /id="cp-admin-panel"\s+class="modal-backdrop hidden"/, 'o painel começa fechado');
   });
 
   it('carrega as bibliotecas offline e o módulo da página como módulo', () => {
