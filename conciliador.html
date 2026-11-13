@@ -37,11 +37,34 @@
       <div class="topbar-actions">
         <div class="cp-cloud">
           <span id="cp-cloud-state" class="cp-cloud-state" role="status">Modelos: carregando…</span>
-          <span id="cp-memory-state" class="cp-cloud-state cp-memory-state" role="status">Memória: carregando…</span>
+          <!-- Resumo da memória: só para o administrador (login + senha). -->
+          <span id="cp-memory-state" class="cp-cloud-state cp-memory-state hidden" role="status" hidden></span>
         </div>
+        <button
+          id="btn-cp-admin"
+          class="btn btn-sm btn-outline-light"
+          type="button"
+          aria-expanded="false"
+          aria-controls="cp-admin-gate"
+          title="Painel de memória da IA — só administrador"
+        >
+          Administrador
+        </button>
         <a class="btn btn-sm btn-outline-light" href="./index.html">Conversor</a>
       </div>
     </div>
+
+    <form id="cp-admin-gate" class="cp-admin-gate hidden" autocomplete="off" novalidate>
+      <div class="container cp-admin-gate-inner">
+        <span class="cp-admin-gate-label">Painel do administrador</span>
+        <label class="sr-only" for="cp-admin-user">Login do administrador</label>
+        <input id="cp-admin-user" type="text" placeholder="Login" autocomplete="username" spellcheck="false" />
+        <label class="sr-only" for="cp-admin-password">Senha do administrador</label>
+        <input id="cp-admin-password" type="password" placeholder="Senha" autocomplete="current-password" />
+        <button id="btn-cp-admin-enter" class="btn btn-sm btn-primary" type="submit">Entrar</button>
+        <p id="cp-admin-error" class="cp-admin-error hidden" role="alert"></p>
+      </div>
+    </form>
   </header>
 
   <main id="conteudo" class="container main-content cp-main">
@@ -302,7 +325,7 @@
   <footer class="site-footer">
     <div class="container site-footer-inner">
       <p>
-        Conversor <span id="app-version" class="footer-version">v1.23.1</span> — os arquivos nunca saem do navegador.
+        Conversor <span id="app-version" class="footer-version">v1.24.0</span> — os arquivos nunca saem do navegador.
       </p>
       <p class="footer-privacy">Sem cookies de rastreamento. Suas preferências e os layouts aprendidos ficam no seu navegador — só vão para a nuvem se você ligar a sincronização, cifrados com a sua chave.</p>
     </div>

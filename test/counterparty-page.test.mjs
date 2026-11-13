@@ -98,7 +98,8 @@ describe('página do conciliador', () => {
     for (const id of ['btn-cp-apply-suggestions', 'cp-memory-state', 'cp-link-memory']) {
       assert.ok(pageIds.includes(id), `falta #${id}`);
     }
-    assert.match(page, /Memória:/);
+    // O resumo da memória só aparece para o administrador (login + senha).
+    assert.match(module, /Memória: /);
     assert.match(module, /learnRowAccount/);
     assert.match(module, /data-cp-suggest/);
     assert.match(module, /function applySuggestion/);

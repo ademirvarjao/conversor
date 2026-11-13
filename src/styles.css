@@ -2190,6 +2190,56 @@ body {
   }
 }
 
+/* Painel do administrador (topo do conciliador): resumo da memória escondido
+   atrás de login + senha, na mesma trava da conexão do banco. */
+.cp-admin-gate {
+  background: rgba(8, 22, 38, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 10px 0;
+}
+
+.cp-admin-gate-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cp-admin-gate-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.cp-admin-gate input {
+  flex: 0 1 160px;
+  min-width: 130px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+
+.cp-admin-gate input::placeholder {
+  color: #94a3b8;
+}
+
+.cp-admin-gate input:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 1px;
+}
+
+.cp-admin-error {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #fca5a5;
+}
+
 @media (max-width: 720px) {
   .cp-main {
     padding-top: 14px;
