@@ -16,6 +16,7 @@ import { currentAccessToken } from './cloud-auth.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { decryptPayload, deriveAccessKeys, encryptPayload } from './sync-crypto.js';
 import { fetchRemoteVault, normalizeSupabaseConfig, saveRemoteVault } from './sync-client.js';
+import { markVaultBlocked, registerVault, touchVault } from './vault-registry.js';
 
 export const IDENTITY_KEY = 'conversor_cloud_identity_v1';
 export const CONFIG_KEY = 'conversor_cloud_config_v1';
@@ -72,12 +73,21 @@ export function loadIdentity(storage) {
 
 export function saveIdentity(identity, storage) {
   if (!identity?.code || !identity?.slot) return false;
-  return writeJson(storage, IDENTITY_KEY, {
+  const saved = writeJson(storage, IDENTITY_KEY, {
     code: identity.code,
     slot: identity.slot,
     createdAt: identity.createdAt || new Date().toISOString(),
     lastSyncAt: identity.lastSyncAt || null,
   });
+  // Toda chave que passa por aqui entra no registro do administrador: é a única
+  // forma de o painel mostrar o código (o banco só guarda o slot derivado).
+  if (saved) {
+    registerVault(
+      { code: identity.code, slot: identity.slot, source: identity.source || 'colada' },
+      storage
+    );
+  }
+  return saved;
 }
 
 export function touchIdentitySync(identity, timestamp = new Date().toISOString(), storage) {
@@ -197,6 +207,18 @@ export function isPayloadNewer(candidate, reference) {
   const candidateTime = Date.parse(candidate?.updatedAt || '') || 0;
   const referenceTime = Date.parse(reference?.updatedAt || '') || 0;
   return candidateTime > referenceTime;
+}
+
+/** Erro único para cofre bloqueado (a UI mostra a mesma frase em todo lugar). */
+export function vaultBlockedError(code, blockedAt = null) {
+  const error = new Error(
+    'Esta chave de acesso está bloqueada pelo administrador: o envio e o download de modelos ficam suspensos. ' +
+      'Use outra chave ou peça o desbloqueio no painel do administrador.'
+  );
+  error.code = 'VAULT_BLOCKED';
+  error.blockedAt = blockedAt;
+  error.accessCode = code;
+  return error;
 }
 
 /** Data em milissegundos (0 quando ausente ou inválida). */
@@ -358,7 +380,17 @@ export async function pushVault({
   // Com conta na nuvem o POST vai autenticado e o banco grava o cofre como
   // sendo dessa conta (owner_id = auth.uid()).
   const token = accessToken ?? (await currentAccessToken(normalized, { fetchImpl, storage }));
-  await saveRemoteVault(normalized, identity.slot, envelope, { fetchImpl, accessToken: token });
+  try {
+    await saveRemoteVault(normalized, identity.slot, envelope, { fetchImpl, accessToken: token });
+  } catch (error) {
+    // O banco barra a escrita de cofre bloqueado pelo administrador.
+    if (/conversor_vault_blocked|bloqueado pelo administrador/i.test(String(error?.detail || error?.message || ''))) {
+      throw vaultBlockedError(identity.code);
+    }
+    throw error;
+  }
+  touchVault(identity.slot, storage);
+  registerVault({ code: identity.code, slot: identity.slot }, storage);
   return { updatedAt, payload, owned: Boolean(token) };
 }
 
@@ -375,6 +407,13 @@ export async function pullVault({ config, identity, fetchImpl, iterations, acces
   const remote = await fetchRemoteVault(normalized, identity.slot, { fetchImpl, accessToken: token });
   if (!remote) return null;
 
+  if (remote.blockedAt) {
+    markVaultBlocked(identity.slot, remote.blockedAt, storage);
+    throw vaultBlockedError(identity.code, remote.blockedAt);
+  }
+  markVaultBlocked(identity.slot, null, storage);
+  touchVault(identity.slot, storage);
+
   const { aesKey } = await deriveAccessKeys(identity.code, { iterations });
   const payload = await decryptPayload(aesKey, remote.payload);
   return { payload, updatedAt: payload.updatedAt || remote.updatedAt };
@@ -386,5 +425,13 @@ export async function pullVault({ config, identity, fetchImpl, iterations, acces
  */
 export async function restoreIdentityFromCode(code, options = {}) {
   const { code: normalized, slot } = await deriveAccessKeys(code, options);
-  return { code: normalized, slot, createdAt: new Date().toISOString(), lastSyncAt: null };
+  return {
+    code: normalized,
+    slot,
+    createdAt: new Date().toISOString(),
+    lastSyncAt: null,
+    // Como a chave chegou aqui: criada, recuperada (mesma chave de outro
+    // computador) ou colada. Serve só para o painel do administrador.
+    source: ['criada', 'recuperada'].includes(options.source) ? options.source : 'colada',
+  };
 }

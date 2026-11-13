@@ -2733,22 +2733,57 @@ body {
 /* -------------------------------------------------------------------------- */
 
 .cp-admin-panel-card {
-  max-width: 940px;
+  max-width: 980px;
+  /* O cartão é uma coluna flex com altura máxima: sem isto, o corpo (que rola)
+     empurra a barra de ações para fora e os botões são cortados. */
+  min-height: 0;
+  overflow: hidden;
 }
 
+/* Abas: uma linha só, com rolagem lateral quando não couberem. Antes elas
+   quebravam em duas fileiras e desalinhavam o cabeçalho. */
 .cp-admin-tabs {
-  flex-wrap: wrap;
-  padding: 0 18px;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 0 14px;
   margin-bottom: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
 }
 
 .cp-admin-tabs .mtab {
+  flex: 0 0 auto;
   white-space: nowrap;
+  padding: 9px 12px;
+  scroll-snap-align: start;
+  border-radius: 8px 8px 0 0;
 }
 
+.cp-admin-tabs .mtab:hover {
+  color: var(--navy);
+  background: var(--surface-alt);
+}
+
+.cp-admin-tabs .mtab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+/* Área que rola: `min-height: 0` é o que permite o flex diminuir o corpo. */
 #cp-admin-body {
   padding-top: 14px;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+#cp-admin-body:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -3px;
 }
 
 .cp-admin-actions {
@@ -2756,9 +2791,10 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-  padding: 12px 20px;
+  padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface-alt);
+  flex: 0 0 auto;
 }
 
 .cp-admin-section {
@@ -2780,14 +2816,16 @@ body {
   color: var(--text-light);
 }
 
+/* Grade fluida: 4 colunas em tela cheia, 2 no tablet e 1 no celular — sem
+   depender de medidas fixas (que deixavam os cartões espremidos). */
 .cp-admin-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 168px), 1fr));
   gap: 8px;
 }
 
 .cp-admin-grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
 }
 
 .cp-admin-card {
@@ -2826,32 +2864,46 @@ body {
 /* Gráfico de barras dos últimos 14 dias */
 .cp-admin-chart {
   display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  height: 96px;
-  padding: 8px 10px 0;
+  align-items: stretch;
+  gap: 3px;
+  height: 116px;
+  padding: 10px 10px 6px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 9px;
 }
 
 .cp-admin-bar {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
-  min-width: 0;
 }
 
-.cp-admin-bar span {
+/* A coluna medida: a barra cresce dentro dela e o rótulo fica embaixo, fora
+   da altura percentual (antes a barra em % + o rótulo estouravam o gráfico). */
+.cp-admin-bar-col {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-end;
+  min-height: 0;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.cp-admin-bar-col i {
   display: block;
   width: 100%;
-  border-radius: 3px 3px 0 0;
-  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
   min-height: 2px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+}
+
+.cp-admin-bar:hover .cp-admin-bar-col i {
+  background: linear-gradient(180deg, #60a5fa, #1e40af);
 }
 
 .cp-admin-bar em {
@@ -2859,6 +2911,9 @@ body {
   font-style: normal;
   color: var(--text-light);
   white-space: nowrap;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 /* Tabelas e listas */
@@ -2990,22 +3045,234 @@ body {
   border-color: rgba(147, 197, 253, 0.5);
 }
 
-@media (max-width: 720px) {
-  .cp-admin-grid,
-  .cp-admin-grid-3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+/* -------------------------------------------------------------------------- */
+/*                    Códigos de acesso (aba de administração)                */
+/* -------------------------------------------------------------------------- */
+
+.cp-vault-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.cp-vault-toolbar .cp-vault-stats {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.cp-vault-toolbar > .btn {
+  flex: 0 0 auto;
+}
+
+.cp-vault-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cp-vault-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.cp-vault-item.is-blocked {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fff5f5, #fff);
+}
+
+.cp-vault-item.is-busy {
+  opacity: 0.6;
+}
+
+.cp-vault-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.cp-vault-code {
+  display: inline-block;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-alt);
+  color: var(--navy);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.cp-vault-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.cp-vault-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.66rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cp-vault-badge.is-blocked { background: #fee2e2; color: #b91c1c; }
+.cp-vault-badge.is-open { background: #dcfce7; color: #15803d; }
+.cp-vault-badge.is-current { background: #dbeafe; color: #1d4ed8; }
+.cp-vault-badge.is-cloud { background: #f1f5f9; color: #475569; }
+.cp-vault-badge.is-local { background: #fef3c7; color: #92400e; }
+
+.cp-vault-meta {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-light);
+  overflow-wrap: anywhere;
+}
+
+.cp-vault-confirm {
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.cp-vault-actions {
+  display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.cp-vault-notice {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.cp-vault-notice.is-ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.cp-vault-notice.is-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.cp-vault-notice.is-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+@media (max-width: 900px) {
+  /* Seis abas não cabem numa linha em telas médias: rolar é melhor que quebrar. */
+  .cp-admin-panel-card {
+    max-width: 100%;
   }
+}
+
+@media (max-width: 720px) {
   .cp-admin-dl {
     grid-template-columns: 1fr;
   }
   .cp-admin-dl dd {
     margin-bottom: 6px;
   }
+
+  /* Barra de ações em duas colunas: cinco botões lado a lado não cabem. */
   .cp-admin-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 10px 12px;
     justify-content: stretch;
   }
   .cp-admin-actions .btn {
+    width: 100%;
+  }
+  .cp-admin-actions .cp-admin-spacer {
+    display: none;
+  }
+  #btn-cp-admin-reset {
+    grid-column: 1 / -1;
+  }
+
+  .cp-vault-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+  .cp-vault-actions .btn {
     flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 560px) {
+  /* Cabeçalho e corpo com menos respiro para o conteúdo caber. */
+  #cp-admin-panel .modal-card {
+    max-height: 92vh;
+    border-radius: 12px;
+  }
+  #cp-admin-panel .modal-header {
+    padding: 14px 16px;
+  }
+  #cp-admin-panel .modal-header h2 {
+    font-size: 1.02rem;
+  }
+  #cp-admin-panel .modal-sub {
+    font-size: 0.76rem;
+  }
+  #cp-admin-body {
+    padding: 12px 14px;
+  }
+  .cp-admin-tabs {
+    padding: 0 8px;
+  }
+  .cp-admin-tabs .mtab {
+    font-size: 0.8rem;
+    padding: 9px 10px;
+  }
+  /* 14 rótulos "dd/mm" não cabem: as barras ficam, os rótulos saem
+     (o detalhe continua no title e no aria-label do gráfico). */
+  .cp-admin-chart {
+    height: 84px;
+  }
+  .cp-admin-bar em {
+    display: none;
+  }
+  .cp-admin-card strong {
+    font-size: 0.98rem;
+  }
+  .cp-vault-item {
+    padding: 9px 10px;
+  }
+  .cp-vault-code {
+    font-size: 0.86rem;
   }
 }
 
