@@ -15,6 +15,7 @@ import {
   isPayloadNewer,
   loadCloudConfig,
   loadIdentity,
+  mergeVaultPayload,
   pullVault,
   pushVault,
   restoreIdentityFromCode,
@@ -432,4 +433,130 @@ test('tabela ausente vira mensagem de ação (rodar o SQL)', async () => {
     () => pullVault({ config: CONFIG, identity, fetchImpl: forbidden, iterations: FAST }),
     /Chave anônima recusada/i
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/*              Memória de layout e OCR guardada no banco (cifrada)           */
+/* -------------------------------------------------------------------------- */
+
+function signatureOf(name, lastUsedAt, usageCount = 1) {
+  return {
+    id: `sig-${name.toLowerCase()}`,
+    signature: name.toLowerCase(),
+    headers: ['data', name.toLowerCase()],
+    roles: [
+      { header: 'data', role: 'date', historyOrder: 0 },
+      { header: name.toLowerCase(), role: 'history', historyOrder: 1 },
+    ],
+    name,
+    fileType: 'pdf',
+    usageCount,
+    createdAt: '2026-10-01T10:00:00.000Z',
+    lastUsedAt,
+  };
+}
+
+function ocrRunOf(fileName, createdAt, rowCount = 3) {
+  return {
+    id: `ocr-${fileName}`,
+    fileName,
+    fileType: 'pdf',
+    pageCount: 1,
+    pagesRead: 1,
+    confidence: 92,
+    headers: ['data', 'valor'],
+    rowCount,
+    truncated: false,
+    createdAt,
+  };
+}
+
+test('o pacote leva as assinaturas de layout e as leituras de OCR', () => {
+  const memory = memoryWithProfile('Layout da equipe');
+  memory.layoutSignatures = [signatureOf('Itaú', '2026-11-10T10:00:00.000Z')];
+  memory.ocrRuns = [ocrRunOf('extrato-escaneado.pdf', '2026-11-10T11:00:00.000Z')];
+
+  const payload = buildVaultPayload(memory);
+
+  assert.equal(payload.layoutSignatures.length, 1);
+  assert.equal(payload.layoutSignatures[0].name, 'Itaú');
+  assert.equal(payload.ocrRuns.length, 1);
+  assert.equal(payload.ocrRuns[0].confidence, 92);
+  assert.equal('optionalLlm' in payload, false, 'a chave do LLM continua só no navegador');
+});
+
+test('aplicar o pacote restaura layout e OCR sem tocar na chave local', () => {
+  const local = memoryWithProfile();
+  local.optionalLlm = { provider: 'groq', apiKey: 'gsk_local', model: '' };
+  const remote = buildVaultPayload({
+    ...memoryWithProfile('Layout da equipe'),
+    layoutSignatures: [signatureOf('Bradesco', '2026-11-09T10:00:00.000Z')],
+    ocrRuns: [ocrRunOf('extrato.pdf', '2026-11-09T12:00:00.000Z', 8)],
+  });
+
+  const restored = applyVaultPayload(local, remote);
+  assert.equal(restored.layoutSignatures.length, 1);
+  assert.equal(restored.layoutSignatures[0].name, 'Bradesco');
+  assert.equal(restored.ocrRuns.length, 1);
+  assert.equal(restored.ocrRuns[0].rowCount, 8);
+  assert.equal(restored.optionalLlm.apiKey, 'gsk_local');
+  assert.equal(restored.optionalLlm.provider, 'groq');
+});
+
+test('a sincronização soma layouts e leituras dos dois lados', () => {
+  const local = memoryWithProfile();
+  local.layoutSignatures = [
+    signatureOf('Itaú', '2026-11-11T09:00:00.000Z', 3),
+    signatureOf('Sicoob', '2026-11-05T09:00:00.000Z', 1),
+  ];
+  local.ocrRuns = [
+    ocrRunOf('extrato-itau.pdf', '2026-11-11T10:00:00.000Z', 12),
+    ocrRunOf('extrato-antigo.pdf', '2026-11-01T10:00:00.000Z', 4),
+  ];
+
+  const remotePayload = buildVaultPayload({
+    ...memoryWithProfile('Layout da equipe'),
+    layoutSignatures: [
+      // Mesma assinatura daqui, com contagem maior: o uso é somado pelo maior.
+      signatureOf('Itaú', '2026-11-10T09:00:00.000Z', 7),
+      signatureOf('Bradesco', '2026-11-08T09:00:00.000Z', 2),
+    ],
+    ocrRuns: [
+      // Mesmo arquivo, leitura mais nova do outro computador.
+      ocrRunOf('extrato-itau.pdf', '2026-11-11T12:00:00.000Z', 15),
+      ocrRunOf('extrato-novo.pdf', '2026-11-10T10:00:00.000Z', 6),
+    ],
+  });
+
+  const merged = mergeVaultPayload(local, remotePayload);
+
+  const nomes = merged.layoutSignatures.map((signature) => signature.name).sort();
+  assert.deepEqual(nomes, ['Bradesco', 'Itaú', 'Sicoob']);
+  const itau = merged.layoutSignatures.find((signature) => signature.name === 'Itaú');
+  assert.equal(itau.usageCount, 7);
+
+  const arquivos = merged.ocrRuns.map((run) => run.fileName).sort();
+  assert.deepEqual(arquivos, ['extrato-antigo.pdf', 'extrato-itau.pdf', 'extrato-novo.pdf']);
+  const itauRun = merged.ocrRuns.find((run) => run.fileName === 'extrato-itau.pdf');
+  assert.equal(itauRun.rowCount, 15, 'vale a leitura mais recente');
+});
+
+test('o pacote continua cifrado: nenhum conteúdo de layout vai em claro', async () => {
+  const backend = fakeBackend();
+  const memory = memoryWithProfile('Layout secreto do cliente');
+  memory.layoutSignatures = [signatureOf('Itaú', '2026-11-10T10:00:00.000Z')];
+  memory.ocrRuns = [ocrRunOf('extrato-confidencial.pdf', '2026-11-10T11:00:00.000Z')];
+
+  const identity = await restoreIdentityFromCode('ABCDEFGH', { iterations: FAST });
+  await pushVault({
+    config: CONFIG,
+    identity,
+    memory,
+    iterations: FAST,
+    fetchImpl: backend.fetchImpl,
+  });
+
+  const stored = JSON.stringify([...backend.rows.values()]);
+  assert.equal(stored.includes('Layout secreto do cliente'), false);
+  assert.equal(stored.includes('extrato-confidencial.pdf'), false);
 });

@@ -577,7 +577,12 @@ async function readLedgerFile(file, onProgress) {
   const buffer = await file.arrayBuffer();
 
   if (extension === 'pdf') {
-    const parsed = await parsePdfFile(buffer, file.name, pdfjsLib, { onProgress });
+    // `onProgress` cobre a leitura normal; no PDF escaneado o OCR avisa por
+    // `onOcrProgress` (o mesmo contador de páginas, com o rótulo certo).
+    const parsed = await parsePdfFile(buffer, file.name, pdfjsLib, {
+      onProgress,
+      onOcrProgress: onProgress,
+    });
     return transactionsFromTable(parsed.headers, parsed.rows, { sourceFile: file.name });
   }
 

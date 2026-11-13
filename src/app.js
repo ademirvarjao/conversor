@@ -11,6 +11,9 @@ import {
   saveAiMemory,
   trainAiWithLayout,
   transformRowsWithConfig,
+  LLM_PROVIDERS,
+  defaultLlmModel,
+  registerOcrRun,
 } from './ai-engine.js';
 import { formatLocalDateTime, formatValueGroupedBr, formatValuePlainBr, sumValues } from './format.js';
 import { summarizeRecords } from './summary.js';
@@ -1378,17 +1381,79 @@ function isDuplicate(candidate) {
   );
 }
 
+/**
+ * Guarda na memória (e manda para o banco, se houver chave) o que o OCR leu:
+ * páginas, confiança, colunas reconhecidas e quantos lançamentos saíram.
+ * É o registro que faz o próximo PDF digitalizado do mesmo banco ser mais
+ * rápido de conferir — e que sobrevive à troca de computador.
+ */
+function rememberOcrParsed(parsedFile) {
+  const ocr = parsedFile.ocr;
+  if (!ocr) return null;
+  state.memory = registerOcrRun(state.memory, {
+    fileName: parsedFile.fileName,
+    fileType: 'pdf',
+    pageCount: ocr.pageCount,
+    pagesRead: ocr.pagesRead,
+    confidence: ocr.confidence,
+    headers: parsedFile.headers,
+    rowCount: parsedFile.rows.length,
+    truncated: ocr.truncated,
+  });
+  const saved = saveAiMemory(state.memory);
+  if (saved) scheduleCloudPush();
+  const run = state.memory.ocrRuns.find(
+    (item) => item.fileName.toLowerCase() === String(parsedFile.fileName).toLowerCase()
+  );
+  return { run: run || null, saved };
+}
+
 async function parseUploadedFile(file) {
   const extension = fileExtension(file.name);
   const buffer = await file.arrayBuffer();
 
   if (extension === 'pdf') {
-    return parsePdfFile(buffer, file.name, pdfjsLib, {
+    const parsed = await parsePdfFile(buffer, file.name, pdfjsLib, {
       onProgress: (page, total) => {
         const text = dom['processing-text'];
         if (text) text.textContent = `Lendo ${file.name} — página ${page} de ${total}…`;
       },
+      // PDF sem camada de texto: o app cai no OCR e avisa a cada página lida.
+      onOcrProgress: (page, total) => {
+        const text = dom['processing-text'];
+        if (text) {
+          text.textContent = `PDF escaneado: aplicando OCR em ${file.name} — página ${page} de ${total}…`;
+        }
+      },
+      onOcrStatus: ({ status, progress }) => {
+        if (status !== 'recognizing text') return;
+        const text = dom['processing-text'];
+        if (text) {
+          text.textContent = `PDF escaneado: lendo ${file.name} (${Math.round(progress * 100)}%)…`;
+        }
+      },
     });
+
+    if (parsed.ocr) {
+      const { saved } = rememberOcrParsed(parsed);
+      const confianca = Math.round(Number(parsed.ocr.confidence) || 0);
+      const destino = !saved
+        ? 'não foi possível guardar a leitura (o navegador bloqueou a memória)'
+        : cloud.identity
+          ? 'guardada na memória da IA e sincronizada com o banco'
+          : 'guardada na memória da IA deste navegador';
+      showToast(
+        `PDF escaneado lido por OCR (${confianca}% de confiança, ${parsed.rows.length} lançamento(s)): leitura ${destino}.`,
+        confianca >= 70 && saved ? 'success' : 'warn'
+      );
+      track(
+        'arquivo',
+        'PDF escaneado convertido por OCR',
+        `${parsed.fileName} • ${confianca}% de confiança • ${parsed.ocr.pagesRead}/${parsed.ocr.pageCount} página(s)`
+      );
+    }
+
+    return parsed;
   }
 
   const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
@@ -1600,6 +1665,50 @@ function renderAiModal() {
 
   dom['llm-provider'].value = memory.optionalLlm?.provider || 'none';
   dom['llm-apikey'].value = memory.optionalLlm?.apiKey || '';
+  if (dom['llm-model']) dom['llm-model'].value = memory.optionalLlm?.model || '';
+  renderLlmHint();
+  renderCloudMemoryNote();
+}
+
+/**
+ * Mostra, embaixo do conector, o que o provedor escolhido oferece de graça e
+ * qual modelo será usado quando o campo "Modelo" ficar em branco.
+ */
+function renderLlmHint() {
+  const hint = dom['llm-hint'];
+  const select = dom['llm-provider'];
+  if (!hint || !select) return;
+  const provider = LLM_PROVIDERS[select.value] || LLM_PROVIDERS.none;
+  const model = defaultLlmModel(provider.id);
+  const parts = [];
+  if (provider.note) parts.push(provider.note);
+  if (model) parts.push(`Modelo padrão: ${model}.`);
+  if (provider.keyHint) parts.push(`A chave começa com ${provider.keyHint}.`);
+  hint.textContent = parts.join(' ');
+
+  const keyInput = dom['llm-apikey'];
+  if (keyInput) {
+    keyInput.placeholder = provider.keyHint || 'chave do provedor';
+    keyInput.disabled = provider.id === 'none';
+  }
+  const modelInput = dom['llm-model'];
+  if (modelInput) {
+    modelInput.placeholder = model || 'padrão do provedor';
+    modelInput.disabled = provider.id === 'none';
+  }
+}
+
+/** Diz, na aba da nuvem, o que exatamente está sendo guardado no banco. */
+function renderCloudMemoryNote() {
+  const note = dom['cloud-memory-note'];
+  if (!note) return;
+  const layouts = state.memory.layoutSignatures?.length || 0;
+  const ocr = state.memory.ocrRuns?.length || 0;
+  const perfis = state.memory.learnedProfiles?.length || 0;
+  note.textContent =
+    `Na memória guardada no banco: ${perfis} layout(s) treinado(s), ` +
+    `${layouts} assinatura(s) de layout e ${ocr} PDF(s) escaneado(s) lido(s) por OCR. ` +
+    'Tudo vai cifrado — o banco só vê o slot e o pacote fechado.';
 }
 
 function openAiModal() {
@@ -2293,26 +2402,37 @@ function bindModalEvents() {
     showToast('Memória da IA restaurada para o padrão inicial.', 'warn');
   });
 
+  dom['llm-provider']?.addEventListener('change', renderLlmHint);
+
   dom['btn-save-llm']?.addEventListener('click', () => {
     const provider = dom['llm-provider'].value;
     const apiKey = dom['llm-apikey'].value.trim();
+    const model = (dom['llm-model']?.value || '').trim();
 
     if (provider !== 'none' && !apiKey) {
-      showToast('Informe a API key do provedor escolhido ou selecione "Desativado".', 'warn');
+      const label = LLM_PROVIDERS[provider]?.label || provider;
+      showToast(
+        `Informe a API key do ${label} (é grátis criar a conta) ou selecione "Desativado".`,
+        'warn'
+      );
       return;
     }
 
-    state.memory.optionalLlm = { provider, apiKey, model: '' };
+    state.memory.optionalLlm = { provider, apiKey, model };
     const saved = saveAiMemory(state.memory);
     // O painel registra só o provedor — a chave nunca entra no histórico.
     track('memoria', 'Provedor de IA configurado', provider === 'none' ? 'desativado' : provider);
     if (state.selectedFileId) openTrainerForFile(state.selectedFileId);
+    const chosen = LLM_PROVIDERS[provider];
     showToast(
       saved
-        ? 'Configuração do LLM salva localmente neste navegador.'
+        ? provider === 'none'
+          ? 'Conector desativado: o Conversor segue com a IA local do navegador.'
+          : `Conector salvo: ${chosen?.label || provider} (modelo ${model || defaultLlmModel(provider)}). A chave fica só neste navegador.`
         : 'Configuração aplicada, mas o navegador bloqueou o salvamento.',
       saved ? 'success' : 'warn'
     );
+    renderLlmHint();
   });
 }
 
@@ -2616,6 +2736,7 @@ async function leaveCloudAccount() {
 function renderCloudPanel() {
   applyCloudLock();
   renderCloudAccount();
+  renderCloudMemoryNote();
 
 
   const hasConfig = !!cloud.config;

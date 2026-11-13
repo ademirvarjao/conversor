@@ -51,6 +51,9 @@ const MAX_PROFILES = 60;
 /** Assinaturas de layout aprendidas (reconhecem variações de nome de coluna). */
 const MAX_SIGNATURES = 120;
 
+/** Leituras por OCR guardadas na memória (e sincronizadas com o banco). */
+export const MAX_OCR_RUNS = 40;
+
 export const ROLES = {
   DATE: 'date',
   VALUE_AUTO: 'value_auto',
@@ -267,6 +270,9 @@ function createDefaultMemory() {
     // Assinaturas dos layouts já treinados: reconhecem variações (coluna
     // renomeada, banco que mudou o formato) mesmo sem perfil idêntico.
     layoutSignatures: [],
+    // PDFs digitalizados lidos por OCR: guarda o que foi reconhecido (confiança,
+    // páginas, colunas e nome do arquivo) para reusar o layout depois.
+    ocrRuns: [],
     // Preferências locais da IA.
     settings: {
       // Baixar o catálogo público de layouts (só download: nada do arquivo sai).
@@ -505,6 +511,75 @@ function adoptLegacyMemory() {
   return null;
 }
 
+function sanitizeOcrRuns(rawRuns) {
+  if (!Array.isArray(rawRuns)) return [];
+  const seen = new Set();
+  const out = [];
+
+  for (const raw of rawRuns) {
+    if (!isPlainObject(raw)) continue;
+    const fileName = cleanWhitespace(raw.fileName).slice(0, 160);
+    const id = cleanWhitespace(raw.id) || `ocr-${out.length + 1}`;
+    if (!fileName || seen.has(id)) continue;
+    seen.add(id);
+
+    out.push({
+      id,
+      fileName,
+      fileType: raw.fileType === 'xlsx' ? 'xlsx' : 'pdf',
+      pageCount: Math.max(0, Number(raw.pageCount) || 0),
+      pagesRead: Math.max(0, Number(raw.pagesRead) || 0),
+      confidence: Math.min(100, Math.max(0, Math.round((Number(raw.confidence) || 0) * 10) / 10)),
+      headers: Array.isArray(raw.headers)
+        ? raw.headers.map((header) => cleanWhitespace(header)).filter(Boolean).slice(0, 32)
+        : [],
+      rowCount: Math.max(0, Number(raw.rowCount) || 0),
+      truncated: Boolean(raw.truncated),
+      createdAt: raw.createdAt || new Date().toISOString(),
+    });
+  }
+
+  return out
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, MAX_OCR_RUNS);
+}
+
+/**
+ * Registra na memória uma leitura de PDF digitalizado feita por OCR.
+ * Retorna a memória atualizada (não muta a original) — é esse registro que a
+ * sincronização leva para o banco, junto com os layouts aprendidos.
+ *
+ * @param {object} memory memória atual
+ * @param {{fileName:string, fileType?:string, pageCount?:number, pagesRead?:number,
+ *   confidence?:number, headers?:string[], rowCount?:number, truncated?:boolean}} run
+ */
+export function registerOcrRun(memory, run = {}) {
+  const updated = normalizeMemory(memory || {});
+  const record = sanitizeOcrRuns([
+    {
+      ...run,
+      id: run.id || `ocr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      createdAt: run.createdAt || new Date().toISOString(),
+    },
+  ])[0];
+  if (!record) return updated;
+
+  // Reaproveita o registro anterior do mesmo arquivo (mesmo nome) em vez de
+  // empilhar uma linha nova a cada conversão do mesmo extrato.
+  const previous = updated.ocrRuns.find(
+    (item) => item.fileName.toLowerCase() === record.fileName.toLowerCase()
+  );
+  const merged = previous
+    ? { ...record, id: previous.id, createdAt: previous.createdAt }
+    : record;
+
+  updated.ocrRuns = sanitizeOcrRuns([
+    merged,
+    ...updated.ocrRuns.filter((item) => item.id !== merged.id),
+  ]);
+  return updated;
+}
+
 /**
  * Valida e normaliza qualquer objeto de memória (localStorage ou backup JSON).
  * Nunca lança: em caso de payload inválido devolve a memória padrão.
@@ -545,11 +620,12 @@ export function normalizeMemory(rawMemory) {
       correctionsLearned: Math.max(0, Number(stats.correctionsLearned) || 0),
     },
     optionalLlm: {
-      provider: ['none', 'openai', 'gemini'].includes(llm.provider) ? llm.provider : 'none',
+      provider: Object.keys(LLM_PROVIDERS).includes(llm.provider) ? llm.provider : 'none',
       apiKey: typeof llm.apiKey === 'string' ? llm.apiKey : '',
       model: typeof llm.model === 'string' ? llm.model : '',
     },
     layoutSignatures: sanitizeSignatures(rawMemory.layoutSignatures),
+    ocrRuns: sanitizeOcrRuns(rawMemory.ocrRuns),
     settings: {
       communityCatalog: rawMemory?.settings?.communityCatalog !== false,
     },
@@ -1812,6 +1888,81 @@ export function transformRowsWithConfig(parsedFile, config) {
 
 const LLM_TIMEOUT_MS = 30000;
 
+/**
+ * Provedores do conector LLM opcional.
+ *
+ * A ordem reflete o custo: os dois primeiros têm plano gratuito de verdade e
+ * usam a mesma API compatível com a da OpenAI (só muda a URL base e o modelo),
+ * então é a mesma chamada para ambos. Gemini é gratuito com cota diária.
+ * OpenAI segue disponível para quem já tem crédito.
+ *
+ * `model` aqui é o padrão; o usuário pode sobrescrever no campo "Modelo" —
+ * necessário porque catálogo de modelo gratuito muda de tempos em tempos.
+ */
+export const LLM_PROVIDERS = {
+  none: {
+    id: 'none',
+    label: 'Desativado (IA local apenas)',
+    kind: 'none',
+    model: '',
+    free: true,
+    note: 'Tudo roda no navegador, sem chave e sem cota.',
+  },
+  groq: {
+    id: 'groq',
+    label: 'Groq — grátis (gpt-oss-120b)',
+    kind: 'openai',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'openai/gpt-oss-120b',
+    free: true,
+    keyHint: 'gsk_...',
+    note: 'Plano gratuito: ~30 pedidos/min e 1.000 por dia. Chave em console.groq.com/keys.',
+  },
+  openrouter: {
+    id: 'openrouter',
+    label: 'OpenRouter — modelos :free',
+    kind: 'openai',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'openai/gpt-oss-120b:free',
+    free: true,
+    keyHint: 'sk-or-v1-...',
+    note: 'Plano gratuito: 50 pedidos/dia (1.000/dia depois de US$ 10 em créditos). Chave em openrouter.ai/keys.',
+  },
+  gemini: {
+    id: 'gemini',
+    label: 'Google Gemini — cota grátis',
+    kind: 'gemini',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+    model: 'gemini-2.5-flash',
+    free: true,
+    keyHint: 'AIza...',
+    note: 'Cota gratuita diária do Google AI Studio. O conteúdo enviado pode ser usado para melhorar os produtos Google.',
+  },
+  openai: {
+    id: 'openai',
+    label: 'OpenAI — paga',
+    kind: 'openai',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4o-mini',
+    free: false,
+    keyHint: 'sk-...',
+    note: 'Exige crédito na conta; sem cota gratuita.',
+  },
+};
+
+/** Lista de ids válidos (usada pela interface e pela validação da memória). */
+export const LLM_PROVIDER_IDS = Object.keys(LLM_PROVIDERS);
+
+/** Provedores que funcionam sem pagar nada. */
+export const FREE_LLM_PROVIDER_IDS = LLM_PROVIDER_IDS.filter(
+  (id) => id !== 'none' && LLM_PROVIDERS[id].free
+);
+
+/** Modelo padrão de um provedor ('' quando desativado). */
+export function defaultLlmModel(provider) {
+  return LLM_PROVIDERS[provider]?.model || '';
+}
+
 function extractJsonPayload(text) {
   if (typeof text !== 'string') return null;
   const trimmed = text.trim();
@@ -1843,14 +1994,98 @@ function sanitizeLlmResult(parsed, headerCount) {
   };
 }
 
+function llmErrorMessage(provider, status, body) {
+  const detail = String(body || '').slice(0, 200);
+  if (status === 429) {
+    return (
+      `Cota gratuita do ${provider.label} esgotada agora (429). ` +
+      'Aguarde alguns minutos, troque de provedor no conector ou use a IA local do Conversor.'
+    );
+  }
+  if (status === 401 || status === 403) {
+    return `A chave informada foi recusada pelo ${provider.label} (${status}). Confira a chave e o modelo.`;
+  }
+  return `Erro ${provider.label} (${status}): ${detail}`;
+}
+
+/** Chamada compatível com a API da OpenAI (Groq, OpenRouter e OpenAI). */
+async function callOpenAiCompatible(provider, model, prompt, apiKey, controller) {
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  };
+  // OpenRouter pede identificação do app (opcional, mas evita bloqueio).
+  if (provider.id === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://ademirvarjao.github.io/conversor/';
+    headers['X-Title'] = 'Conversor';
+  }
+
+  const send = async (withJsonMode) => {
+    const response = await fetch(provider.endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        ...(withJsonMode ? { response_format: { type: 'json_object' } } : {}),
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: controller?.signal,
+    });
+    return response;
+  };
+
+  let response = await send(true);
+  // Alguns modelos gratuitos não aceitam `response_format`: repete sem ele e o
+  // JSON é extraído do texto (o extrator já entende blocos ```json).
+  if (!response.ok && [400, 404, 422].includes(response.status)) {
+    response = await send(false);
+  }
+  if (!response.ok) {
+    throw new Error(llmErrorMessage(provider, response.status, await response.text()));
+  }
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+/** Chamada do Google Gemini (generateContent). */
+async function callGemini(provider, model, prompt, apiKey, controller) {
+  const response = await fetch(
+    `${provider.endpoint}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      }),
+      signal: controller?.signal,
+    }
+  );
+  if (!response.ok) {
+    throw new Error(llmErrorMessage(provider, response.status, await response.text()));
+  }
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
 /**
- * Analisa um layout inédito via LLM (OpenAI ou Gemini) usando a chave do usuário.
- * A chave nunca sai do navegador para outro destino além do provedor escolhido.
+ * Analisa um layout inédito via LLM usando a chave do usuário.
+ *
+ * Groq, OpenRouter e OpenAI falam o mesmo protocolo (compatível com OpenAI):
+ * só mudam a URL e o modelo. Gemini tem o seu próprio formato. A chave nunca
+ * sai do navegador para outro destino além do provedor escolhido.
  */
 export async function analyzeWithOptionalLlm(parsedFile, llmConfig) {
   if (!llmConfig || llmConfig.provider === 'none' || !llmConfig.apiKey) {
     throw new Error('Nenhum provedor LLM externo configurado.');
   }
+
+  const provider = LLM_PROVIDERS[llmConfig.provider];
+  if (!provider || provider.kind === 'none') {
+    throw new Error('Provedor LLM não suportado.');
+  }
+  const model = llmConfig.model || provider.model;
 
   const headers = parsedFile.headers || [];
   const previewRows = (parsedFile.rows || []).slice(0, 6);
@@ -1869,45 +2104,10 @@ export async function analyzeWithOptionalLlm(parsedFile, llmConfig) {
   try {
     let rawText = '';
 
-    if (llmConfig.provider === 'openai') {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${llmConfig.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: llmConfig.model || 'gpt-4o-mini',
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        signal: controller?.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`Erro OpenAI (${response.status}): ${(await response.text()).slice(0, 200)}`);
-      }
-      const data = await response.json();
-      rawText = data.choices?.[0]?.message?.content || '';
-    } else if (llmConfig.provider === 'gemini') {
-      const model = llmConfig.model || 'gemini-2.0-flash';
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(llmConfig.apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-          }),
-          signal: controller?.signal,
-        }
-      );
-      if (!response.ok) {
-        throw new Error(`Erro Gemini (${response.status}): ${(await response.text()).slice(0, 200)}`);
-      }
-      const data = await response.json();
-      rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (provider.kind === 'openai') {
+      rawText = await callOpenAiCompatible(provider, model, prompt, llmConfig.apiKey, controller);
+    } else if (provider.kind === 'gemini') {
+      rawText = await callGemini(provider, model, prompt, llmConfig.apiKey, controller);
     } else {
       throw new Error('Provedor LLM não suportado.');
     }

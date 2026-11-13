@@ -100,6 +100,19 @@ describe('index.html x controlador', () => {
     assert.match(header, /outro computador/i, 'o aviso precisa citar o uso em outro computador');
   });
 
+  it('oferece provedores de LLM com plano gratuito e campo de modelo', () => {
+    const select = html.slice(html.indexOf('id="llm-provider"'), html.indexOf('</select>', html.indexOf('id="llm-provider"')));
+    for (const provider of ['none', 'groq', 'openrouter', 'gemini', 'openai']) {
+      assert.match(select, new RegExp(`value="${provider}"`), `falta a opção ${provider}`);
+    }
+    assert.match(select, /Groq/);
+    assert.match(select, /OpenRouter/);
+    assert.match(select, /grátis/i);
+    assert.equal(select.includes('gemini-2.0-flash'), false, 'Gemini 2.0 foi descontinuado');
+    assert.ok(html.includes('id="llm-model"'), 'falta o campo de modelo (opcional)');
+    assert.ok(html.includes('id="llm-hint"'), 'falta a dica do provedor');
+  });
+
   it('usa o título curto do produto', () => {
     assert.match(html, /<title>Conversor — Conciliação Financeira<\/title>/);
   });

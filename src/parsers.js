@@ -657,7 +657,7 @@ function isNumericToken(text) {
 }
 
 /** Junta símbolos de moeda isolados ao número imediatamente à direita. */
-function mergeCurrencyTokens(items) {
+export function mergeCurrencyTokens(items) {
   const merged = [];
   for (let i = 0; i < items.length; i++) {
     const current = items[i];
@@ -2059,23 +2059,81 @@ function describeSparseText(lines, pageCount) {
  * `buildTableFromTextLines`.
  */
 export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib, options = {}) {
-  const { pageCount, lines } = await extractPdfLines(arrayBuffer, pdfjsLib, options);
+  // O PDF.js TRANSFERE os bytes para o worker (o buffer original fica
+  // "detached"). Guardamos uma cópia para o OCR poder reler o arquivo quando a
+  // camada de texto não der nenhum lançamento.
+  const bytes =
+    arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer);
+  const extracted = await extractPdfLines(bytes.slice(), pdfjsLib, options);
+  const pageCount = extracted.pageCount;
+  let lines = extracted.lines;
+  let table = null;
+  let buildError = null;
+
+  // 1ª tentativa: a camada de texto do próprio PDF (rápido e exato).
+  if (lines.length > 0) {
+    try {
+      table = buildTableFromTextLines(lines);
+    } catch (error) {
+      buildError = error;
+    }
+  }
+
+  const needsOcr = options.ocr !== false && (lines.length === 0 || !table || table.rows.length === 0);
+  let ocr = null;
+  let ocrFailure = null;
+
+  // 2ª tentativa: o documento é imagem/escaneado — lê por OCR no navegador
+  // (Tesseract vendorizado, sem CDN) e refaz a tabela com as linhas lidas.
+  if (needsOcr) {
+    try {
+      // `ocrEngine` permite injetar o leitor nos testes (e trocar a engine sem
+      // mexer no parser); em produção é o OCR vendorizado que roda.
+      const engine =
+        typeof options.ocrEngine === 'function'
+          ? options.ocrEngine
+          : (await import('./ocr.js')).ocrPdfToLines;
+      const result = await engine(bytes.slice(), pdfjsLib, {
+        onProgress: options.onOcrProgress,
+        onStatus: options.onOcrStatus,
+        scale: options.ocrScale,
+        maxPages: options.ocrMaxPages,
+      });
+      ocr = {
+        used: false,
+        confidence: result.confidence,
+        pagesRead: result.pagesRead,
+        pageCount: result.pageCount,
+        truncated: Boolean(result.truncated),
+      };
+      if (result.lines.length > 0) {
+        lines = result.lines;
+        try {
+          table = buildTableFromTextLines(lines);
+          buildError = null;
+          ocr.used = true;
+        } catch (error) {
+          buildError = error;
+        }
+      }
+    } catch (error) {
+      ocrFailure = error;
+      // O aviso da tela é amigável; o motivo técnico fica no console para
+      // diagnosticar (worker bloqueado, arquivo ilegível, memória curta).
+      console.warn('OCR indisponível para este PDF:', error);
+    }
+  }
 
   if (lines.length === 0) {
     throw new Error(
-      `Nenhum texto extraível encontrado em "${fileName}". O PDF pode ser apenas imagem/escaneado.`
+      `Nenhum texto extraível encontrado em "${fileName}". O PDF pode ser apenas imagem/escaneado.` +
+        ocrHint(ocrFailure)
     );
   }
 
-  let table;
-  try {
-    table = buildTableFromTextLines(lines);
-  } catch (error) {
-    throw new Error(`${error.message}${describeSparseText(lines, pageCount)} (${fileName})`);
-  }
-
-  if (table.rows.length === 0) {
-    throw new Error(`Nenhum lançamento com data foi reconhecido em "${fileName}".`);
+  if (!table || table.rows.length === 0) {
+    const message = buildError ? buildError.message : 'Nenhum lançamento com data foi reconhecido.';
+    throw new Error(`${message}${describeSparseText(lines, pageCount)} (${fileName})${ocrHint(ocrFailure)}`);
   }
 
   return {
@@ -2087,5 +2145,16 @@ export async function parsePdfFile(arrayBuffer, fileName, pdfjsLib, options = {}
     bannerLines: table.bannerLines,
     skippedRows: table.skippedRows,
     checkpoints: table.checkpoints || [],
+    ocr: ocr?.used ? ocr : null,
+    ocrAttempt: ocr,
   };
+}
+
+/** Complemento da mensagem quando o OCR também foi tentado e não resolveu. */
+function ocrHint(ocrFailure) {
+  if (!ocrFailure) return '';
+  return (
+    ' O leitor de OCR também foi acionado, mas não conseguiu ler os lançamentos deste arquivo: ' +
+    'tente um PDF com melhor resolução (mínimo 200 dpi) ou baixe o extrato em .xlsx/.csv.'
+  );
 }
