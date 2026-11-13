@@ -353,6 +353,12 @@ campo **Modelo (opcional)** permite trocar o modelo sem atualizar o app — nece
 gratuito muda com o tempo. Nenhum desses planos é ilimitado; o caminho sem cota continua sendo a IA
 local, que não faz requisição nenhuma.
 
+### Ícone da marca uniforme (v1.30.1)
+O selo redondo azul-claro com **+** que ficava sobre o ícone da marca no topo do `index.html` saiu. Ele
+aparecia só na página principal (o conciliador e o manual nunca tiveram) e quebrava a uniformidade entre as
+telas: agora as três usam exatamente o mesmo SVG — barras azuis e o ponto verde — e o atalho para o
+conciliador continua no mesmo lugar (o ícone, com `title`/`aria-label` e efeito de hover).
+
 ### Manual próprio e Sobre (v1.30.0)
 A opção **Como funciona** do menu da engrenagem deixou de abrir o README do repositório: agora ela abre
 **`manual.html`**, uma página do próprio aplicativo (publicada junto no deploy), em outra aba — assim quem
