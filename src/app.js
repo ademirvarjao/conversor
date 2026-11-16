@@ -61,6 +61,11 @@ import {
   touchIdentitySync,
 } from './sync-vault.js';
 import { isSecretSupabaseKey, normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
+import {
+  startInternalNetworkDetection,
+  isInternalNetwork,
+  onInternalNetworkChange,
+} from './internal-network.js';
 import { findVault } from './vault-registry.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
@@ -3462,6 +3467,51 @@ function init() {
   bindCloudEvents();
   bindGlobalEvents();
 
+  // Função JR: ícone ao lado dos ícones de acesso, habilitado só na rede interna.
+  // Os elementos são opcionais (só existem no index.html), então lidos direto do DOM.
+  const btnFuncJr = document.getElementById('btn-func-jr');
+  const funcJrDot = document.getElementById('func-jr-dot');
+  const funcMenuJrStatus = document.getElementById('func-menu-jr-status');
+
+  function atualizarFuncJr(online) {
+    const habilitado = Boolean(online);
+    if (btnFuncJr) {
+      btnFuncJr.disabled = !habilitado;
+      btnFuncJr.title = habilitado
+        ? 'Conciliador Bancário JR — usar o banco de dados do site interno'
+        : 'Conciliador Bancário JR — indisponível fora da rede interna';
+    }
+    if (funcJrDot) {
+      funcJrDot.style.backgroundColor = habilitado ? '#34d399' : '#94a3b8';
+      funcJrDot.style.boxShadow = habilitado ? '0 0 6px #34d399' : '0 0 6px #94a3b8';
+    }
+    if (funcMenuJrStatus) {
+      funcMenuJrStatus.textContent = habilitado
+        ? 'Disponível na rede interna'
+        : 'Rede interna não detectada';
+      funcMenuJrStatus.classList.toggle('offline', !habilitado);
+      funcMenuJrStatus.classList.toggle('online', habilitado);
+    }
+  }
+
+  if (btnFuncJr) {
+    btnFuncJr.addEventListener('click', () => {
+      if (isInternalNetwork()) {
+        window.open('./conciliador-jr.html', '_blank', 'noopener');
+      } else {
+        showToast(
+          'O Conciliador JR só está disponível quando você está na rede interna do site da contabilidade.',
+          'warn',
+          { duration: 7000 }
+        );
+      }
+    });
+  }
+
+  // Detecção em tempo real: verifica agora e periodicamente (a cada 8s).
+  atualizarFuncJr(isInternalNetwork());
+  onInternalNetworkChange(atualizarFuncJr);
+  void startInternalNetworkDetection();
 
   // Mantém filtros e controles acessíveis em estados iniciais coerentes.
   document.querySelectorAll('.pill[data-filter]').forEach((button) => {

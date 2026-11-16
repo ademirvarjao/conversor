@@ -97,6 +97,40 @@
           </div>
         </div>
 
+        <!-- Ícone da função JR, ao lado dos ícones de acesso das outras funções -->
+        <div class="func-group" id="func-group">
+          <button
+            id="btn-func-jr"
+            class="btn btn-func btn-func-jr"
+            type="button"
+            aria-label="Conciliador Bancário JR"
+            title="Conciliador Bancário - JR Gestão e Contabilidade"
+            disabled
+          >
+            <svg class="func-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect width="24" height="24" rx="6" fill="#0F2744" />
+              <path d="M7 9h10M7 14h10M7 19h7" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" />
+              <circle cx="17" cy="19" r="2" fill="#10B981" />
+            </svg>
+            <span class="func-dot" id="func-jr-dot" aria-hidden="true"></span>
+          </button>
+
+          <!-- Menu interativo: aparece ao passar o mouse, mostra opções acessíveis -->
+          <div class="func-menu" id="func-menu">
+            <div class="func-menu-header">Funções disponíveis</div>
+            <div class="func-menu-item" id="func-menu-item-jr" role="menuitem">
+              <span class="func-menu-icon" aria-hidden="true">▦</span>
+              <span class="func-menu-label">Conciliador Bancário JR</span>
+              <span class="func-menu-status" id="func-menu-jr-status">Rede interna não detectada</span>
+            </div>
+            <div class="func-menu-item" id="func-menu-item-conciliador" role="menuitem">
+              <span class="func-menu-icon" aria-hidden="true">⌘</span>
+              <span class="func-menu-label">Conciliador Clientes/Fornecedores</span>
+              <span class="func-menu-status">Disponível</span>
+            </div>
+          </div>
+        </div>
+
         <button
           id="btn-gear"
           class="btn-gear"

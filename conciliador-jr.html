@@ -127,6 +127,26 @@
     .jr-total-item strong {
       color: var(--navy);
     }
+    .rede-status {
+      font-size: 0.65rem;
+      line-height: 1;
+      border-radius: 50%;
+      padding: 0 4px;
+      margin-left: 4px;
+      user-select: none;
+      opacity: 0.85;
+    }
+    .rede-off {
+      color: #94a3b8;
+    }
+    .rede-on {
+      color: #34d399;
+      animation: rede-pulse 2s infinite;
+    }
+    @keyframes rede-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
     .typewriter-cursor {
       display: inline-block;
       width: 8px;
@@ -193,6 +213,7 @@
             <div class="input-group">
               <input id="jr-cod-empresa" class="form-control" type="number" placeholder="Ex: 9999" required />
               <span class="input-group-text empresa-nome-display d-none" id="jr-empresa-nome"></span>
+              <span id="jr-rede-status" class="input-group-text rede-status rede-off" title="Rede interna não detectada" aria-hidden="true">●</span>
             </div>
           </div>
 
