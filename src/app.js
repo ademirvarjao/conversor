@@ -22,7 +22,7 @@ import { escapeHtml } from './html.js';
 import { installGlobalErrorReporting, reportStartupFailure } from './ui-errors.js';
 import { createAdminConsole } from './admin-console.js';
 import { mountGearMenu } from './gear-menu.js';
-import { exportToPdf, exportToXlsx } from './exporters.js';
+import { exportToCsv, exportToPdf, exportToXlsx } from './exporters.js';
 import {
   applyCoachFixes,
   buildCoachReport,
@@ -80,7 +80,7 @@ const DEFAULT_PAGE_SIZE = 100;
 const PAGE_SIZE_OPTIONS = [50, 100, 300, 1000, 'all'];
 const MAX_FILE_BYTES = 60 * 1024 * 1024; // 60 MB por arquivo
 const SEARCH_DEBOUNCE_MS = 180;
-const SUPPORTED_EXTENSIONS = ['pdf', 'xlsx'];
+const SUPPORTED_EXTENSIONS = ['pdf', 'xlsx', 'csv', 'ofx'];
 
 if (pdfjsLib?.GlobalWorkerOptions) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdfjs/pdf.worker.min.mjs';
@@ -90,8 +90,9 @@ if (pdfjsLib?.GlobalWorkerOptions) {
 /*                                    Estado                                  */
 /* -------------------------------------------------------------------------- */
 
+const memory = loadAiMemory();
 const state = {
-  memory: loadAiMemory(),
+  memory,
   /** @type {Array<{id:string,parsedFile:object,analysis:object,result:{records:any[],skipped:any[]},meta:{size:number,uploadedAt:string}}>} */
   files: [],
   selectedFileId: null,
@@ -104,12 +105,12 @@ const state = {
   pageSize: DEFAULT_PAGE_SIZE,
   /** Chaves (`arquivo#linha`) marcadas na tabela. */
   selected: new Set(),
-  /** Histórico digitado à mão, por chave de origem. */
-  historyOverrides: new Map(),
-  /** Linhas que o usuário excluiu (podem ser restauradas). */
-  removedKeys: new Set(),
+  /** Histórico digitado à mão, por chave de origem. Carregado da memória. */
+  historyOverrides: new Map(Object.entries(memory.historyOverrides || {})),
+  /** Linhas que o usuário excluiu (podem ser restauradas). Carregado da memória. */
+  removedKeys: new Set(memory.removedKeys || []),
   removedCount: 0,
-  exportOnlyFiltered: false,
+  exportOnlyFiltered: memory.settings?.exportOnlyFiltered === true,
   processing: false,
   /** Relatório do treinador automático do arquivo aberto no painel de treino. */
   coachReport: null,
@@ -325,10 +326,11 @@ function debounce(fn, wait) {
 }
 
 function suggestLayoutName(parsedFile) {
-  const base = String(parsedFile.fileName || '')
-    .replace(/\.(pdf|xlsx)$/i, '')
-    .replace(/[_-]+/g, ' ');
-  return cleanWhitespace(base).slice(0, 48) || 'Novo layout';
+  // Não expor o nome do arquivo (pode conter dados pessoais) — sugere um nome
+  // genérico baseado apenas no tipo e na quantidade de colunas.
+  const type = parsedFile.fileType === 'pdf' ? 'PDF' : 'Planilha';
+  const cols = (parsedFile.headers || []).length;
+  return `Layout ${type} (${cols} coluna(s))`;
 }
 
 function updateAiBadge() {
@@ -1207,6 +1209,8 @@ function deleteSelectedRows() {
 
   for (const key of keys) state.removedKeys.add(key);
   state.selected.clear();
+  state.memory.removedKeys = [...state.removedKeys];
+  saveAiMemory(state.memory);
   rebuildUnifiedOutput({ resetPage: false });
 
   showToast(
@@ -1220,6 +1224,8 @@ function deleteRow(key) {
   if (!key) return;
   state.removedKeys.add(key);
   state.selected.delete(key);
+  state.memory.removedKeys = [...state.removedKeys];
+  saveAiMemory(state.memory);
   rebuildUnifiedOutput({ resetPage: false });
   showToast('Lançamento excluído — use “Restaurar excluídas” para voltar.');
 }
@@ -1229,6 +1235,8 @@ function restoreDeletedRows() {
   if (state.removedKeys.size === 0) return;
   const count = state.removedKeys.size;
   state.removedKeys.clear();
+  state.memory.removedKeys = [];
+  saveAiMemory(state.memory);
   rebuildUnifiedOutput({ resetPage: false });
   showToast(`${count} lançamento(s) restaurado(s) na planilha.`);
 }
@@ -1248,6 +1256,10 @@ function commitHistoryEdit(input) {
   }
 
   const changed = setHistoryOverride(state, record, input.value);
+  if (changed) {
+    state.memory.historyOverrides = Object.fromEntries(state.historyOverrides);
+    saveAiMemory(state.memory);
+  }
   applyFilters();
   renderOutputSection();
 
@@ -1461,9 +1473,74 @@ async function parseUploadedFile(file) {
     return parsed;
   }
 
+  if (extension === 'csv' || extension === 'ofx') {
+    return parseSimpleFile(buffer, file.name, extension);
+  }
+
   const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
   if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
   return parseXlsxFile(buffer, file.name, ExcelJSRef);
+}
+
+/** Lê um arquivo .csv ou .ofx e devolve o mesmo formato dos outros parsers. */
+function parseSimpleFile(buffer, fileName, extension) {
+  const decoder = new TextDecoder('utf-8');
+  let text = decoder.decode(buffer);
+
+  if (extension === 'ofx') {
+    text = ofxToCsv(text);
+  }
+
+  const lines = text.split(/\r\n|\r|\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    throw new Error('Arquivo vazio ou não pôde ser lido.');
+  }
+
+  const headers = lines[0].split(';').map((h) => cleanWhitespace(h));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(';').map((c) => cleanWhitespace(c));
+    // Ignora linhas de total (começam com TOTAIS)
+    if (cells[0] && /^total/i.test(cells[0])) continue;
+    rows.push(cells);
+  }
+
+  return {
+    fileName,
+    fileType: extension === 'ofx' ? 'ofx' : 'csv',
+    headers,
+    rows,
+    bannerLines: [],
+    availableSheets: [{ sheetName: 'Plan1', headers, rows, rowCount: rows.length }],
+    sheetName: 'Plan1',
+  };
+}
+
+/** Converte um extrato OFX (SGML-like) para CSV com colunas data;valor;historico. */
+function ofxToCsv(text) {
+  const lines = [];
+  lines.push('data;valor;historico');
+
+  // Cada lançamento OFX começa com <STMTTRN>
+  const transactions = text.split(/<STMTTRN>/).slice(1);
+  for (const txn of transactions) {
+    const dt = (txn.match(/<DTPOSTED>([^<]*)<\/DTPOSTED>/) || [])[1] || '';
+    const amt = (txn.match(/<TRNAMT>([^<]*)<\/TRNAMT>/) || [])[1] || '0';
+    const memo = (txn.match(/<MEMO>([^<]*)<\/MEMO>/) || [])[1] || '';
+    const name = (txn.match(/<NAME>([^<]*)<\/NAME>/) || [])[1] || '';
+    const trType = (txn.match(/<TRNTYPE>([^<]*)<\/TRNTYPE>/) || [])[1] || '';
+
+    if (!dt) continue;
+
+    // OFX datas: YYYYMMDD[HHMMSS[.SSS[Z]]]
+    const dateBr = dt.length >= 8 ? `${dt.slice(6, 8)}/${dt.slice(4, 6)}/${dt.slice(0, 4)}` : dt;
+    const value = parseFloat(amt.replace(/,/g, '.')) || 0;
+    const history = [name, memo, trType].filter(Boolean).join(' — ').trim() || 'Lançamento OFX';
+
+    lines.push(`${dateBr};${value.toFixed(2).replace('.', ',')};${history.replace(/;/g, ',')}`);
+  }
+
+  return lines.join('\n');
 }
 
 async function processUploadedFiles(fileList) {
@@ -1484,7 +1561,7 @@ async function processUploadedFiles(fileList) {
       const extension = fileExtension(file.name);
 
       if (!SUPPORTED_EXTENSIONS.includes(extension)) {
-        failures.push(`${file.name}: formato não suportado (use .pdf ou .xlsx).`);
+        failures.push(`${file.name}: formato não suportado (use .pdf, .xlsx, .csv ou .ofx).`);
         continue;
       }
       if (file.size > MAX_FILE_BYTES) {
@@ -2233,6 +2310,8 @@ function bindOutputEvents() {
 
   dom['export-only-filtered']?.addEventListener('change', (event) => {
     state.exportOnlyFiltered = event.target.checked;
+    state.memory.settings.exportOnlyFiltered = state.exportOnlyFiltered;
+    saveAiMemory(state.memory);
     renderExportScopeHint();
   });
 
@@ -2281,6 +2360,22 @@ function bindOutputEvents() {
       showToast(`${rows.length} lançamento(s) exportado(s) em .pdf.`);
     } catch (error) {
       showToast(`Erro ao exportar .pdf: ${error.message}`, 'error');
+    }
+  });
+
+  dom['btn-export-csv']?.addEventListener('click', () => {
+    const rows = visibleExportRows();
+    if (rows.length === 0) {
+      showToast('Não há lançamentos para exportar.', 'warn');
+      return;
+    }
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      exportToCsv(rows, `Conciliacao_${stamp}.csv`);
+      track('exportacao', 'CSV gerado', `${rows.length} lançamento(s)`, 'exports');
+      showToast(`${rows.length} lançamento(s) exportado(s) em .csv (separador ";" e vírgula decimal).`);
+    } catch (error) {
+      showToast(`Erro ao exportar .csv: ${error.message}`, 'error');
     }
   });
 

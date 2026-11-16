@@ -129,7 +129,7 @@
       </div>
 
       <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Selecionar ou arrastar arquivos PDF ou XLSX" aria-describedby="dropzone-hint">
-        <input id="file-input" type="file" accept=".pdf,.xlsx" multiple class="sr-only" tabindex="-1" />
+        <input id="file-input" type="file" accept=".pdf,.xlsx,.csv,.ofx" multiple class="sr-only" tabindex="-1" />
         <div class="dropzone-icon" aria-hidden="true">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -292,6 +292,9 @@
           </button>
           <button id="btn-export-pdf" class="btn btn-navy" type="button">
             Exportar .pdf
+          </button>
+          <button id="btn-export-csv" class="btn btn-outline-dark" type="button">
+            Exportar .csv
           </button>
           <p id="export-scope-hint" class="export-scope-hint">Nada selecionado: exporta todos os lançamentos.</p>
         </div>

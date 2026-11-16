@@ -182,7 +182,20 @@ function showToast(message, type = 'success', { duration = 4500 } = {}) {
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
-  toast.textContent = message;
+
+  const text = document.createElement('span');
+  text.className = 'toast-text';
+  text.textContent = message;
+  toast.appendChild(text);
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Fechar notificação');
+  close.textContent = '✕';
+  close.addEventListener('click', () => toast.remove());
+  toast.appendChild(close);
+
   container.appendChild(toast);
 
   while (container.children.length > 4) container.removeChild(container.firstElementChild);

@@ -277,10 +277,16 @@ function createDefaultMemory() {
     settings: {
       // Baixar o catálogo público de layouts (só download: nada do arquivo sai).
       communityCatalog: true,
+      // Exportar apenas o resultado filtrado na planilha de saída.
+      exportOnlyFiltered: false,
     },
     // Conciliação de clientes/fornecedores (PDF Questor): apelidos de histórico
     // já ligados a um contato, pesos por contato e a última vez que foi usada.
     counterparties: emptyCounterparties(),
+    // Históricos digitados à mão (chave "arquivo#linha" -> texto) e linhas
+    // excluídas (chaves "arquivo#linha"). Persistem entre sessões.
+    historyOverrides: {},
+    removedKeys: [],
   };
 }
 
@@ -628,8 +634,25 @@ export function normalizeMemory(rawMemory) {
     ocrRuns: sanitizeOcrRuns(rawMemory.ocrRuns),
     settings: {
       communityCatalog: rawMemory?.settings?.communityCatalog !== false,
+      exportOnlyFiltered: rawMemory?.settings?.exportOnlyFiltered === true,
     },
     counterparties: sanitizeCounterparties(rawMemory.counterparties),
+    // Históricos digitados à mão e linhas excluídas: preservam-se entre sessões.
+    historyOverrides: (() => {
+      const raw = rawMemory.historyOverrides;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+      const out = {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof key === 'string' && typeof value === 'string' && value.length > 0)
+          out[key.slice(0, 200)] = value.slice(0, 500);
+      }
+      return out;
+    })(),
+    removedKeys: (() => {
+      const raw = rawMemory.removedKeys;
+      if (!Array.isArray(raw)) return [];
+      return raw.filter((key) => typeof key === 'string' && key.length > 0).slice(0, 200);
+    })(),
   };
 }
 

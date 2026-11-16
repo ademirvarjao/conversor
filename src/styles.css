@@ -19,6 +19,7 @@
   --shadow: 0 1px 3px rgba(15, 39, 68, 0.06), 0 4px 14px rgba(15, 39, 68, 0.04);
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mono: var(--font-mono);
 }
 
 *, *::before, *::after {
@@ -31,6 +32,7 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -627,6 +629,9 @@ body {
   font-size: 0.86rem;
   margin-bottom: 14px;
   border: 1px solid;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
 }
 .ai-alert.evolved {
   background: #fffbeb;
@@ -642,6 +647,16 @@ body {
   background: #eff6ff;
   border-color: #bfdbfe;
   color: #1e40af;
+}
+.ai-alert.is-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+.ai-alert.is-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
 }
 
 .trainer-meta-row {
@@ -1450,6 +1465,17 @@ body {
 
 .data-table tbody tr:nth-child(even) {
   background: #f8fafc;
+}
+
+.data-table tbody tr.selected-row {
+  background: #dbeafe !important;
+  border-left: 3px solid var(--primary);
+}
+
+.data-table td.col-hist input.is-edited {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
 }
 
 .pagination-bar {
@@ -3059,6 +3085,7 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
 .cp-admin-tag.is-nuvem { background: #cffafe; color: #0e7490; }
 .cp-admin-tag.is-erro { background: #fee2e2; color: #b91c1c; }
 .cp-admin-tag.is-sessao { background: #e2e8f0; color: #475569; }
+.cp-admin-tag.is-memoria { background: #ede9fe; color: #6d28d9; }
 
 .cp-admin-filters {
   display: flex;
@@ -3798,6 +3825,14 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
   outline-offset: 1px;
 }
 
+/* Botões de navegação no topo do manual: links claros entre páginas do app. */
+.manual-top-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 8px 8px 0;
+}
+
 .manual-body {
   min-width: 0;
 }
@@ -3970,6 +4005,35 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
   margin-top: 6px !important;
   color: var(--text-light) !important;
   font-size: 0.78rem !important;
+}
+
+.footer-privacy {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  opacity: 0.72;
+  line-height: 1.5;
+}
+
+/* Previne overflow horizontal em componentes que podem estourar em telas estreitas. */
+.files-grid,
+.modal-tabs,
+.pagination-bar,
+.filter-pills,
+.toast-container,
+.topbar-actions {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+@media (max-width: 620px) {
+  .topbar-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .topbar-actions #btn-gear {
+    flex: 0 0 auto;
+  }
 }
 
 @media (max-width: 900px) {

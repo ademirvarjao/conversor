@@ -481,6 +481,7 @@ describe('SQL do bloqueio e da exclusão', () => {
     '20261111180000_conversor_models_adopt.sql',
     '20261112100000_conversor_models_block.sql',
     '20261116165533_conversor_models_hardening.sql',
+    '20261116175010_conversor_ai_database.sql',
   ];
 
   it('o schema.sql é a união exata das migrações', () => {
