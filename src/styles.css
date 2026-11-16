@@ -284,6 +284,11 @@ body {
   gap: 6px;
 }
 
+/* Quando o usuário não está na rede interna, o ícone e o menu somem. */
+.func-group.oculto {
+  display: none !important;
+}
+
 .btn.btn-func {
   display: inline-flex;
   align-items: center;

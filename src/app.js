@@ -3467,14 +3467,21 @@ function init() {
   bindCloudEvents();
   bindGlobalEvents();
 
-  // Função JR: ícone ao lado dos ícones de acesso, habilitado só na rede interna.
+  // Função JR: ícone ao lado dos ícones de acesso, visível só na rede interna.
   // Os elementos são opcionais (só existem no index.html), então lidos direto do DOM.
+  const funcGroup = document.getElementById('func-group');
   const btnFuncJr = document.getElementById('btn-func-jr');
   const funcJrDot = document.getElementById('func-jr-dot');
   const funcMenuJrStatus = document.getElementById('func-menu-jr-status');
 
   function atualizarFuncJr(online) {
     const habilitado = Boolean(online);
+
+    // Oculta o ícone e o menu imediatamente quando não está na rede interna.
+    if (funcGroup) {
+      funcGroup.classList.toggle('oculto', !habilitado);
+    }
+
     if (btnFuncJr) {
       btnFuncJr.disabled = !habilitado;
       btnFuncJr.title = habilitado
