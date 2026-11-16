@@ -590,3 +590,42 @@ export function exportCounterpartiesCsv(rows, outputName = 'Conciliacao_Clientes
   triggerDownload(blob, outputName);
   return csv;
 }
+
+/* -------------------------------------------------------------------------- */
+/*        CSV da conciliação unificada (data | valor | historico)             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Monta o CSV (separador ";" com vírgula decimal) do layout de conciliação
+ * unificado: data | valor | historico.
+ */
+export function buildCsv(rows) {
+  const records = normalizeRecords(rows);
+  const lines = ['data;valor;historico'];
+
+  for (const record of records) {
+    const history = neutralizeCsvText(
+      String(record.history ?? '').replace(/[\r\n;]+/g, ' ').replace(/\s+/g, ' ').trim()
+    );
+    lines.push([record.dateBr || '', formatValuePlainBr(record.value), history].join(';'));
+  }
+
+  const totals = summarizeRecords(records);
+  lines.push(
+    [
+      'TOTAIS',
+      formatValuePlainBr(totals.netTotal),
+      `${records.length} lançamento(s) • Entradas ${formatValuePlainBr(totals.totalIn)} • Saídas ${formatValuePlainBr(Math.abs(totals.totalOut))}`,
+    ].join(';')
+  );
+
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/** Baixa o CSV da conciliação unificada. */
+export function exportToCsv(rows, outputName = 'Conciliacao.csv') {
+  const csv = buildCsv(rows);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  triggerDownload(blob, outputName);
+  return csv;
+}

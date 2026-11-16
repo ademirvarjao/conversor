@@ -50,6 +50,7 @@ export const REQUIRED_ELEMENT_IDS = [
   'output-section',
   'btn-export-xlsx',
   'btn-export-pdf',
+  'btn-export-csv',
   'export-only-filtered',
   'export-scope-hint',
   'kpi-count',

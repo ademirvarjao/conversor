@@ -85,7 +85,7 @@ export function gearSections(ctx = {}) {
       id: 'settings',
       label: 'Configurações',
       items: [
-        { id: 'settings', icon: 'key', label: 'Backup e chave do LLM', hint: 'Conector opcional (OpenAI / Gemini)' },
+        { id: 'settings', icon: 'key', label: 'Backup e chave do LLM', hint: 'Conector opcional (Groq / OpenRouter / Gemini)' },
         {
           id: 'cloud',
           icon: 'cloud',
