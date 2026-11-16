@@ -273,6 +273,161 @@ body {
   font-weight: 600;
 }
 
+/* ------------------------------------------------------------------ */
+/*   Grupo de funções (ícones ao lado dos ícones de acesso)           */
+/* ------------------------------------------------------------------ */
+
+.func-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Quando o usuário não está na rede interna, o ícone e o menu somem. */
+.func-group.oculto {
+  display: none !important;
+}
+
+.btn.btn-func {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.btn.btn-func:not(:disabled):hover {
+  background: rgba(56, 189, 248, 0.24);
+  border-color: rgba(56, 189, 248, 0.75);
+}
+
+.btn.btn-func:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.btn.btn-func:focus-visible {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 2px;
+}
+
+.func-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.func-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+  box-shadow: 0 0 6px #94a3b8;
+  display: inline-block;
+}
+
+/* Menu interativo: aparece ao passar o mouse sobre o grupo */
+.func-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 240px;
+  z-index: 60;
+  display: none; /* oculto por padrão, exibido via :hover do grupo */
+  font-size: 0.82rem;
+  overflow: hidden;
+}
+
+.func-group:hover .func-menu {
+  display: block !important;
+}
+
+.func-menu-header {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.func-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.func-menu-item:last-child {
+  border-bottom: none;
+}
+
+.func-menu-item:hover {
+  background: var(--surface-alt);
+}
+
+.func-menu-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(15, 39, 68, 0.08);
+  color: var(--navy);
+  font-size: 0.9rem;
+  line-height: 1;
+  flex: none;
+}
+
+.func-menu-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.func-menu-status {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.func-menu-status.offline {
+  color: #94a3b8;
+}
+
+.func-menu-status.online {
+  color: #34d399;
+}
+
+/* Ajuste em telas estreitas: o grupo não quebra o layout */
+@media (max-width: 620px) {
+  .func-group {
+    flex: 0 0 auto;
+  }
+  .func-menu {
+    right: -8px;
+    left: auto;
+  }
+}
+
 /* Engrenagem de opções — substitui o botão \"Memória da IA\" na topbar */
 .btn-gear {
   width: 38px;

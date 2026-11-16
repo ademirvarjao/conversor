@@ -15,6 +15,11 @@
 import { parseMoneyValue, cleanWhitespace, parseDateValue } from './parsers.js';
 import { formatValuePlainBr, formatIsoToBrDate } from './format.js';
 import { APP_VERSION } from './ui-contract.js';
+import {
+  isInternalNetwork,
+  onInternalNetworkChange,
+  internalApiUrl,
+} from './internal-network.js';
 
 const STATE = {
   empresa: { codigo: '', nome: '' },
@@ -85,11 +90,50 @@ function setProcessing(active) {
 }
 
 /* ------------------------------------------------------------------ */
-/*                        Simulação de API (JR)                      */
+/*                   API da empresa (interna ou simulada)             */
+/* ------------------------------------------------------------------ */
+
+/** Busca o nome da empresa no site interno, com fallback para simulação. */
+async function buscarEmpresa(codigo) {
+  if (isInternalNetwork()) {
+    try {
+      const response = await fetch(internalApiUrl(`/api/empresa/${codigo}`), {
+        mode: 'cors',
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      const nome = data.nome ?? null;
+      return { nome };
+    } catch {
+      // Se a rede interna caiu no meio da chamada, segue com a simulação.
+    }
+  }
+  return buscarEmpresaSimulado(codigo);
+}
+
+/** Busca as contas bancárias da empresa no site interno, com fallback. */
+async function buscarContasBanco(codigo) {
+  if (isInternalNetwork()) {
+    try {
+      const response = await fetch(internalApiUrl(`/api/contas-banco/${codigo}`), {
+        mode: 'cors',
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      return { contas: data.contas ?? [] };
+    } catch {
+      // Segue com a simulação quando o site interno não responde.
+    }
+  }
+  return buscarContasBancoSimulado(codigo);
+}
+
+/* ------------------------------------------------------------------ */
+/*                   Simulação de API (fallback offline)              */
 /* ------------------------------------------------------------------ */
 
 /** Simula a busca do nome da empresa pelo código. */
-function buscarEmpresa(codigo) {
+function buscarEmpresaSimulado(codigo) {
   return new Promise((resolve) => {
     setTimeout(() => {
       if (!codigo || codigo.length < 2) {
@@ -112,7 +156,7 @@ function buscarEmpresa(codigo) {
 }
 
 /** Simula a busca de contas bancárias da empresa. */
-function buscarContasBanco(codigo) {
+function buscarContasBancoSimulado(codigo) {
   return new Promise((resolve) => {
     setTimeout(() => {
       if (!codigo) { resolve({ contas: [] }); return; }
@@ -590,6 +634,22 @@ function init() {
   DOM['jr-data-final'].value = paraInput(hoje);
 
   bindFormEvents();
+
+  // Detecção de rede interna: atualiza o indicador visual e o comportamento
+  // da API (real quando está na rede interna, simulado quando não está).
+  const redeStatus = DOM['jr-rede-status'];
+  function atualizarRede(online) {
+    if (!redeStatus) return;
+    redeStatus.classList.toggle('rede-off', !online);
+    redeStatus.classList.toggle('rede-on', online);
+    redeStatus.title = online
+      ? 'Rede interna detectada — usando o banco de dados do site interno'
+      : 'Rede interna não detectada — usando dados simulados';
+    redeStatus.removeAttribute('aria-hidden');
+  }
+  atualizarRede(isInternalNetwork());
+  onInternalNetworkChange(atualizarRede);
+  void startInternalNetworkDetection();
 }
 
 init();
