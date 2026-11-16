@@ -42,6 +42,15 @@ const ENVELOPE_PREFIX = 'v1';
 
 const IV_BYTES = 12;
 
+/**
+ * Cache em memória das chaves derivadas nesta sessão (evita recalcular 310 mil
+ * rodadas de PBKDF2 a cada sincronização automática da mesma chave). As
+ * `CryptoKey`s continuam não-exportáveis (`extractable: false`) e nunca vão
+ * para o `localStorage`.
+ */
+const MAX_DERIVED_CACHE = 8;
+const derivedKeysCache = new Map();
+
 function subtleCrypto() {
   const webcrypto = globalThis.crypto;
   if (!webcrypto?.subtle) {
@@ -144,6 +153,15 @@ export async function deriveAccessKeys(code, options = {}) {
 
   const crypto = subtleCrypto();
   const iterations = Math.max(1, Math.floor(options.iterations || PBKDF2_ITERATIONS));
+  const cacheKey = `${normalized}:${iterations}`;
+  const cached = derivedKeysCache.get(cacheKey);
+  if (cached) {
+    // LRU simples: move para o fim ao reutilizar.
+    derivedKeysCache.delete(cacheKey);
+    derivedKeysCache.set(cacheKey, cached);
+    return { ...cached };
+  }
+
   const encoder = new TextEncoder();
 
   const baseKey = await crypto.subtle.importKey(
@@ -176,12 +194,20 @@ export async function deriveAccessKeys(code, options = {}) {
     'decrypt',
   ]);
 
-  return {
+  const derived = {
     code: normalized,
     // 128 bits bastam para identificar o slot e evitam colisão acidental.
     slot: bytesToHex(new Uint8Array(slotBytes)).slice(0, 32),
     aesKey,
   };
+
+  if (derivedKeysCache.size >= MAX_DERIVED_CACHE) {
+    const oldest = derivedKeysCache.keys().next().value;
+    if (oldest !== undefined) derivedKeysCache.delete(oldest);
+  }
+  derivedKeysCache.set(cacheKey, derived);
+
+  return { ...derived };
 }
 
 /* -------------------------------------------------------------------------- */

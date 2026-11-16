@@ -19,6 +19,50 @@ const EXPIRY_SKEW_MS = 60 * 1000;
 
 const TIMEOUT_MS = 15000;
 
+const LOCAL_AUTH_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Promessas de renovação em voo por refresh token: com rotação de tokens ativa
+ * no Supabase, duas renovações paralelas do mesmo token derrubariam a sessão
+ * por detecção de reuso.
+ */
+const inflightRefreshes = new Map();
+
+/** Lê `sub` e `email` do corpo de um JWT quando o redirect não traz `user`. */
+function decodeJwtClaims(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const raw =
+      typeof atob === 'function'
+        ? atob(padded)
+        : Buffer.from(padded, 'base64').toString('utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Valida URL de redirecionamento de confirmação de e-mail (sem fragmento/query). */
+function sanitizeRedirectUrl(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol === 'https:') return `${parsed.origin}${parsed.pathname}`;
+    if (protocol === 'http:' && LOCAL_AUTH_HOSTS.has(parsed.hostname.toLowerCase())) {
+      return `${parsed.origin}${parsed.pathname}`;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
 function storageOf(storage) {
   if (storage) return storage;
   try {
@@ -62,12 +106,19 @@ export function normalizeSession(raw, now = Date.now()) {
   const expiresIn = Number(raw.expires_in || raw.expiresIn || 3600);
   const expiresAt = Number(raw.expires_at || raw.expiresAt) || now + expiresIn * 1000;
   const user = raw.user && typeof raw.user === 'object' ? raw.user : {};
+  let userId = String(user.id || raw.userId || '');
+  let email = String(user.email || raw.email || '');
+  if (!userId || !email) {
+    const claims = decodeJwtClaims(accessToken);
+    if (!userId && claims?.sub) userId = String(claims.sub);
+    if (!email && claims?.email) email = String(claims.email);
+  }
   return {
     accessToken,
     refreshToken: String(raw.refresh_token || raw.refreshToken || ''),
     expiresAt,
-    userId: String(user.id || raw.userId || ''),
-    email: String(user.email || raw.email || ''),
+    userId,
+    email,
   };
 }
 
@@ -216,7 +267,10 @@ export async function signUp(config, email, password, options = {}) {
   if (!mail || !password) throw new Error('Informe e-mail e senha para criar a conta.');
   if (String(password).length < 8) throw new Error('A senha da conta precisa de pelo menos 8 caracteres.');
 
-  const data = await authRequest(config, 'signup', {
+  const redirectTo = sanitizeRedirectUrl(options.redirectTo);
+  const path = redirectTo ? `signup?redirect_to=${encodeURIComponent(redirectTo)}` : 'signup';
+
+  const data = await authRequest(config, path, {
     body: { email: mail, password: String(password) },
     fetchImpl: options.fetchImpl,
   });
@@ -225,17 +279,73 @@ export async function signUp(config, email, password, options = {}) {
   return { session, needsConfirmation: !session, email: mail };
 }
 
-/** Renova o token. Lança erro quando o refresh token também venceu. */
+/**
+ * Captura a sessão devolvida no fragmento da URL (`#access_token=...`) quando o
+ * usuário volta do link de confirmação de e-mail ou recuperação do Supabase, e
+ * limpa o token da barra de endereços imediatamente.
+ *
+ * @returns {{session: object, type: string}|null}
+ */
+export function consumeAuthRedirect(options = {}) {
+  const loc = options.location ?? (typeof globalThis.location !== 'undefined' ? globalThis.location : null);
+  const hash = String(loc?.hash || '');
+  if (!hash.startsWith('#') || !hash.includes('access_token=')) return null;
+
+  const params = new URLSearchParams(hash.slice(1));
+  const accessToken = params.get('access_token') || '';
+  if (!accessToken) return null;
+
+  const session = normalizeSession(
+    {
+      access_token: accessToken,
+      refresh_token: params.get('refresh_token') || '',
+      expires_in: params.get('expires_in') || 3600,
+      expires_at: params.get('expires_at') || undefined,
+    },
+    options.now
+  );
+  if (!session) return null;
+
+  saveSession(session, options.storage);
+
+  // Remove o JWT da URL e do histórico do navegador.
+  const hist = options.history ?? (typeof globalThis.history !== 'undefined' ? globalThis.history : null);
+  if (hist && typeof hist.replaceState === 'function') {
+    const cleanUrl = `${loc.pathname || '/'}${loc.search || ''}`;
+    try {
+      hist.replaceState(null, '', cleanUrl);
+    } catch {
+      /* ambiente restrito: a sessão já foi salva */
+    }
+  }
+
+  return { session, type: String(params.get('type') || 'signup') };
+}
+
+/** Renova o token (deduplicando chamadas concorrentes). Lança erro quando o refresh token também venceu. */
 export async function refreshSession(config, session, options = {}) {
   if (!session?.refreshToken) throw new Error('Sessão sem token de renovação: entre de novo.');
-  const data = await authRequest(config, 'token?grant_type=refresh_token', {
-    body: { refresh_token: session.refreshToken },
-    fetchImpl: options.fetchImpl,
-  });
-  const renewed = normalizeSession(data, options.now);
-  if (!renewed) throw new Error('Não foi possível renovar a sessão: entre de novo.');
-  saveSession(renewed, options.storage);
-  return renewed;
+  const dedupeKey = `${String(config?.url || '').replace(/\/+$/, '')}|${session.refreshToken}`;
+  const pending = inflightRefreshes.get(dedupeKey);
+  if (pending) return pending;
+
+  const run = (async () => {
+    const data = await authRequest(config, 'token?grant_type=refresh_token', {
+      body: { refresh_token: session.refreshToken },
+      fetchImpl: options.fetchImpl,
+    });
+    const renewed = normalizeSession(data, options.now);
+    if (!renewed) throw new Error('Não foi possível renovar a sessão: entre de novo.');
+    saveSession(renewed, options.storage);
+    return renewed;
+  })();
+
+  inflightRefreshes.set(dedupeKey, run);
+  try {
+    return await run;
+  } finally {
+    inflightRefreshes.delete(dedupeKey);
+  }
 }
 
 /** Sai da conta no servidor (melhor esforço) e limpa a sessão local. */

@@ -231,6 +231,14 @@ const SOURCE_LABELS = {
   banco: 'Só vista no banco',
 };
 
+function formatVaultBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1).replace('.', ',')} KB`;
+  return `${(value / (1024 * 1024)).toFixed(2).replace('.', ',')} MB`;
+}
+
 function vaultButton(label, attrs, { kind = 'outline', disabled = false, title = '' } = {}) {
   const classes = kind === 'danger' ? 'btn btn-sm btn-danger-outline' : kind === 'primary' ? 'btn btn-sm btn-navy' : 'btn btn-sm btn-outline-dark';
   return `<button class="${classes}" type="button" ${attrs}${disabled ? ' disabled' : ''}${
@@ -257,12 +265,16 @@ function vaultItem(item, ctx) {
       : '<span class="cp-vault-badge is-local">Só neste navegador</span>'
   );
 
+  const sizeText = item.inDb ? formatVaultBytes(item.payloadBytes) : '';
   const meta = [
     `Criada em ${escapeHtml(formatDateTime(item.createdAt))}`,
     item.lastSeenAt ? `último uso ${escapeHtml(formatDateTime(item.lastSeenAt))}` : 'sem uso registrado',
     item.inDb && item.dbUpdatedAt ? `banco ${escapeHtml(formatDateTime(item.dbUpdatedAt))}` : null,
+    sizeText ? escapeHtml(sizeText) : null,
+    item.inDb && item.revision > 1 ? `rev. ${escapeHtml(String(item.revision))}` : null,
     item.inDb ? (item.ownerId ? 'dono: conta logada' : 'dono: sem conta (legado/anônimo)') : null,
     blocked && item.blockedAt ? `bloqueado em ${escapeHtml(formatDateTime(item.blockedAt))}` : null,
+    blocked && item.blockedReason ? `motivo: ${escapeHtml(item.blockedReason)}` : null,
     item.code ? null : `slot ${escapeHtml(item.shortSlot)}`,
   ].filter(Boolean);
 

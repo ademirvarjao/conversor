@@ -60,11 +60,11 @@ import {
   saveIdentity,
   touchIdentitySync,
 } from './sync-vault.js';
-import { normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
+import { isSecretSupabaseKey, normalizeSupabaseConfig, pingDatabase } from './sync-client.js';
 import { findVault } from './vault-registry.js';
 import { DEFAULT_CLOUD_CONFIG } from './sync-config.js';
 import { SETUP_SQL, sqlEditorUrl } from './sql-setup.js';
-import { describeSession, loadSession, signIn, signOut, signUp } from './cloud-auth.js';
+import { consumeAuthRedirect, describeSession, loadSession, signIn, signOut, signUp } from './cloud-auth.js';
 import {
   LOCKOUT_MS,
   MAX_ATTEMPTS,
@@ -182,7 +182,7 @@ const adminConsole = createAdminConsole({
     accessCode: cloud.identity ? formatAccessCode(cloud.identity.code) : '',
     lastSync: cloud.identity?.lastSyncAt ? formatLocalDateTime(cloud.identity.lastSyncAt) : '—',
     host: cloudHostLabel(),
-    account: cloud.session?.user?.email || 'sem conta',
+    account: cloud.session?.email || 'sem conta',
     remote: cloud.locked ? 'conexão bloqueada' : cloud.identity ? 'sincronizado' : 'não verificado',
   }),
   notify: (message, kind) => showToast(message, kind || 'success'),
@@ -2683,9 +2683,14 @@ function renderCloudAccount() {
   }
 }
 
-/** Tenta reivindicar o cofre da chave atual para a conta que acabou de entrar. */
+/**
+ * Sincroniza e reivindica o cofre da chave atual para a conta que acabou de
+ * entrar: primeiro baixa e soma o que já existir no banco (evitando sobrescrever
+ * modelos de outra máquina), depois envia para gravar o dono e o resultado.
+ */
 async function adoptVaultAfterSignIn() {
   if (!cloud.config || !cloud.identity) return;
+  await pullNow({ silent: true });
   const result = await pushNow({ silent: true });
   if (result) {
     showToast('Modelos sincronizados: o cofre agora pertence a esta conta.', 'success');
@@ -2705,7 +2710,11 @@ async function submitCloudAccount(action) {
   await withCloudBusy(async () => {
     try {
       if (action === 'signup') {
-        const result = await signUp(cloud.config, email, password);
+        const redirectTo =
+          typeof window !== 'undefined' && window.location
+            ? `${window.location.origin}${window.location.pathname}`
+            : '';
+        const result = await signUp(cloud.config, email, password, { redirectTo });
         if (dom['cloud-account-password']) dom['cloud-account-password'].value = '';
         if (result.needsConfirmation) {
           showToast(
@@ -2912,11 +2921,22 @@ let cloudPushTimer = null;
  */
 function scheduleCloudPush() {
   if (!cloud.config || !cloud.identity) return;
+  enqueueCloudPush(1200);
+}
+
+function enqueueCloudPush(delay) {
+  if (!cloud.config || !cloud.identity) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => {
     cloudPushTimer = null;
+    // Se outra operação da nuvem estiver rodando (ex.: download inicial), não
+    // descarta o envio — reagenda para logo depois.
+    if (cloud.busy) {
+      enqueueCloudPush(2500);
+      return;
+    }
     void cloudPush({ silent: true });
-  }, 1200);
+  }, delay);
 }
 
 /**
@@ -2973,9 +2993,12 @@ async function useAccessCode(rawCode) {
   let adopted = false;
   await withCloudBusy(async () => {
     try {
-      // Mesma chave que já estava anotada aqui = recuperação; senão, chave colada.
-      const source = findVault((await restoreIdentityFromCode(code)).slot) ? 'recuperada' : 'colada';
-      const identity = await restoreIdentityFromCode(code, { source });
+      // Deriva uma única vez (310 mil rodadas de PBKDF2) e ajusta a origem.
+      const baseIdentity = await restoreIdentityFromCode(code);
+      const identity = {
+        ...baseIdentity,
+        source: findVault(baseIdentity.slot) ? 'recuperada' : 'colada',
+      };
       saveIdentity(identity);
       cloud.identity = identity;
       renderCloudPanel();
@@ -3081,8 +3104,16 @@ function bindCloudEvents() {
       url: dom['cloud-url']?.value || '',
       anonKey: dom['cloud-anon-key']?.value || '',
     };
+    if (isSecretSupabaseKey(config.anonKey)) {
+      showToast(
+        'Recusado por segurança: nunca use a chave service_role ou sb_secret_ no navegador. Informe apenas a chave pública (publishable/anon).',
+        'error',
+        { duration: 9000 }
+      );
+      return;
+    }
     if (!saveCloudConfig(config)) {
-      showToast('Informe a Project URL e a chave anônima do Supabase.', 'warn');
+      showToast('Informe uma Project URL HTTPS válida e a chave pública do Supabase.', 'warn');
       return;
     }
     cloud.config = loadCloudConfig();
@@ -3341,13 +3372,25 @@ function init() {
   document.querySelectorAll('.pill[data-filter]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.classList.contains('active')));
   });
+  // Retorno do link de confirmação/login do Supabase Auth: guarda a sessão e
+  // remove o token do fragmento da URL antes de consultar o banco.
+  const authCallback = consumeAuthRedirect();
+  if (authCallback?.session) {
+    cloud.session = authCallback.session;
+    showToast(`E-mail confirmado: ${describeSession(authCallback.session)}.`, 'success');
+  }
+
   activateModalTab('profiles');
   dom['ai-modal']?.setAttribute('aria-hidden', 'true');
   renderCloudPanel();
 
   // Nuvem sem botões: quem tem chave de acesso recebe os modelos sozinho na
   // abertura (e confere de novo quando a aba volta ao foco).
-  scheduleCloudPull();
+  if (authCallback?.session && cloud.config && cloud.identity) {
+    void withCloudBusy(adoptVaultAfterSignIn);
+  } else {
+    scheduleCloudPull();
+  }
 
   renderFilesList();
   renderOutputSection();
