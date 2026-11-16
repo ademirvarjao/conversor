@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Conciliador Bancário - JR Gestão e Contabilidade</title>
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./src/styles.css?v=1.31.0" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" crossorigin="anonymous" />
+  <style>
+    /* Estilos específicos da alternativa JR */
+    .jr-navbar {
+      background: linear-gradient(135deg, var(--navy) 0%, var(--navy-mid) 100%);
+      color: #fff;
+      padding: 12px 0;
+      box-shadow: 0 2px 10px rgba(15, 39, 68, 0.18);
+    }
+    .jr-navbar .jr-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+    }
+    .jr-navbar h1.jr-title {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .jr-navbar p.jr-subtitle {
+      margin: 0;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      min-width: 150px;
+      overflow: hidden;
+    }
+    .jr-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .jr-form-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+    .jr-result-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      display: none;
+    }
+    .jr-result-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+      margin-top: 12px;
+    }
+    .jr-result-table th {
+      background: var(--surface-alt);
+      color: var(--text-muted);
+      font-weight: 700;
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .jr-result-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .jr-result-table tr:nth-child(even) {
+      background: #f8fafc;
+    }
+    .jr-badge-entrada {
+      background: #d1fae5;
+      color: #065f46;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .jr-badge-saida {
+      background: #fef2f2;
+      color: #991b1b;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .jr-badge-positivo {
+      background: #d1fae5;
+      color: #065f46;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .jr-badge-negativo {
+      background: #fef2f2;
+      color: #991b1b;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .jr-totals {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+      font-size: 0.84rem;
+      font-weight: 600;
+    }
+    .jr-total-item {
+      flex: 1;
+      padding: 10px 12px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+    }
+    .jr-total-item strong {
+      color: var(--navy);
+    }
+    .typewriter-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 1em;
+      background: var(--primary);
+      animation: blink 1s infinite;
+      vertical-align: text-bottom;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+    }
+    .back-link:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 620px) {
+      .jr-form-card, .jr-result-card {
+        padding: 16px;
+      }
+      .jr-totals {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+  <nav class="jr-navbar">
+    <div class="container topbar-inner">
+      <div class="d-flex align-items-center gap-3">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%230F2744'/%3E%3Cpath d='M9 11h18M9 18h18M9 25h11' stroke='%2338BDF8' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%2310B981'/%3E%3C/svg%3E" alt="JR Gestão e Contabilidade" class="jr-logo" width="40" height="40" />
+        <div>
+          <h1 class="jr-title">Conciliador Bancário</h1>
+          <p class="jr-subtitle">JR Gestão e Contabilidade</p>
+        </div>
+      </div>
+      <a href="./index.html" class="back-link" style="margin-left: auto;">
+        <span>← Voltar ao Conversor</span>
+      </a>
+    </div>
+  </nav>
+
+  <main id="conteudo" class="container main-content jr-container">
+    <div class="jr-form-card">
+      <form id="jr-form">
+        <div class="section-header" style="margin-bottom: 18px;">
+          <h2 style="margin: 0; font-size: 1.12rem; font-weight: 700; color: var(--navy);">Dados da Conciliação</h2>
+        </div>
+
+        <div class="row gy-3">
+          <div class="col-12 col-md-6">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Código Empresa</label>
+            <div class="input-group">
+              <input id="jr-cod-empresa" class="form-control" type="number" placeholder="Ex: 9999" required />
+              <span class="input-group-text empresa-nome-display d-none" id="jr-empresa-nome"></span>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Conta Banco</label>
+            <select id="jr-conta-banco-select" class="form-select" required disabled>
+              <option value="">Selecione a conta bancária</option>
+            </select>
+            <div class="mt-2" id="jr-conta-banco-manual-div" style="display: none;">
+              <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Código da conta específica (máx. 7 dígitos)</label>
+              <input id="jr-conta-banco-manual" class="form-control" type="number" min="1" max="9999999" maxlength="7" placeholder="Ex: 1234567" />
+            </div>
+            <input id="jr-conta-banco" name="jr-conta-banco" type="hidden" value="" />
+          </div>
+
+          <div class="col-12">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Planilha de Conciliação</label>
+            <input id="jr-planilha" class="form-control" type="file" accept=".xlsx" required />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Data Início</label>
+            <input id="jr-data-inicio" class="form-control" type="date" required />
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Data Final</label>
+            <input id="jr-data-final" class="form-control" type="date" required />
+          </div>
+
+          <div class="col-12 mt-4 d-flex gap-2">
+            <button id="jr-btn-processar" class="btn btn-primary" type="button">Processar</button>
+            <div class="dropdown ms-auto">
+              <button class="btn btn-secondary dropdown-toggle" type="button" id="jr-download-dropdown" data-bs-toggle="dropdown" aria-expanded="false" disabled>
+                Download
+              </button>
+              <ul class="dropdown-menu" aria-labelledby="jr-download-dropdown">
+                <li>
+                  <a class="dropdown-item" id="jr-download-entrada-saida" href="#">Valores Entrada/Saída</a>
+                </li>
+                <li>
+                  <a class="dropdown-item" id="jr-download-positivo-negativo" href="#">Valores Positivo/Negativo</a>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div id="jr-alert" class="ai-alert hidden mt-3" role="status"></div>
+    </div>
+
+    <section id="jr-result" class="jr-result-card" aria-labelledby="jr-result-title">
+      <div class="section-header" style="margin-bottom: 16px;">
+        <div>
+          <h2 id="jr-result-title" style="margin: 0; font-size: 1.12rem; font-weight: 700; color: var(--navy);">Resultado da Conciliação</h2>
+        </div>
+        <div class="d-flex gap-2">
+          <button id="jr-btn-limpar" class="btn btn-sm btn-ghost-dark" type="button">Limpar</button>
+        </div>
+      </div>
+
+      <div class="jr-totals" id="jr-totals"></div>
+
+      <table class="jr-result-table" id="jr-result-table">
+        <thead id="jr-result-thead"></thead>
+        <tbody id="jr-result-tbody"></tbody>
+      </table>
+
+      <div id="jr-empty" style="text-align: center; color: var(--text-light); padding: 24px; display: none;">
+        Nenhum lançamento encontrado no período selecionado.
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container site-footer-inner">
+      <p>
+        Conversor <span id="app-version" class="footer-version">v1.31.0</span> — data | valor | histórico. Seus arquivos nunca saem do navegador.
+      </p>
+      <p class="footer-manual">
+        <a href="./manual.html">Manual do usuário</a>
+        <span aria-hidden="true">·</span>
+        <a href="./manual.html#sobre">Sobre o Conversor</a>
+      </p>
+    </div>
+  </footer>
+
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="./vendor/exceljs/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+  <script type="module" src="./src/conciliador-jr.js?v=1.31.0"></script>
+</body>
+</html>
