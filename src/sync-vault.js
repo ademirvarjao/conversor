@@ -217,13 +217,19 @@ export function isPayloadNewer(candidate, reference) {
 }
 
 /** Erro único para cofre bloqueado (a UI mostra a mesma frase em todo lugar). */
-export function vaultBlockedError(code, blockedAt = null) {
+export function vaultBlockedError(code, blockedAt = null, blockedReason = null) {
+  const reason = String(blockedReason ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 200);
   const error = new Error(
-    'Esta chave de acesso está bloqueada pelo administrador: o envio e o download de modelos ficam suspensos. ' +
-      'Use outra chave ou peça o desbloqueio no painel do administrador.'
+    'Esta chave de acesso está bloqueada pelo administrador: o envio e o download de modelos ficam suspensos.' +
+      (reason ? ` Motivo: ${reason}.` : '') +
+      ' Use outra chave ou peça o desbloqueio no painel do administrador.'
   );
   error.code = 'VAULT_BLOCKED';
   error.blockedAt = blockedAt;
+  error.blockedReason = reason || null;
   error.accessCode = code;
   return error;
 }
@@ -425,12 +431,16 @@ export async function pushVault({
   try {
     await saveRemoteVault(normalized, identity.slot, envelope, { fetchImpl, accessToken: token });
   } catch (error) {
-    // O banco barra a escrita de cofre bloqueado pelo administrador.
+    // O banco barra a escrita de cofre bloqueado pelo administrador: marca no
+    // registro local também para o painel refletir o estado imediatamente.
     if (/conversor_vault_blocked|bloqueado pelo administrador/i.test(String(error?.detail || error?.message || ''))) {
-      throw vaultBlockedError(identity.code);
+      const blockedStamp = now || new Date().toISOString();
+      markVaultBlocked(identity.slot, blockedStamp, storage);
+      throw vaultBlockedError(identity.code, blockedStamp);
     }
     throw error;
   }
+  markVaultBlocked(identity.slot, null, storage);
   touchVault(identity.slot, storage);
   registerVault({ code: identity.code, slot: identity.slot }, storage);
   return { updatedAt, payload, owned: Boolean(token) };
@@ -451,7 +461,7 @@ export async function pullVault({ config, identity, fetchImpl, iterations, acces
 
   if (remote.blockedAt) {
     markVaultBlocked(identity.slot, remote.blockedAt, storage);
-    throw vaultBlockedError(identity.code, remote.blockedAt);
+    throw vaultBlockedError(identity.code, remote.blockedAt, remote.blockedReason);
   }
   markVaultBlocked(identity.slot, null, storage);
   touchVault(identity.slot, storage);

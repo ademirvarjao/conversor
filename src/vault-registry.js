@@ -234,9 +234,13 @@ export function mergeVaultView(entries, rows = [], options = {}) {
       source: entry.source,
       label: entry.label,
       blockedAt: entry.blockedAt,
+      blockedReason: null,
       inDb: false,
       ownerId: null,
+      dbCreatedAt: null,
       dbUpdatedAt: null,
+      revision: null,
+      payloadBytes: null,
       isCurrent: entry.slot === currentSlot,
     });
   }
@@ -246,11 +250,23 @@ export function mergeVaultView(entries, rows = [], options = {}) {
     if (!slot) continue;
     const known = bySlot.get(slot);
     const blockedAt = isoOrNull(row?.blockedAt);
+    const blockedReason = blockedAt ? cleanLabel(row?.blockedReason) || null : null;
+    const dbCreatedAt = isoOrNull(row?.createdAt);
+    const dbUpdatedAt = isoOrNull(row?.updatedAt);
+    const revision = Number.isFinite(Number(row?.revision)) && Number(row?.revision) >= 1 ? Number(row.revision) : null;
+    const payloadBytes =
+      Number.isFinite(Number(row?.payloadBytes)) && Number(row?.payloadBytes) >= 0
+        ? Number(row.payloadBytes)
+        : null;
     if (known) {
       known.inDb = true;
       known.ownerId = row?.ownerId || null;
-      known.dbUpdatedAt = isoOrNull(row?.updatedAt);
+      known.dbCreatedAt = dbCreatedAt;
+      known.dbUpdatedAt = dbUpdatedAt;
       known.blockedAt = blockedAt;
+      known.blockedReason = blockedReason;
+      known.revision = revision;
+      known.payloadBytes = payloadBytes;
       continue;
     }
     bySlot.set(slot, {
@@ -258,14 +274,18 @@ export function mergeVaultView(entries, rows = [], options = {}) {
       code: null,
       masked: shortSlot(slot),
       shortSlot: shortSlot(slot),
-      createdAt: isoOrNull(row?.updatedAt) || now,
+      createdAt: dbCreatedAt || dbUpdatedAt || now,
       lastSeenAt: null,
       source: 'banco',
       label: '',
       blockedAt,
+      blockedReason,
       inDb: true,
       ownerId: row?.ownerId || null,
-      dbUpdatedAt: isoOrNull(row?.updatedAt),
+      dbCreatedAt,
+      dbUpdatedAt,
+      revision,
+      payloadBytes,
       isCurrent: slot === currentSlot,
     });
   }

@@ -471,9 +471,15 @@ As migrações que ligam isso são
 [`20261111160000_conversor_models_owner.sql`](supabase/migrations/20261111160000_conversor_models_owner.sql)
 (coluna + políticas),
 [`20261111180000_conversor_models_adopt.sql`](supabase/migrations/20261111180000_conversor_models_adopt.sql)
-(adoção das linhas antigas) e
+(adoção das linhas antigas),
 [`20261112100000_conversor_models_block.sql`](supabase/migrations/20261112100000_conversor_models_block.sql)
-(bloqueio e exclusão pelo painel do administrador), aplicadas pela integração Supabase + GitHub como as demais. Para trocar a senha da conta use
+(bloqueio e exclusão pelo painel do administrador) e
+[`20261116165533_conversor_models_hardening.sql`](supabase/migrations/20261116165533_conversor_models_hardening.sql)
+(blindagem de integridade com `CHECK` em `slot`, envelope `v1.<base64url>` até 5 MiB, `blocked_reason`
+e `revision`; colunas `created_at`, `revision` e `payload_bytes`; privilégios mínimos por coluna;
+`search_path` fixo; trava `FOR UPDATE` na exclusão; preservação de `owner_id`/`updated_at` no
+bloqueio; RLS com InitPlan `(select auth.uid())`; índice em `updated_at DESC` e ajuste de
+HOT/autovacuum), aplicadas pela integração Supabase + GitHub como as demais. Para trocar a senha da conta use
 **Sair da conta** e o painel do Supabase (**Authentication → Users**), onde também dá para
 desligar o cadastro público se você for o único usuário.
 

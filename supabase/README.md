@@ -11,6 +11,7 @@ chaves de LLM passa por aqui.
 | `migrations/20261111160000_conversor_models_owner.sql` | Dono do cofre (`owner_id`) e políticas por conta. |
 | `migrations/20261111180000_conversor_models_adopt.sql` | Adoção das linhas antigas sem dono. |
 | `migrations/20261112100000_conversor_models_block.sql` | Bloqueio (`blocked_at`) e as funções `conversor_block_vault` / `conversor_delete_vault` usadas pelo painel do administrador. |
+| `migrations/20261116165533_conversor_models_hardening.sql` | Blindagem de integridade (`CHECK` em `slot`, envelope `payload` até 5 MiB, `blocked_reason`, `revision`), auditoria (`created_at`, `revision`, `payload_bytes`), privilégios mínimos por coluna, `search_path` fixo, trava `FOR UPDATE` em exclusão, preservação de `owner_id` no bloqueio, RLS com InitPlan `(select auth.uid())`, índice `updated_at DESC` e ajuste de HOT/autovacuum. |
 | **Todas** | São idempotentes e aplicadas em ordem pela integração a cada push na `main`. |
 | `schema.sql` | O mesmo SQL, para colar no SQL Editor em emergência. |
 
@@ -37,5 +38,12 @@ chaves de LLM passa por aqui.
 
 - A Project URL e a chave **publishable/anon** são públicas por natureza e ficam versionadas em
   `src/sync-config.js`; o sigilo vem da criptografia feita no navegador (chave de acesso do usuário).
-- A RLS está ligada com políticas de `select`, `insert` e `update` para `anon` — o suficiente para o
-  upsert do app. **Nunca** use a `service_role`/secret key em código de cliente.
+- A RLS separa cofres por conta (`owner_id = (select auth.uid())`) e os privilégios de coluna
+  restringem `insert`/`update` de `anon` e `authenticated` apenas a `(slot, payload, updated_at)`:
+  colunas de controle (`owner_id`, `created_at`, `revision`, `blocked_at`, `blocked_reason`) e
+  exclusões só passam pelo gatilho ou pelas RPCs `SECURITY DEFINER` com `search_path` fixo.
+- O próprio banco valida formato do `slot` (32 hex) e do envelope `v1.<base64url>` (limite de 5 MiB),
+  impedindo gravação acidental em texto claro e abuso de espaço.
+- No Supabase Auth, mantenha `Site URL` apontando para o endereço publicado
+  (`https://ademirvarjao.github.io/conversor/`) e `localhost:3000` na lista de redirecionamento.
+- **Nunca** use a `service_role`/secret key em código de cliente (o próprio app recusa salvá-la).

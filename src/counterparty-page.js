@@ -54,7 +54,7 @@ import {
 import { formatValueGroupedBr, formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
-import { loadSession } from './cloud-auth.js';
+import { consumeAuthRedirect, loadSession } from './cloud-auth.js';
 import {
   loadCloudConfig,
   loadIdentity,
@@ -437,11 +437,21 @@ let cloudPushTimer = null;
  */
 function scheduleCloudPush() {
   if (!cloud.config || !cloud.identity) return;
+  enqueueCloudPush(1200);
+}
+
+function enqueueCloudPush(delay) {
+  if (!cloud.config || !cloud.identity) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => {
     cloudPushTimer = null;
+    // Se um download/envio ainda estiver em andamento, não descarta o envio.
+    if (cloud.busy) {
+      enqueueCloudPush(2500);
+      return;
+    }
     void pushModels({ silent: true });
-  }, 1200);
+  }, delay);
 }
 
 let cloudPullTimer = null;
@@ -1654,6 +1664,8 @@ function init() {
       : DEFAULT_PAGE_SIZE;
   if (dom['cp-page-size']) dom['cp-page-size'].value = String(state.pageSize);
 
+  // Limpa e salva eventual sessão vinda de redirect de confirmação do Supabase Auth.
+  consumeAuthRedirect();
   counterpartyMemory();
   renderCloudState(describeIdentity(), 'idle');
   // Painel do administrador: marcação, sessão de uso e tempo ativo. O

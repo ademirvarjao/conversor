@@ -250,8 +250,12 @@ describe('administração dos cofres no banco', () => {
     assert.equal(rows.length, 2);
     assert.equal(rows[1].blockedAt, '2026-11-10T12:00:00Z');
     assert.equal(calls[0].url.pathname, '/rest/v1/conversor_models');
-    assert.match(calls[0].url.search, /select=slot%2Cupdated_at%2Cblocked_at%2Cowner_id|select=slot,updated_at,blocked_at,owner_id/);
-    assert.equal(calls[0].url.search.includes('payload'), false, 'nada de payload na listagem');
+    assert.match(
+      calls[0].url.search,
+      /select=slot(%2C|,)created_at(%2C|,)updated_at(%2C|,)blocked_at(%2C|,)blocked_reason(%2C|,)owner_id(%2C|,)revision(%2C|,)payload_bytes/
+    );
+    assert.equal(calls[0].url.search.includes('payload,'), false, 'nada de payload na listagem');
+    assert.equal(calls[0].url.search.includes('payload%2C'), false, 'nada de payload na listagem');
   });
 
   it('banco sem a migração avisa e lista mesmo assim', async () => {
@@ -476,6 +480,7 @@ describe('SQL do bloqueio e da exclusão', () => {
     '20261111160000_conversor_models_owner.sql',
     '20261111180000_conversor_models_adopt.sql',
     '20261112100000_conversor_models_block.sql',
+    '20261116165533_conversor_models_hardening.sql',
   ];
 
   it('o schema.sql é a união exata das migrações', () => {
