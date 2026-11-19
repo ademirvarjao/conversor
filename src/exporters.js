@@ -14,6 +14,16 @@ const EXCEL_ROW_LIMIT = 1048576 - 2;
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+/** Sanitiza texto de célula para evitar injeção de fórmula no Excel. */
+function sanitizeCellValue(value) {
+  if (typeof value !== 'string') return value;
+  const first = value.slice(0, 1);
+  if (first === '=' || first === '+' || first === '-' || first === '@') {
+    return `'${value}`;
+  }
+  return value;
+}
+
 function triggerDownload(blob, fileName) {
   if (typeof document === 'undefined') return;
   const url = URL.createObjectURL(blob);
@@ -401,6 +411,8 @@ export async function exportCounterpartiesXlsx(
     valueCell.border = thinBorder;
 
     const historyCell = row.getCell(5);
+    historyCell.numFmt = '@';
+    historyCell.value = sanitizeCellValue(record.history);
     historyCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF111827' } };
     historyCell.alignment = { horizontal: 'left', vertical: 'middle' };
     historyCell.border = thinBorder;
@@ -424,7 +436,10 @@ export async function exportCounterpartiesXlsx(
     if (colNumber === 4) cell.numFmt = '0.00';
   });
 
-  worksheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 5 } };
+  worksheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: records.length + 1, column: 5 },
+  };
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: XLSX_MIME });

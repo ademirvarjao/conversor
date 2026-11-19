@@ -364,7 +364,9 @@ function sanitizeProfile(rawProfile) {
   return {
     id: String(rawProfile.id || `prof-imported-${Math.random().toString(36).slice(2, 8)}`),
     name: cleanWhitespace(rawProfile.name) || 'Layout importado',
-    fileType: rawProfile.fileType === 'pdf' ? 'pdf' : 'xlsx',
+    fileType: ['pdf', 'xlsx', 'csv', 'ofx'].includes(rawProfile.fileType)
+      ? rawProfile.fileType
+      : 'xlsx',
     headers,
     mappings,
     rules,
@@ -438,7 +440,9 @@ function sanitizeSignatures(rawSignatures) {
       roles,
       name: cleanWhitespace(raw.name) || `Layout ${headers.slice(0, 2).join(' / ')}`,
       bank: isPlainObject(raw.bank) && raw.bank.id ? { id: String(raw.bank.id), name: cleanWhitespace(raw.bank.name) || String(raw.bank.id) } : null,
-      fileType: raw.fileType === 'xlsx' ? 'xlsx' : 'pdf',
+      fileType: ['pdf', 'xlsx', 'csv', 'ofx'].includes(raw.fileType)
+        ? raw.fileType
+        : 'xlsx',
       usageCount: Math.max(1, Number(raw.usageCount) || 1),
       createdAt: raw.createdAt || new Date().toISOString(),
       lastUsedAt: raw.lastUsedAt || raw.createdAt || new Date().toISOString(),
@@ -1557,10 +1561,11 @@ export function trainAiWithLayout(parsedFile, currentAnalysis, layoutName, memor
 
   for (let index = 0; index < mappings.length; index++) {
     const mapping = mappings[index];
-    if (!mapping || !ALL_ROLES.includes(mapping.role) || mapping.role === ROLES.IGNORE) continue;
+    if (!mapping || !ALL_ROLES.includes(mapping.role)) continue;
 
     const originalRole = predicted[index];
     const wasCorrected = !!originalRole && originalRole !== mapping.role;
+    if (mapping.role === ROLES.IGNORE && !wasCorrected) continue;
     if (wasCorrected) corrections++;
 
     for (const token of tokenizeHeader(mapping.header)) {
@@ -1631,7 +1636,9 @@ export function trainAiWithLayout(parsedFile, currentAnalysis, layoutName, memor
     const newProfile = {
       id: `prof-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: cleanName,
-      fileType: parsedFile.fileType === 'pdf' ? 'pdf' : 'xlsx',
+      fileType: ['pdf', 'xlsx', 'csv', 'ofx'].includes(parsedFile.fileType)
+        ? parsedFile.fileType
+        : 'xlsx',
       headers: (parsedFile.headers || []).map((header) => normalizeText(header)),
       mappings: profileMappings,
       rules: { ...defaultRules(), ...currentAnalysis.rules },
@@ -2074,10 +2081,13 @@ async function callOpenAiCompatible(provider, model, prompt, apiKey, controller)
 /** Chamada do Google Gemini (generateContent). */
 async function callGemini(provider, model, prompt, apiKey, controller) {
   const response = await fetch(
-    `${provider.endpoint}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    `${provider.endpoint}/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0, responseMimeType: 'application/json' },
@@ -2111,7 +2121,13 @@ export async function analyzeWithOptionalLlm(parsedFile, llmConfig) {
   const model = llmConfig.model || provider.model;
 
   const headers = parsedFile.headers || [];
-  const previewRows = (parsedFile.rows || []).slice(0, 6);
+  const previewRows = (parsedFile.rows || []).slice(0, 6).map((row) =>
+    row.map((cell) =>
+      typeof cell === 'string'
+        ? cell.replace(/\b\d{11}\b/g, '00000000000').replace(/\b\d{14}\b/g, '00000000000000')
+        : cell
+    )
+  );
   const prompt = [
     'Analise esta tabela financeira e retorne APENAS um JSON válido com a estrutura:',
     '{"layoutName":"string","defaultSign":"auto|negative|positive","roles":["..."]}',

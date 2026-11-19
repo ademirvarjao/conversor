@@ -1,185 +1,14 @@
 -- ============================================================================
 --  Conversor — schema completo do banco compartilhado
 -- ----------------------------------------------------------------------------
---  Este arquivo é a UNIÃO das migrações de `supabase/migrations/`, na ordem.
+--  Este arquivo é a UNIÃO das migrações de , na ordem.
 --  Serve para aplicar tudo de uma vez no SQL Editor quando a integração
 --  Supabase + GitHub não estiver ativa. É idempotente (pode rodar de novo).
 --
---  O teste `test/sql-setup.test.mjs` garante que este arquivo, as migrações e o
---  SQL embarcado no app (`src/sql-setup.js`) continuam idênticos.
+--  O teste  garante que este arquivo, as migrações e o
+--  SQL embarcado no app () continuam idênticos.
 -- ============================================================================
 
--- ============================================================================
---  Conversor — cofre compartilhado de MODELOS treinados
--- ----------------------------------------------------------------------------
---  Esta migração cria a tabela usada pelo app para guardar os modelos da IA
---  (pesos semânticos, perfis de layout, log e contas treinadas no conciliador).
---
---  Fluxo oficial (nenhum passo manual):
---    repositório no GitHub  ->  integração do Supabase aplica esta migração
---    quando o push chega no branch conectado (main).
---
---  Alternativa manual (só se a integração não estiver ativa):
---    Supabase -> SQL Editor -> New query -> cole este arquivo -> Run.
---
---  O que guardamos: apenas o pacote de modelos, CIFRADO no navegador
---  (AES-GCM 256, envelope "v1.<base64url>", ver src/sync-crypto.js).
---  NUNCA sobem arquivos, lançamentos financeiros ou a chave de API do LLM.
---
---  A chave anônima do Supabase é pública por natureza: quem a tiver lê apenas
---  texto cifrado. Nunca use a service_role key no app.
--- ============================================================================
-
-create table if not exists public.conversor_models (
-  slot       text primary key,
-  payload    text not null,
-  updated_at timestamptz not null default now()
-);
-
-comment on table public.conversor_models is
-  'Cofres cifrados de modelos treinados do Conversor (um por chave de acesso).';
-
-comment on column public.conversor_models.slot is
-  'Identificador opaco derivado da chave de acesso (HMAC). Não é a chave.';
-
-comment on column public.conversor_models.payload is
-  'Envelope cifrado "v1.<base64url(iv|ciphertext)>" gerado no navegador (AES-GCM).';
-
--- Atualiza updated_at automaticamente em qualquer insert/update.
-create or replace function public.conversor_models_touch()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
-
-drop trigger if exists conversor_models_touch on public.conversor_models;
-create trigger conversor_models_touch
-  before insert or update on public.conversor_models
-  for each row execute function public.conversor_models_touch();
-
--- ----------------------------------------------------------------------------
---  Row Level Security
---  O app usa SOMENTE a chave anônima (public). O sigilo vem da criptografia no
---  navegador: sem a chave de acesso, o payload é ilegível.
--- ----------------------------------------------------------------------------
--- ============================================================================
---  Conversor — cofre compartilhado de MODELOS treinados
--- ----------------------------------------------------------------------------
---  Esta migração cria a tabela usada pelo app para guardar os modelos da IA
---  (pesos semânticos, perfis de layout, log e contas treinadas no conciliador).
---
---  Fluxo oficial (nenhum passo manual):
---    repositório no GitHub  ->  integração do Supabase aplica esta migração
---    quando o push chega no branch conectado (main).
---
---  Alternativa manual (só se a integração não estiver ativa):
---    Supabase -> SQL Editor -> New query -> cole este arquivo -> Run.
---
---  O que guardamos: apenas o pacote de modelos, CIFRADO no navegador
---  (AES-GCM 256, envelope "v1.<base64url>", ver src/sync-crypto.js).
---  NUNCA sobem arquivos, lançamentos financeiros ou a chave de API do LLM.
---
---  A chave anônima do Supabase é pública por natureza: quem a tiver lê apenas
---  texto cifrado. Nunca use a service_role key no app.
--- ============================================================================
-
-create table if not exists public.conversor_models (
-  slot       text primary key,
-  payload    text not null,
-  updated_at timestamptz not null default now()
-);
-
-comment on table public.conversor_models is
-  'Cofres cifrados de modelos treinados do Conversor (um por chave de acesso).';
-
-comment on column public.conversor_models.slot is
-  'Identificador opaco derivado da chave de acesso (HMAC). Não é a chave.';
-
-comment on column public.conversor_models.payload is
-  'Envelope cifrado "v1.<base64url(iv|ciphertext)>" gerado no navegador (AES-GCM).';
-
--- Atualiza updated_at automaticamente em qualquer insert/update.
-create or replace function public.conversor_models_touch()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
-
-drop trigger if exists conversor_models_touch on public.conversor_models;
-create trigger conversor_models_touch
-  before insert or update on public.conversor_models
-  for each row execute function public.conversor_models_touch();
-
--- ----------------------------------------------------------------------------
---  Row Level Security
---  O app usa SOMENTE a chave anônima (public). O sigilo vem da criptografia no
---  navegador: sem a chave de acesso, o payload é ilegível.
--- ----------------------------------------------------------------------------
--- ============================================================================
---  Conversor — cofre compartilhado de MODELOS treinados
--- ----------------------------------------------------------------------------
---  Esta migração cria a tabela usada pelo app para guardar os modelos da IA
---  (pesos semânticos, perfis de layout, log e contas treinadas no conciliador).
---
---  Fluxo oficial (nenhum passo manual):
---    repositório no GitHub  ->  integração do Supabase aplica esta migração
---    quando o push chega no branch conectado (main).
---
---  Alternativa manual (só se a integração não estiver ativa):
---    Supabase -> SQL Editor -> New query -> cole este arquivo -> Run.
---
---  O que guardamos: apenas o pacote de modelos, CIFRADO no navegador
---  (AES-GCM 256, envelope "v1.<base64url>", ver src/sync-crypto.js).
---  NUNCA sobem arquivos, lançamentos financeiros ou a chave de API do LLM.
---
---  A chave anônima do Supabase é pública por natureza: quem a tiver lê apenas
---  texto cifrado. Nunca use a service_role key no app.
--- ============================================================================
-
-create table if not exists public.conversor_models (
-  slot       text primary key,
-  payload    text not null,
-  updated_at timestamptz not null default now()
-);
-
-comment on table public.conversor_models is
-  'Cofres cifrados de modelos treinados do Conversor (um por chave de acesso).';
-
-comment on column public.conversor_models.slot is
-  'Identificador opaco derivado da chave de acesso (HMAC). Não é a chave.';
-
-comment on column public.conversor_models.payload is
-  'Envelope cifrado "v1.<base64url(iv|ciphertext)>" gerado no navegador (AES-GCM).';
-
--- Atualiza updated_at automaticamente em qualquer insert/update.
-create or replace function public.conversor_models_touch()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at := now();
-  return new;
-end;
-$$;
-
-drop trigger if exists conversor_models_touch on public.conversor_models;
-create trigger conversor_models_touch
-  before insert or update on public.conversor_models
-  for each row execute function public.conversor_models_touch();
-
--- ----------------------------------------------------------------------------
---  Row Level Security
---  O app usa SOMENTE a chave anônima (public). O sigilo vem da criptografia no
---  navegador: sem a chave de acesso, o payload é ilegível.
--- ----------------------------------------------------------------------------
 alter table public.conversor_models enable row level security;
 
 drop policy if exists "conversor_models_select" on public.conversor_models;
@@ -1080,10 +909,15 @@ create policy conversor_catalog_sources_select_public on public.conversor_catalo
 -- Nenhuma política de INSERT/UPDATE/DELETE para anon ou authenticated: a escrita
 -- ocorre apenas pelas RPCs SECURITY DEFINER abaixo (e pelo serviço de sync).
 revoke all on table public.conversor_bank_catalog from anon, authenticated;
+grant select on table public.conversor_bank_catalog to anon, authenticated;
 revoke all on table public.conversor_ai_tokens from anon, authenticated;
+grant select on table public.conversor_ai_tokens to anon, authenticated;
 revoke all on table public.conversor_ai_signatures from anon, authenticated;
+grant select on table public.conversor_ai_signatures to anon, authenticated;
 revoke all on table public.conversor_ai_rules from anon, authenticated;
+grant select on table public.conversor_ai_rules to anon, authenticated;
 revoke all on table public.conversor_catalog_sources from anon, authenticated;
+grant select on table public.conversor_catalog_sources to anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 4. Sementes do catálogo (48+ modelos públicos, sem dados de cliente)
@@ -1384,6 +1218,7 @@ returns table (
   roles jsonb
 )
 language sql
+security definer
 stable
 set search_path = public, extensions, pg_temp
 as $$
@@ -1443,6 +1278,7 @@ create or replace function public.conversor_ai_bootstrap(
 )
 returns jsonb
 language sql
+security definer
 stable
 set search_path = public, extensions, pg_temp
 as $$
@@ -1463,6 +1299,7 @@ create or replace function public.conversor_ai_learn_event(
 )
 returns void
 language sql
+security definer
 set search_path = public, extensions, pg_temp
 as $$
 insert into public.conversor_ai_learn_events (event_type, payload)
@@ -1476,6 +1313,7 @@ create or replace function public.conversor_ai_ingest_catalog(
 )
 returns jsonb
 language sql
+security definer
 set search_path = public, extensions, pg_temp
 as $$
 with items as (
@@ -1507,6 +1345,7 @@ ins as (
     version = public.conversor_bank_catalog.version + 1,
     active = excluded.active,
     updated_at = now()
+  where public.conversor_bank_catalog.source <> 'built-in'
   returning 1
 ),
 upd as (
@@ -1526,6 +1365,7 @@ $$;
 create or replace function public.conversor_ai_stats()
 returns jsonb
 language sql
+security definer
 stable
 set search_path = public, extensions, pg_temp
 as $$
@@ -1546,7 +1386,8 @@ $$;
 grant execute on function public.conversor_ai_classify_layout(jsonb, text) to anon, authenticated, service_role;
 grant execute on function public.conversor_ai_bootstrap(boolean, timestamptz) to anon, authenticated, service_role;
 grant execute on function public.conversor_ai_learn_event(text, jsonb) to anon, authenticated, service_role;
-grant execute on function public.conversor_ai_ingest_catalog(text, jsonb) to anon, authenticated, service_role;
+revoke all on function public.conversor_ai_ingest_catalog(text, jsonb) from public, anon, authenticated;
+grant execute on function public.conversor_ai_ingest_catalog(text, jsonb) to service_role;
 grant execute on function public.conversor_ai_stats() to anon, authenticated, service_role;
 
 -- ----------------------------------------------------------------------------

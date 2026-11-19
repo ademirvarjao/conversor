@@ -382,7 +382,7 @@ function reconcileCheckpoints(parsedFile, checkpoints, transform = null, analysi
         valueCents: lastRecord ? toCents(lastRecord.value) : 0,
         saldoCents,
         expectedCents,
-        deltaCents: saldoCents - expectedCents,
+        deltaCents: expectedCents - saldoCents,
         transactions: between.length,
         kind: between.length > 0 ? 'lancamento' : 'checkpoint',
       });

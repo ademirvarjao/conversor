@@ -1246,7 +1246,7 @@ function applyAccountBatch() {
     'conta',
     clearing ? 'Contas digitadas à mão removidas' : 'Contas aplicadas em lote',
     summary,
-    clearing ? 'accountsCleared' : 'accountsApplied'
+    'accountEdits'
   );
   showToast(clearing ? `Contas digitadas à mão removidas — ${summary}.` : `Contas aplicadas — ${summary}.`);
 }
