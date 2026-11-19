@@ -1,12 +1,12 @@
 /**
  * Conversor — SQL de instalação do banco compartilhado
  *
- * Mesmo conteúdo de `supabase/migrations/*.sql` (todos, na ordem), embarcado no
+ * Mesmo conteúdo de  (todos, na ordem), embarcado no
  * app para o plano B de quem não usa a integração Supabase+GitHub:
- * a tela "Nuvem" copia este SQL para a área de transferência e abre o SQL
+ * a tela Nuvem copia este SQL para a área de transferência e abre o SQL
  * Editor do projeto — dois cliques, sem caçar arquivo no repositório.
  *
- * O teste `test/sql-setup.test.mjs` garante que este texto e a migração do
+ * O teste  garante que este texto e a migração do
  * repositório continuam idênticos.
  */
 
@@ -967,10 +967,15 @@ create policy conversor_catalog_sources_select_public on public.conversor_catalo
 -- Nenhuma política de INSERT/UPDATE/DELETE para anon ou authenticated: a escrita
 -- ocorre apenas pelas RPCs SECURITY DEFINER abaixo (e pelo serviço de sync).
 revoke all on table public.conversor_bank_catalog from anon, authenticated;
+grant select on table public.conversor_bank_catalog to anon, authenticated;
 revoke all on table public.conversor_ai_tokens from anon, authenticated;
+grant select on table public.conversor_ai_tokens to anon, authenticated;
 revoke all on table public.conversor_ai_signatures from anon, authenticated;
+grant select on table public.conversor_ai_signatures to anon, authenticated;
 revoke all on table public.conversor_ai_rules from anon, authenticated;
+grant select on table public.conversor_ai_rules to anon, authenticated;
 revoke all on table public.conversor_catalog_sources from anon, authenticated;
+grant select on table public.conversor_catalog_sources to anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 4. Sementes do catálogo (48+ modelos públicos, sem dados de cliente)
@@ -1271,6 +1276,7 @@ returns table (
   roles jsonb
 )
 language sql
+security definer
 stable
 set search_path = public, extensions, pg_temp
 as $$
@@ -1330,6 +1336,7 @@ create or replace function public.conversor_ai_bootstrap(
 )
 returns jsonb
 language sql
+security definer
 stable
 set search_path = public, extensions, pg_temp
 as $$
@@ -1350,6 +1357,7 @@ create or replace function public.conversor_ai_learn_event(
 )
 returns void
 language sql
+security definer
 set search_path = public, extensions, pg_temp
 as $$
 insert into public.conversor_ai_learn_events (event_type, payload)
@@ -1363,6 +1371,7 @@ create or replace function public.conversor_ai_ingest_catalog(
 )
 returns jsonb
 language sql
+security definer
 set search_path = public, extensions, pg_temp
 as $$
 with items as (
@@ -1394,6 +1403,7 @@ ins as (
     version = public.conversor_bank_catalog.version + 1,
     active = excluded.active,
     updated_at = now()
+  where public.conversor_bank_catalog.source <> 'built-in'
   returning 1
 ),
 upd as (
@@ -1413,6 +1423,7 @@ $$;
 create or replace function public.conversor_ai_stats()
 returns jsonb
 language sql
+security definer
 stable
 set search_path = public, extensions, pg_temp
 as $$
@@ -1433,7 +1444,8 @@ $$;
 grant execute on function public.conversor_ai_classify_layout(jsonb, text) to anon, authenticated, service_role;
 grant execute on function public.conversor_ai_bootstrap(boolean, timestamptz) to anon, authenticated, service_role;
 grant execute on function public.conversor_ai_learn_event(text, jsonb) to anon, authenticated, service_role;
-grant execute on function public.conversor_ai_ingest_catalog(text, jsonb) to anon, authenticated, service_role;
+revoke all on function public.conversor_ai_ingest_catalog(text, jsonb) from public, anon, authenticated;
+grant execute on function public.conversor_ai_ingest_catalog(text, jsonb) to service_role;
 grant execute on function public.conversor_ai_stats() to anon, authenticated, service_role;
 
 -- ----------------------------------------------------------------------------
@@ -1453,9 +1465,8 @@ analyze public.conversor_ai_learn_events;
 notify pgrst, 'reload schema';`;
 
 /**
- * Ref do projeto Supabase a partir da Project URL
- * (`https://abcdefgh.supabase.co` → `abcdefgh`).
- * @param {string} url
+ * Extrai a reference do projeto de uma Project URL do Supabase.
+ * @param {string} url Project URL (ex.: https://xxxx.supabase.co)
  * @returns {string}
  */
 export function projectRefFromUrl(url) {

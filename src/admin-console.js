@@ -925,7 +925,6 @@ export function createAdminConsole(options = {}) {
 
     adoptStoredUnlock();
     startSession(usage);
-    bumpCounter(usage, 'sessions', 1, Date.now());
     persistUsage();
     recordEvent(usage, { type: 'sessao', message: `Página aberta: ${page}` }, Date.now());
     persistUsage();

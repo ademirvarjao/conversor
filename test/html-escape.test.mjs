@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 import { escapeHtml, esc } from '../src/html.js';
 
-const SRC_DIR = path.join(import.meta.dirname, '..', 'src');
+const SRC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
 describe('escapeHtml', () => {
   it('escapa os cinco caracteres perigosos, inclusive dentro de atributos', () => {

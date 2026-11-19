@@ -1377,6 +1377,7 @@ function renderOutputSection() {
   const hasRows = state.unifiedRows.length > 0;
   dom['btn-export-xlsx'].disabled = !hasRows;
   dom['btn-export-pdf'].disabled = !hasRows;
+  dom['btn-export-csv'].disabled = !hasRows;
   if (dom['export-only-filtered']) {
     dom['export-only-filtered'].disabled = !hasRows;
     dom['export-only-filtered'].checked = state.exportOnlyFiltered;
@@ -1482,10 +1483,50 @@ async function parseUploadedFile(file) {
   return parseXlsxFile(buffer, file.name, ExcelJSRef);
 }
 
+/** Decodifica buffer tentando UTF-8 primeiro, com fallback para windows-1252. */
+function decodeTextBuffer(buffer) {
+  const utf8 = new TextDecoder('utf-8').decode(buffer);
+  if (
+    utf8.includes('\uFFFD') ||
+    /CHARSET\s*:\s*(1252|ISO-8859-1|8859-1)/i.test(utf8)
+  ) {
+    try {
+      return new TextDecoder('windows-1252').decode(buffer);
+    } catch {
+      return utf8;
+    }
+  }
+  return utf8;
+}
+
+/** Divide uma linha CSV respeitando aspas duplas e delimitador configurável. */
+function splitCsvLine(line, delimiter = ';') {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === delimiter && !inQuotes) {
+      cells.push(cleanWhitespace(current));
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(cleanWhitespace(current));
+  return cells;
+}
+
 /** Lê um arquivo .csv ou .ofx e devolve o mesmo formato dos outros parsers. */
 function parseSimpleFile(buffer, fileName, extension) {
-  const decoder = new TextDecoder('utf-8');
-  let text = decoder.decode(buffer);
+  let text = decodeTextBuffer(buffer).replace(/^\uFEFF/, '');
 
   if (extension === 'ofx') {
     text = ofxToCsv(text);
@@ -1496,12 +1537,17 @@ function parseSimpleFile(buffer, fileName, extension) {
     throw new Error('Arquivo vazio ou não pôde ser lido.');
   }
 
-  const headers = lines[0].split(';').map((h) => cleanWhitespace(h));
+  const delimiter =
+    lines[0].includes(';')
+      ? ';'
+      : lines[0].includes('\t')
+        ? '\t'
+        : ',';
+  const headers = splitCsvLine(lines[0], delimiter);
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(';').map((c) => cleanWhitespace(c));
-    // Ignora linhas de total (começam com TOTAIS)
-    if (cells[0] && /^total/i.test(cells[0])) continue;
+    const cells = splitCsvLine(lines[i], delimiter);
+    if (cells[0] && /^tota(l|is)\b/i.test(cells[0])) continue;
     rows.push(cells);
   }
 
@@ -1516,26 +1562,39 @@ function parseSimpleFile(buffer, fileName, extension) {
   };
 }
 
-/** Converte um extrato OFX (SGML-like) para CSV com colunas data;valor;historico. */
+/** Extrai o valor de uma tag OFX (suporte a OFX 1.x SGML sem tag de fechamento). */
+function ofxTag(block, tag) {
+  const match = new RegExp(`<${tag}>([^<\\r\\n]+)`, 'i').exec(block);
+  return match ? cleanWhitespace(match[1]) : '';
+}
+
+/** Converte um extrato OFX (SGML-like ou XML) para CSV com colunas data;valor;historico. */
 function ofxToCsv(text) {
   const lines = [];
   lines.push('data;valor;historico');
 
   // Cada lançamento OFX começa com <STMTTRN>
-  const transactions = text.split(/<STMTTRN>/).slice(1);
-  for (const txn of transactions) {
-    const dt = (txn.match(/<DTPOSTED>([^<]*)<\/DTPOSTED>/) || [])[1] || '';
-    const amt = (txn.match(/<TRNAMT>([^<]*)<\/TRNAMT>/) || [])[1] || '0';
-    const memo = (txn.match(/<MEMO>([^<]*)<\/MEMO>/) || [])[1] || '';
-    const name = (txn.match(/<NAME>([^<]*)<\/NAME>/) || [])[1] || '';
-    const trType = (txn.match(/<TRNTYPE>([^<]*)<\/TRNTYPE>/) || [])[1] || '';
+  const transactions = String(text || '').split(/<STMTTRN>/i).slice(1);
 
-    if (!dt) continue;
+  for (const rawTxn of transactions) {
+    const txn = rawTxn.split(/<\/STMTTRN>/i)[0] || rawTxn;
+    const dt = ofxTag(txn, 'DTPOSTED');
+    const amt = ofxTag(txn, 'TRNAMT') || '0';
+    const memo = ofxTag(txn, 'MEMO');
+    const name = ofxTag(txn, 'NAME');
+    const checkNum = ofxTag(txn, 'CHECKNUM');
+    const trType = ofxTag(txn, 'TRNTYPE');
 
-    // OFX datas: YYYYMMDD[HHMMSS[.SSS[Z]]]
-    const dateBr = dt.length >= 8 ? `${dt.slice(6, 8)}/${dt.slice(4, 6)}/${dt.slice(0, 4)}` : dt;
-    const value = parseFloat(amt.replace(/,/g, '.')) || 0;
-    const history = [name, memo, trType].filter(Boolean).join(' — ').trim() || 'Lançamento OFX';
+    const digits = dt.replace(/\D/g, '');
+    if (digits.length < 8) continue;
+
+    const dateBr = `${digits.slice(6, 8)}/${digits.slice(4, 6)}/${digits.slice(0, 4)}`;
+    const value = parseFloat(amt.replace(/\s+/g, '').replace(',', '.')) || 0;
+    const history =
+      [name, memo, checkNum ? `Doc ${checkNum}` : '', trType]
+        .filter(Boolean)
+        .join(' — ')
+        .trim() || 'Lançamento OFX';
 
     lines.push(`${dateBr};${value.toFixed(2).replace('.', ',')};${history.replace(/;/g, ',')}`);
   }
