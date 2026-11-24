@@ -1349,10 +1349,335 @@ function completeShortDates(allPageLines) {
   return completed;
 }
 
+/* -------------------------------------------------------------------------- */
+/*        Relatório "Contas a Pagar por Local com Apropriação" (90ti)         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cabeçalho padronizado entregue à IA para este modelo de relatório.
+ *
+ * O PDF original tem 3 linhas de cabeçalho, um bloco de rateio por pagamento e
+ * repete o último lançamento na página seguinte. A tabela geométrica genérica
+ * tentava transformar cada linha do rateio em coluna e perdia dezenas de
+ * pagamentos. Este modelo tem um leitor dedicado: ele devolve UMA linha por
+ * título pago, com a data e o valor do fato, e junta o rateio no histórico.
+ *
+ * Nenhum dado de cliente é gravado aqui: só os nomes das colunas.
+ */
+export const APPROPRIATION_REPORT_HEADERS = [
+  'FORNECEDOR',
+  'TÍTULO',
+  'DATA EMISSÃO',
+  'DATA PAGAMENTO',
+  'VALOR ORIGINAL',
+  'VALOR PAGO',
+  'TIPO',
+  'APROPRIAÇÃO',
+];
+
+const APPROPRIATION_HEADER_TOKENS = [
+  'fornecedor',
+  'titulo',
+  'emissao',
+  'pagamento',
+  'original',
+  'pago',
+  'tipo',
+  'rateio da apropriacao',
+  'apropriado',
+  'centro de custo',
+  'natureza',
+  'valor',
+];
+
+function appropriationLineNorm(line) {
+  return normalizeText(lineText(line));
+}
+
+/**
+ * Reconhece o cabeçalho de 3 linhas e calcula as fronteiras das colunas pelas
+ * POSIÇÕES dos rótulos. Assim o leitor continua funcionando se o relatório for
+ * impresso numa escala ligeiramente diferente.
+ */
+function findAppropriationHeader(allPageLines) {
+  for (const anchor of allPageLines) {
+    const anchorNorm = appropriationLineNorm(anchor);
+    if (
+      !/\bfornecedor\b/.test(anchorNorm) ||
+      !/\btitulo\b/.test(anchorNorm) ||
+      !/\btipo\b/.test(anchorNorm)
+    ) {
+      continue;
+    }
+
+    const block = allPageLines.filter(
+      (line) =>
+        line.page === anchor.page &&
+        Math.abs(line.y - anchor.y) <= 12 &&
+        line.items.length >= 2 &&
+        line.items.every(
+          (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
+        )
+    );
+    const signature = normalizeText(block.map(appropriationLineNorm).join(' '));
+    const hits = APPROPRIATION_HEADER_TOKENS.filter((token) => signature.includes(token)).length;
+    if (hits < 9) continue;
+
+    const items = block.flatMap((line) =>
+      line.items.map((item) => ({
+        str: normalizeText(item.str),
+        x: item.x,
+      }))
+    );
+    const xs = (predicate) =>
+      items.filter((item) => predicate(item.str)).map((item) => item.x).sort((a, b) => a - b);
+    const one = (predicate) => xs(predicate)[0] ?? null;
+
+    const xFornecedor = one((str) => str === 'fornecedor');
+    const xTitulo = one((str) => str === 'titulo');
+    const xTipo = one((str) => str === 'tipo');
+    const xLocal = one((str) => str === 'local');
+    const xNatureza = one((str) => str === 'natureza');
+    const xApropriado = one((str) => str === 'apropriado');
+    const xData = xs((str) => str === 'data');
+    const xValor = xs((str) => str === 'valor');
+
+    if (
+      [xFornecedor, xTitulo, xTipo, xLocal, xNatureza, xApropriado].some((value) => value === null) ||
+      xData.length < 2 ||
+      xValor.length < 3
+    ) {
+      continue;
+    }
+
+    const [xDataEmissao, xDataPagamento] = xData;
+    const [xValorOriginal, xValorPago, xValorApropriado] = xValor;
+    const bounds = [
+      (xFornecedor + xTitulo) / 2,
+      (xTitulo + xDataEmissao) / 2,
+      (xDataEmissao + xDataPagamento) / 2,
+      (xDataPagamento + xValorOriginal) / 2,
+      (xValorOriginal + xValorPago) / 2,
+      (xValorPago + xTipo) / 2,
+      (xTipo + xLocal) / 2,
+      (xApropriado + xValorApropriado) / 2,
+    ];
+    if (bounds.some((bound, idx) => idx > 0 && bound <= bounds[idx - 1])) continue;
+
+    const maxHeaderY = Math.max(...block.map((line) => line.y));
+    const minHeaderY = Math.min(...block.map((line) => line.y));
+    return {
+      page: anchor.page,
+      bounds,
+      signatures: new Set(block.map(appropriationLineNorm)),
+      maxHeaderY,
+      minHeaderY,
+      bannerLines: allPageLines
+        .filter((line) => line.page === anchor.page && line.y > maxHeaderY + 1)
+        .map(lineText)
+        .filter(Boolean),
+    };
+  }
+  return null;
+}
+
+function appropriationBandOf(x, bounds) {
+  for (let idx = 0; idx < bounds.length; idx++) {
+    if (x < bounds[idx]) return idx;
+  }
+  return bounds.length;
+}
+
+function appropriationCellsOf(line, bounds) {
+  const cells = Array.from({ length: bounds.length + 1 }, () => []);
+  for (const item of line.items) cells[appropriationBandOf(item.x, bounds)].push(item.str);
+  return cells.map((parts) => cleanWhitespace(parts.join(' ')));
+}
+
+function isAppropriationNoiseLine(line, header) {
+  const text = lineText(line);
+  const norm = appropriationLineNorm(line);
+  if (!norm) return true;
+  // Razão social, título do relatório e período ficam ACIMA do cabeçalho.
+  if (line.y > header.maxHeaderY + 1) return true;
+  if (header.signatures.has(norm)) return true;
+  if (
+    line.y <= 40 &&
+    !line.items.some(
+      (item) => parseDateValue(item.str) !== null || parseMoneyValue(item.str) !== null
+    )
+  ) {
+    return true;
+  }
+  if (/^page\s+\d+\s+of\s+\d+/.test(norm)) return true;
+  // "TOTAL......... 143" / "TOTAL GERAL....... 143": resumo, não pagamento.
+  const totalNorm = normalizeText(text.replace(/\.+/g, ' '));
+  if (
+    /^total(?: geral)?\b/i.test(totalNorm) &&
+    !line.items.some((item) => parseDateValue(item.str) !== null)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function appropriationMainRow(line, cells, header) {
+  if (line.y >= header.minHeaderY - 2) return null;
+  const date = parseDateValue(cells[3]);
+  const original = parseMoneyValue(cells[4]);
+  const paid = parseMoneyValue(cells[5]);
+  // O fornecedor pode quebrar para a linha de baixo: basta título ou tipo na
+  // linha do valor para sabermos que é um lançamento (não um rateio/total).
+  const anchor = cells[0] || cells[1] || cells[6];
+  if (!date || !original || !paid || !anchor) return null;
+  const totalNorm = normalizeText(appropriationLineNorm(line).replace(/\.+/g, ' '));
+  if (/^total(?: geral)?\b/i.test(totalNorm)) return null;
+  return { line, cells, date, original: original.value, paid: paid.value };
+}
+
+function appropriationCore(cells) {
+  return normalizeText(
+    [
+      cells[1] || '',
+      parseDateValue(cells[3]) || '',
+      parseMoneyValue(cells[4])?.value ?? '',
+      parseMoneyValue(cells[5])?.value ?? '',
+    ].join('|')
+  );
+}
+
+function appropriationSupplier(cells) {
+  return normalizeText(cells[0] || '');
+}
+
+function appendAppropriationLines(record, entries) {
+  for (const entry of entries) {
+    record.lines.push({
+      page: entry.line.page,
+      y: entry.line.y,
+      cells: entry.cells.slice(0, APPROPRIATION_REPORT_HEADERS.length),
+    });
+  }
+}
+
+function aggregateAppropriationRecord(record) {
+  const parts = [...record.lines].sort((a, b) => a.page - b.page || b.y - a.y);
+  const cells = Array.from({ length: APPROPRIATION_REPORT_HEADERS.length }, () => '');
+  for (const part of parts) {
+    for (let col = 0; col < cells.length; col++) {
+      const value = part.cells[col];
+      if (value) cells[col] = cleanWhitespace(`${cells[col]} ${value}`);
+    }
+  }
+  return cells;
+}
+
+/**
+ * Reconstrói a tabela do relatório de contas a pagar com rateio.
+ * Retorna `null` quando o PDF não é deste modelo, para cair no parser genérico.
+ */
+export function buildAppropriationTableFromTextLines(allPageLines) {
+  const header = findAppropriationHeader(allPageLines);
+  if (!header) return null;
+
+  const ordered = [...allPageLines].sort((a, b) => a.page - b.page || b.y - a.y);
+  let current = null;
+  let pending = [];
+  const records = [];
+  let skipped = 0;
+
+  for (const line of ordered) {
+    if (isAppropriationNoiseLine(line, header)) {
+      skipped += 1;
+      continue;
+    }
+
+    const cells = appropriationCellsOf(line, header.bounds);
+    const main = appropriationMainRow(line, cells, header);
+    if (!main) {
+      pending.push({ line, cells });
+      continue;
+    }
+
+    // Texto colado ACIMA da linha do valor costuma ser o começo do nome do
+    // fornecedor/tipo daquele mesmo pagamento (ex.: "COMERCIO E SERVICOS" uma
+    // linha acima de "LTDA"). O resto é continuação do título anterior —
+    // inclusive na virada de página.
+    const preAnchor = [];
+    const rest = [];
+    for (const entry of pending) {
+      const distance = entry.line.y - line.y;
+      const near = entry.line.page === line.page && distance >= 0 && distance <= 12;
+      const inTextBands = entry.line.items.every((item) => {
+        const band = appropriationBandOf(item.x, header.bounds);
+        return band === 0 || band === 1 || band === 6;
+      });
+      const noMainData = entry.cells.slice(2, 6).every((value) => !value);
+      if (near && inTextBands && noMainData) preAnchor.push(entry);
+      else rest.push(entry);
+    }
+
+    if (current) appendAppropriationLines(current, rest);
+    const currentCells = current ? aggregateAppropriationRecord(current) : null;
+    const suppliersMatch = (() => {
+      if (!currentCells) return false;
+      const a = appropriationSupplier(currentCells);
+      const b = appropriationSupplier(main.cells);
+      if (!a || !b) return true;
+      if (a === b) return true;
+      // Na repetição da virada de página o nome pode vir só pela metade.
+      return a.length >= 8 && b.length >= 8 && (a.startsWith(b) || b.startsWith(a));
+    })();
+    const isRepeatedAtPageTop =
+      Boolean(current) &&
+      line.page === current.lastPage + 1 &&
+      line.y > header.maxHeaderY - 25 &&
+      appropriationCore(currentCells) &&
+      appropriationCore(currentCells) === appropriationCore(main.cells) &&
+      suppliersMatch;
+
+    if (isRepeatedAtPageTop) {
+      // O relatório repete o último título no topo da página seguinte para
+      // não cortar o bloco de rateio. Não é um segundo pagamento.
+      appendAppropriationLines(current, preAnchor);
+      current.lastPage = line.page;
+      skipped += 1;
+      pending = [];
+      continue;
+    }
+
+    if (current) records.push(current);
+    current = { page: line.page, lastPage: line.page, lines: [] };
+    appendAppropriationLines(current, [{ line, cells }]);
+    appendAppropriationLines(current, preAnchor);
+    pending = [];
+  }
+
+  if (current) {
+    appendAppropriationLines(current, pending);
+    records.push(current);
+  }
+  if (records.length === 0) return null;
+
+  return {
+    headers: [...APPROPRIATION_REPORT_HEADERS],
+    rows: records.map(aggregateAppropriationRecord),
+    bannerLines: header.bannerLines,
+    skippedRows: skipped,
+    columnCount: APPROPRIATION_REPORT_HEADERS.length,
+    checkpoints: [],
+  };
+}
+
 export function buildTableFromTextLines(allPageLines) {
   if (!Array.isArray(allPageLines) || allPageLines.length === 0) {
     throw new Error('Nenhum texto extraível encontrado no PDF (pode ser um documento digitalizado).');
   }
+
+  // 0. Modelos com estrutura própria saem antes da geometria genérica: o
+  // relatório de rateio tem várias linhas por pagamento e cabeçalho em 3 linhas.
+  const appropriation = buildAppropriationTableFromTextLines(allPageLines);
+  if (appropriation) return appropriation;
 
   // 0a. Datas "dd/mm" ganham o ano do documento (extrato mensal do Itaú).
   completeShortDates(allPageLines);

@@ -720,7 +720,7 @@ export function buildCoachReport(parsedFile, analysis, transform = null, options
   const bankName = recognition.bank?.name || '';
   const layoutDetail =
     recognition.source === 'catalog'
-      ? `Extrato do ${bankName} reconhecido no catálogo de bancos (${Math.round(
+      ? `Layout de ${bankName} reconhecido no catálogo (${Math.round(
           recognition.confidence * 100
         )}%).`
       : recognition.source === 'learned'

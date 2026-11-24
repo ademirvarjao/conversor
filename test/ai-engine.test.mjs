@@ -566,13 +566,17 @@ describe('memória da IA', () => {
     assert.ok(memory.tokenWeights.historico);
   });
 
-  it('já vem com os layouts de fábrica (Itaú e Bradesco) treinados', () => {
+  it('já vem com os três layouts de fábrica treinados', () => {
     const memory = loadAiMemory();
     const seeds = memory.learnedProfiles.filter((profile) => profile.builtIn);
-    assert.equal(seeds.length, 2);
+    assert.equal(seeds.length, 3);
     assert.deepEqual(
       seeds.map((profile) => profile.id).sort(),
-      ['seed-extrato-bradesco', 'seed-extrato-itau']
+      [
+        'seed-contas-pagar-apropriacao',
+        'seed-extrato-bradesco',
+        'seed-extrato-itau',
+      ]
     );
     for (const seed of seeds) {
       assert.equal(seed.fileType, 'pdf');
@@ -605,16 +609,20 @@ describe('memória da IA', () => {
 
     const memory = loadAiMemory();
     const seeds = memory.learnedProfiles.filter((profile) => profile.builtIn).map((profile) => profile.id);
-    assert.deepEqual(seeds.sort(), ['seed-extrato-bradesco', 'seed-extrato-itau']);
+    assert.deepEqual(seeds.sort(), [
+      'seed-contas-pagar-apropriacao',
+      'seed-extrato-bradesco',
+      'seed-extrato-itau',
+    ]);
     assert.equal(memory.learnedProfiles.filter((profile) => !profile.builtIn).length, 1);
     // Gravar de novo não duplica os de fábrica.
     saveAiMemory(memory);
-    assert.equal(loadAiMemory().learnedProfiles.filter((profile) => profile.builtIn).length, 2);
+    assert.equal(loadAiMemory().learnedProfiles.filter((profile) => profile.builtIn).length, 3);
   });
 
   it('importar backup antigo não apaga os layouts de fábrica', () => {
     const memory = normalizeMemory({ learnedProfiles: [] });
-    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 2);
+    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 3);
   });
 
   it('adota a memória guardada em chave de versão anterior (migração)', () => {
@@ -664,7 +672,7 @@ describe('memória da IA', () => {
     const memory = resetAiMemory();
     assert.equal(learnedProfilesOf(memory).length, 0);
     assert.equal(learnedProfilesOf(loadAiMemory()).length, 0);
-    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 2);
+    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 3);
   });
 
   it('normaliza payloads importados e descarta lixo', () => {

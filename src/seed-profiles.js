@@ -1,11 +1,11 @@
 /**
- * Conversor — Layouts de extrato que já vêm treinados ("de fábrica")
+ * Conversor — Layouts que já vêm treinados ("de fábrica")
  *
- * Estes perfis são o resultado do treinamento feito com extratos reais: cada
- * linha registra o cabeçalho exato do arquivo e o papel de cada coluna. Eles
+ * Estes perfis são o resultado do treinamento feito com arquivos reais: cada
+ * linha registra o cabeçalho exato do layout e o papel de cada coluna. Eles
  * entram na memória da IA de qualquer usuário (novo navegador, memória zerada
  * ou backup restaurado) e fazem o app reconhecer o layout na primeira
- * importação, sem precisar treinar de novo.
+ * importação, sem precisar treinar de novo. Nenhum dado de cliente fica aqui.
  *
  * Regras de ouro usadas aqui:
  *  - `value_in`  = coluna de CRÉDITO  (entrada, soma +)
@@ -53,6 +53,37 @@ export const SEED_PROFILES = [
       { header: 'Saldo (R$)', role: 'ignore', historyOrder: 0 },
     ],
     rules: { defaultSign: 'auto', removePipes: true, collapseSpaces: true },
+    builtIn: true,
+  },
+  {
+    id: 'seed-contas-pagar-apropriacao',
+    name: 'Conciliação de pagamentos Itaú — Contas a Pagar por Local com Apropriação (90ti)',
+    fileType: 'pdf',
+    // O leitor dedicado em `parsers.js` reconstrói este cabeçalho a partir das
+    // 3 linhas do PDF, junta as linhas de rateio e remove o título repetido na
+    // virada de página. A data/valor do fato são PAGAMENTO/PAGO; EMISSÃO e
+    // ORIGINAL são só previsto e ficam fora da soma.
+    headers: [
+      'FORNECEDOR',
+      'TÍTULO',
+      'DATA EMISSÃO',
+      'DATA PAGAMENTO',
+      'VALOR ORIGINAL',
+      'VALOR PAGO',
+      'TIPO',
+      'APROPRIAÇÃO',
+    ],
+    mappings: [
+      { header: 'FORNECEDOR', role: 'history', historyOrder: 1 },
+      { header: 'TÍTULO', role: 'history', historyOrder: 2 },
+      { header: 'DATA EMISSÃO', role: 'ignore', historyOrder: 0 },
+      { header: 'DATA PAGAMENTO', role: 'date', historyOrder: 0 },
+      { header: 'VALOR ORIGINAL', role: 'ignore', historyOrder: 0 },
+      { header: 'VALOR PAGO', role: 'value_out', historyOrder: 0 },
+      { header: 'TIPO', role: 'history', historyOrder: 3 },
+      { header: 'APROPRIAÇÃO', role: 'history', historyOrder: 4 },
+    ],
+    rules: { defaultSign: 'negative', removePipes: true, collapseSpaces: true },
     builtIn: true,
   },
 ];
