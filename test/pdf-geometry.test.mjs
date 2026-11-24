@@ -545,6 +545,54 @@ describe('buildTableFromTextLines — casos especiais', () => {
     assert.equal(table.rows[1][2], '200,00');
   });
 
+  it('considera a continuação do mesmo dia no topo da página seguinte (pulo de página)', () => {
+    const table = buildTableFromTextLines([
+      line(1, 230, [
+        ['10/09/2026', 150],
+        ['Transf 3212.21053-2', 208],
+        ['2.000,00', 357],
+      ]),
+      // Virada de página no meio do dia: a continuação da movimentação fica no
+      // topo da página 2 (acima da primeira linha de dados).
+      line(2, 745, [
+        ['Transferencia ao Banco', 208],
+        ['999,00', 357],
+      ]),
+      line(2, 730, [
+        ['10/09/2026', 150],
+        ['PIX ENVIADO SEANITE INTE', 208],
+        ['1.000,00', 426],
+      ]),
+    ]);
+
+    const continuations = table.rows.filter((row) => row[1] === 'Transferencia ao Banco');
+    assert.equal(continuations.length, 1, 'a continuação no topo da página 2 não é cabeçalho: vira lançamento');
+    assert.equal(continuations[0][0], '10/09/2026', 'herda o dia do lançamento do fim da página 1');
+  });
+
+  it('junta quebra de linha do mesmo dia (continuação abaixo do lançamento)', () => {
+    const table = buildTableFromTextLines([
+      line(1, 230, [
+        ['10/09/2026', 150],
+        ['Transf 3212.21053-2', 208],
+        ['2.000,00', 357],
+      ]),
+      line(1, 220, [
+        ['Transferencia ao Banco', 208],
+        ['999,00', 357],
+      ]),
+      line(1, 210, [
+        ['10/09/2026', 150],
+        ['IOF 3212.30881-5/ C/C', 208],
+        ['4.867,52-', 426],
+      ]),
+    ]);
+
+    const continuations = table.rows.filter((row) => row[1] === 'Transferencia ao Banco');
+    assert.equal(continuations.length, 1, 'a descrição quebrada para a linha de baixo continua sendo um lançamento');
+    assert.equal(continuations[0][0], '10/09/2026', 'a linha quebrada herda o dia da movimentação original');
+  });
+
   it('descarta rodapé do extrato (hyperlink e SAC) sem perder lançamentos', () => {
     const table = buildTableFromTextLines([
       line(1, 760, [
