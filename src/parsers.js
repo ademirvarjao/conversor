@@ -43,6 +43,16 @@ const CONTINUATION_RANGE = 24;
  */
 const PAGE_TOP_SLACK = 8;
 
+/**
+ * Folga máxima (pt) ACIMA da primeira linha de dados da página para a
+ * continuação de um lançamento do mesmo dia ("pulo de página"). Faixas de
+ * resumo do topo da página ficam "longe dos dados" (veja o teste
+ * “não confunde faixa de resumo do topo com lançamento sem data”) e continuam
+ * sendo descartadas: a folga aqui é só o que uma linha de movimentação
+ * pegou na virada.
+ */
+const PAGE_JUMP_CONTINUATION_SLACK = 60;
+
 export function cleanWhitespace(str) {
   return String(str ?? '')
     .replace(/[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
@@ -2050,6 +2060,26 @@ export function buildTableFromTextLines(allPageLines) {
   const rows = [];
   const skipped = [];
   const entries = [];
+
+  // Candidata a "carry" (lançamento sem data, valor fora da última coluna):
+  // ela será um bloco próprio com a data herdada (dia que continua nas linhas
+  // seguintes — quebra de linha ou virada de página). Precisa ser definida ANTES
+  // do loop de entradas: lá é onde ela é eximida da "cabeçalho" acima dos dados.
+  const lastColumnIdx = colBounds.length - 1;
+  const isCarryCandidate = (entry) =>
+    !entry.hasDate &&
+    !entry.isSectionHeader &&
+    entry.moneyCols.some((idx) => idx < lastColumnIdx) &&
+    !isBannerOrSummary(entry.text);
+  // Forma de carry aplicada à linha crua (antes do entry existir — no loop de
+  // entradas ainda não foi calculado `moneyCols`): sem data própria, valor fora
+  // da última coluna e não é banner/seção.
+  const isCarryShape = (line) =>
+    !line.items.some((item) => parseDateValue(item.str) !== null) &&
+    line.items.some(
+      (item) => parseMoneyValue(item.str) !== null && assignItemToColumn(item) < lastColumnIdx
+    );
+
   // Linhas de saldo (SALDO ANTERIOR / SALDO DO DIA / SALDO EM CONTA…). Quando o
   // extrato NÃO tem coluna de saldo, o valor dessas linhas cai na mesma coluna
   // dos lançamentos, então elas não podem virar lançamento nem sumir: viram
@@ -2167,8 +2197,21 @@ export function buildTableFromTextLines(allPageLines) {
 
     // Linhas acima da primeira linha de dados da página são cabeçalho/banner.
     if (!isSectionHeader) {
-      if (pageTopDataY !== undefined && line.y > pageTopDataY + PAGE_TOP_SLACK) continue;
-      if (isKnownHeaderLine) {
+      const aboveDataPageTop =
+        pageTopDataY !== undefined && line.y > pageTopDataY + PAGE_TOP_SLACK;
+      // Exceção importante: na virada de página a continuação de um lançamento
+      // do MESMO DIA pode ficar no topo da página seguinte (“pulo de página”):
+      // ela não é cabeçalho, é candidata a carry — deixa de ser descartada
+      // aqui, vira bloco com a data herdada na etapa 6. Antes disso, essa
+      // linha ficava “acima dos dados” e era jogada fora, perdendo o restante
+      // das movimentações do dia.
+      const isPageJumpContinuation =
+        aboveDataPageTop &&
+        line.y - pageTopDataY <= PAGE_JUMP_CONTINUATION_SLACK &&
+        isCarryShape(line) &&
+        !isBannerOrSummary(text);
+      if (aboveDataPageTop && !isPageJumpContinuation) continue;
+      if (isKnownHeaderLine && !aboveDataPageTop) {
         skipped.push(norm);
         continue;
       }
@@ -2216,13 +2259,6 @@ export function buildTableFromTextLines(allPageLines) {
   // linhas continuam sendo lançamentos (têm valor fora da coluna de saldo) e
   // precisam virar bloco — antes eram descartadas e a descrição delas ia parar
   // no lançamento vizinho.
-  const lastColumnIdx = colBounds.length - 1;
-  const isCarryCandidate = (entry) =>
-    !entry.hasDate &&
-    !entry.isSectionHeader &&
-    entry.moneyCols.some((idx) => idx < lastColumnIdx) &&
-    !isBannerOrSummary(entry.text);
-
   const blocks = [];
   for (const entry of entries) {
     if (entry.hasDate || entry.isSectionHeader) blocks.push({ ...entry, extra: [], inheritsDate: false });
