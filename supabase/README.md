@@ -12,8 +12,30 @@ chaves de LLM passa por aqui.
 | `migrations/20261111180000_conversor_models_adopt.sql` | Adoção das linhas antigas sem dono. |
 | `migrations/20261112100000_conversor_models_block.sql` | Bloqueio (`blocked_at`) e as funções `conversor_block_vault` / `conversor_delete_vault` usadas pelo painel do administrador. |
 | `migrations/20261116165533_conversor_models_hardening.sql` | Blindagem de integridade (`CHECK` em `slot`, envelope `payload` até 5 MiB, `blocked_reason`, `revision`), auditoria (`created_at`, `revision`, `payload_bytes`), privilégios mínimos por coluna, `search_path` fixo, trava `FOR UPDATE` em exclusão, preservação de `owner_id` no bloqueio, RLS com InitPlan `(select auth.uid())`, índice `updated_at DESC` e ajuste de HOT/autovacuum. |
+| `migrations/20261118111202_eleao_workspace.sql` | Tabelas `eleao_*` (perfis, operações, artigos, feedback, cota) com RLS. **Não faz parte do Conversor** — ver nota abaixo. |
+| `migrations/20261118111224_eleao_guides.sql` | Conteúdo inicial de `eleao_articles`. **Não faz parte do Conversor**. |
+| `migrations/20261118115338_eleao_owner_claim.sql` | Função `eleao_claim_owner()` que promove o dono verificado a administrador. **Não faz parte do Conversor**. |
 | **Todas** | São idempotentes e aplicadas em ordem pela integração a cada push na `main`. |
-| `schema.sql` | O mesmo SQL, para colar no SQL Editor em emergência. |
+| `schema.sql` | O mesmo SQL do Conversor, para colar no SQL Editor em emergência. |
+
+### Por que há migrações do e-Leão aqui
+
+Este projeto Supabase (`byqhiewzkbqvvmldnwky`) é compartilhado com o aplicativo **e-Leão**, cujas
+migrações foram aplicadas direto no banco antes de existirem neste repositório. A integração
+Supabase + GitHub compara `supabase_migrations.schema_migrations` com `supabase/migrations/` e
+**falha o check** com `Remote migration versions not found in local migrations directory` quando
+uma versão remota não tem arquivo local.
+
+Por isso as três migrações já aplicadas foram versionadas aqui com a **mesma versão de timestamp**
+(`20261118111202`, `20261118111224`, `20261118115338`): assim a integração as reconhece como
+aplicadas e não tenta rodá-las de novo. Consequências práticas:
+
+- Elas **não** entram em `src/sql-setup.js` nem em `supabase/schema.sql` — o SQL embarcado do app
+  continua sendo apenas o do Conversor (o teste `test/sql-setup.test.mjs` garante isso pelo nome
+  do arquivo: só `*_conversor_*.sql` compõem o SQL embarcado).
+- Não as edite: mudar o conteúdo de uma versão já registrada gera divergência de checksum.
+  Mudanças no e-Leão entram como **nova** migração.
+- `test/supabase-migrations.test.mjs` falha se uma versão aplicada no remoto sumir do repositório.
 
 ## Três formas de aplicar (todas idempotentes)
 
@@ -30,6 +52,7 @@ chaves de LLM passa por aqui.
 | Sintoma | Causa provável | O que fazer |
 | --- | --- | --- |
 | `PGRST205 — Could not find the table 'public.conversor_models' in the schema cache` | migração não aplicada **ou** cache do PostgREST desatualizado | rode o SQL (`schema.sql`) e, se a tabela já existir no *Table Editor*, `notify pgrst, 'reload schema';` |
+| Check **Supabase Preview** falha com `Remote migration versions not found in local migrations directory` | existe versão em `schema_migrations` sem arquivo em `supabase/migrations/` (migração aplicada por fora, ou pelo e-Leão) | versione a migração usando **o mesmo timestamp** da versão remota. Para listar as que faltam: `select version, name from supabase_migrations.schema_migrations order by version;` |
 | Nenhum deploy aparece no histórico da integração | *Working directory* apontando para `supabase` em vez de `.` | corrija para `.` e faça um push na `main` |
 | Integração falhou com "already exists" | migração rodada à mão antes | o SQL atual é idempotente; se precisar registrar: `supabase migration repair --status applied 20261111120000` |
 | `401 Invalid API key` no app | chave publicada errada/expirada | atualize `DEFAULT_CLOUD_CONFIG` em `src/sync-config.js` |

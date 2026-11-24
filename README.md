@@ -518,6 +518,12 @@ Para a integração aplicar as migrações, o repositório precisa do folder do 
 SQLs (era o que deixava a tabela ausente). No painel: **Project Settings → Integrations → GitHub**,
 *Working directory* `.`, *Deploy to production* ligado e *Production branch* `main`.
 
+O projeto Supabase é **compartilhado** com o app e-Leão: as migrações `eleao_*` que já estavam
+aplicadas no banco também ficam versionadas em `supabase/migrations/` (com o mesmo timestamp
+remoto), senão o check **Supabase Preview** falha com *"Remote migration versions not found in
+local migrations directory"*. Elas **não** fazem parte do SQL embarcado do Conversor. Detalhes em
+[`supabase/README.md`](supabase/README.md).
+
 Se a tabela ainda não existir, o próprio app resolve em dois cliques: a aba **Nuvem** detecta o
 erro do PostgREST (`PGRST205`), mostra **Copiar SQL de instalação** (o mesmo SQL da migração,
 embarcado em [`src/sql-setup.js`](src/sql-setup.js)), **Abrir SQL Editor** já no projeto certo e
@@ -578,6 +584,12 @@ A suíte cobre aritmética monetária em centavos, parsers de data/valor, leitur
 3. Em ~30 segundos o app estará em `https://SEU-USUARIO.github.io/conversor/`.
 
 O workflow `.github/workflows/tests.yml` roda a suíte automaticamente em push e pull request.
+O `.github/workflows/deploy.yml` roda os testes antes de publicar; se a suíte falhar, nada é publicado.
+
+> **Se o job "Publicar no GitHub Pages" falhar** com `No artifacts named "github-pages" were found`,
+> quase sempre é instabilidade da API de artefatos do GitHub — o upload já aconteceu. O workflow
+> repete a publicação automaticamente uma vez. Se as duas tentativas falharem, confira
+> [githubstatus.com](https://www.githubstatus.com/) (Actions/Pages) e rode o job de novo.
 
 ---
 

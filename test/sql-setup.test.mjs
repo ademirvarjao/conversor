@@ -8,10 +8,23 @@ const MIGRATIONS_DIR = new URL('../supabase/migrations/', import.meta.url);
 
 const normalize = (sql) => String(sql).replace(/\r\n/g, '\n').trim();
 
-/** Todas as migrações, na ordem em que o Supabase aplica (nome = timestamp). */
+/**
+ * O projeto Supabase é compartilhado: o dono aplicou migrações de OUTROS
+ * aplicativos nele (e-Leão) antes de elas existirem neste repositório. Elas
+ * ficam versionadas em `supabase/migrations/` para a integração Supabase +
+ * GitHub parar de falhar com "Remote migration versions not found in local
+ * migrations directory", mas NÃO fazem parte do cofre do Conversor — por isso
+ * não entram no SQL embarcado do app (`src/sql-setup.js`) nem no `schema.sql`.
+ */
+const MIGRACOES_DO_CONVERSOR = /_conversor_/;
+
+/** Migrações do Conversor, na ordem em que o Supabase aplica (nome = timestamp). */
 async function readMigrations() {
   const { readdir } = await import('node:fs/promises');
-  const names = (await readdir(MIGRATIONS_DIR)).filter((name) => name.endsWith('.sql')).sort();
+  const names = (await readdir(MIGRATIONS_DIR))
+    .filter((name) => name.endsWith('.sql'))
+    .filter((name) => MIGRACOES_DO_CONVERSOR.test(name))
+    .sort();
   const parts = [];
   for (const name of names) {
     parts.push(normalize(await readFile(new URL(name, MIGRATIONS_DIR), 'utf8')));
@@ -19,13 +32,13 @@ async function readMigrations() {
   return parts;
 }
 
-test('o SQL embarcado no app é idêntico às migrações do repositório', async () => {
+test('o SQL embarcado no app é idêntico às migrações do Conversor', async () => {
   const parts = await readMigrations();
   assert.ok(parts.length >= 1);
   assert.equal(
     normalize(SETUP_SQL),
     parts.join('\n\n'),
-    'src/sql-setup.js e supabase/migrations/ divergiram: atualize os dois'
+    'src/sql-setup.js e as migrações do Conversor divergiram: atualize os dois'
   );
 });
 

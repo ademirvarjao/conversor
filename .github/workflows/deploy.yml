@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -34,11 +34,11 @@ jobs:
     needs: test
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-retry.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # O site do GitHub Pages precisa existir antes do deploy. O GITHUB_TOKEN
       # não consegue criá-lo (isso exige permissão de administração), por isso
@@ -80,7 +80,7 @@ jobs:
       # `enablement` só tem efeito com um token diferente do GITHUB_TOKEN.
       - name: Configurar GitHub Pages
         if: steps.pages.outputs.ready == 'true'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
         with:
           enablement: ${{ secrets.PAGES_TOKEN != '' }}
           token: ${{ secrets.PAGES_TOKEN || github.token }}
@@ -103,11 +103,33 @@ jobs:
 
       - name: Enviar arquivos estáticos
         if: steps.pages.outputs.ready == 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: '_site'
 
+      # O `deploy-pages` às vezes falha porque a API de artefatos do GitHub
+      # responde "No artifacts named github-pages were found" logo depois do
+      # upload — o artefato existe, mas ainda não está visível. Não é erro de
+      # configuração: basta tentar de novo alguns segundos depois. Por isso a
+      # publicação é repetida uma vez, 20 s depois, antes de desistir.
       - name: Publicar no GitHub Pages
         id: deployment
         if: steps.pages.outputs.ready == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+
+      - name: Aguardar antes de tentar publicar de novo
+        id: retry-1
+        if: steps.pages.outputs.ready == 'true' && steps.deployment.outcome == 'failure'
+        run: sleep 20
+
+      - name: Publicar no GitHub Pages (nova tentativa)
+        id: deployment-retry
+        if: steps.pages.outputs.ready == 'true' && steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+
+      - name: Falhar somente se as duas tentativas falharem
+        if: steps.pages.outputs.ready == 'true' && steps.deployment.outcome == 'failure' && steps.deployment-retry.outcome == 'failure'
+        run: |
+          echo "::error title=Publicação no GitHub Pages falhou::Duas tentativas de publicação falharam. Verifique https://www.githubstatus.com/ para incidentes em Actions/Pages."
+          exit 1
