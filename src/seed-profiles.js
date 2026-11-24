@@ -21,6 +21,24 @@
 
 export const SEED_PROFILES = [
   {
+    id: 'seed-extrato-itau-mensal',
+    name: 'Extrato Itaú — mensal (Data / Descrição / Entradas / Saídas / Saldo)',
+    fileType: 'pdf',
+    // Layout do extrato mensal Itaú: a tabela principal separa créditos e
+    // débitos em colunas distintas. Saldo anterior e checkpoints de aplicação
+    // não são movimentações; entradas/saídas determinam o sinal.
+    headers: ['Data', 'Descrição', 'Entradas R$ (créditos)', 'Saídas R$ (débitos)', 'Saldo R$'],
+    mappings: [
+      { header: 'Data', role: 'date', historyOrder: 0 },
+      { header: 'Descrição', role: 'history', historyOrder: 1 },
+      { header: 'Entradas R$ (créditos)', role: 'value_in', historyOrder: 0 },
+      { header: 'Saídas R$ (débitos)', role: 'value_out', historyOrder: 0 },
+      { header: 'Saldo R$', role: 'ignore', historyOrder: 0 },
+    ],
+    rules: { defaultSign: 'auto', removePipes: true, collapseSpaces: true },
+    builtIn: true,
+  },
+  {
     id: 'seed-extrato-itau',
     name: 'Extrato Itaú — conta PJ (Data / Lançamentos / Razão Social / CNPJ)',
     fileType: 'pdf',
