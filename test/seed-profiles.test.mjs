@@ -20,12 +20,13 @@ const asPdfFile = (table, fileName) => ({ ...table, fileName, fileType: 'pdf' })
 
 describe('layouts de fábrica (treinados com extratos reais)', () => {
   it('existem três perfis embutidos, com papéis coerentes', () => {
-    assert.equal(SEED_PROFILES.length, 3);
+    assert.equal(SEED_PROFILES.length, 4);
 
+    const itauMensal = SEED_PROFILES.find((profile) => profile.id === 'seed-extrato-itau-mensal');
     const itau = SEED_PROFILES.find((profile) => profile.id === 'seed-extrato-itau');
     const bradesco = SEED_PROFILES.find((profile) => profile.id === 'seed-extrato-bradesco');
     const apropriacao = SEED_PROFILES.find((profile) => profile.id === 'seed-contas-pagar-apropriacao');
-    assert.ok(itau && bradesco && apropriacao);
+    assert.ok(itauMensal && itau && bradesco && apropriacao);
 
     const roleOf = (profile, header) =>
       profile.mappings.find((mapping) => mapping.header === header)?.role;
@@ -37,6 +38,13 @@ describe('layouts de fábrica (treinados com extratos reais)', () => {
     assert.equal(roleOf(apropriacao, 'VALOR ORIGINAL'), 'ignore');
     assert.equal(roleOf(apropriacao, 'APROPRIAÇÃO'), 'history');
     assert.equal(apropriacao.rules.defaultSign, 'negative');
+
+    assert.deepEqual(itauMensal.headers, ['Data', 'Descrição', 'Entradas R$ (créditos)', 'Saídas R$ (débitos)', 'Saldo R$']);
+    assert.equal(roleOf(itauMensal, 'Data'), 'date');
+    assert.equal(roleOf(itauMensal, 'Descrição'), 'history');
+    assert.equal(roleOf(itauMensal, 'Entradas R$ (créditos)'), 'value_in');
+    assert.equal(roleOf(itauMensal, 'Saídas R$ (débitos)'), 'value_out');
+    assert.equal(roleOf(itauMensal, 'Saldo R$'), 'ignore');
 
     assert.deepEqual(itau.headers, ['Data', 'Lançamentos', 'Razão Social', 'CNPJ/CPF', 'Valor (R$)', 'Saldo (R$)']);
     assert.equal(roleOf(itau, 'Data'), 'date');
@@ -58,11 +66,12 @@ describe('layouts de fábrica (treinados com extratos reais)', () => {
       'seed-contas-pagar-apropriacao',
       'seed-extrato-bradesco',
       'seed-extrato-itau',
+      'seed-extrato-itau-mensal',
     ]);
 
     // Importar um backup antigo não pode duplicar nem apagar os de fábrica.
     const imported = normalizeMemory({ learnedProfiles: memory.learnedProfiles });
-    assert.equal(imported.learnedProfiles.filter((profile) => profile.builtIn).length, 3);
+    assert.equal(imported.learnedProfiles.filter((profile) => profile.builtIn).length, 4);
   });
 
   it('reconhece o extrato do Bradesco na primeira importação', () => {
