@@ -42,7 +42,7 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Relatórios agrupados por cliente/fornecedor**: o nome do grupo (uma linha só com texto, alinhada à margem esquerda) é reconhecido e usado como **prefixo do histórico** dos lançamentos seguintes — típico de "Contas Recebidas por Cliente".
 - **Previsto × realizado**: quando o arquivo traz `Data Venc`/`Valor Venc` e `Data Rec`/`Valor Recebido`, a conciliação usa **a data e o valor do fato** (recebimento/pagamento) e ignora o previsto, com aviso no Painel da IA.
 - **Colunas de identificação não viram valor**: `Lancto`, `Documento`, `Nº`, `Código` e sequências numéricas (inteiros, únicos e crescentes) são ignorados automaticamente — antes o número do lançamento entraria na soma.
-- **Extratos de banco já vêm treinados (v1.14.0)**: os layouts do **Itaú** (`Data | Lançamentos | Razão Social | CNPJ/CPF | Valor (R$) | Saldo (R$)`) e do **Bradesco** (`Data | Lançamento | Dcto. | Crédito (R$) | Débito (R$) | Saldo (R$)`) são reconhecidos na primeira importação, por perfil de fábrica (`src/seed-profiles.js`) — ninguém precisa treinar à mão. Esses perfis chegam à memória de qualquer usuário novo e sobrevivem a reset/importação de backup.
+- **Layouts já vêm treinados (v1.14.0 · ampliado na v1.32.0)**: os layouts do **Itaú** (`Data | Lançamentos | Razão Social | CNPJ/CPF | Valor (R$) | Saldo (R$)`), do **Bradesco** (`Data | Lançamento | Dcto. | Crédito (R$) | Débito (R$) | Saldo (R$)`) e da **conciliação de pagamentos com rateio de apropriação** são reconhecidos na primeira importação, por perfil de fábrica (`src/seed-profiles.js`) — ninguém precisa treinar à mão. Esses perfis chegam à memória de qualquer usuário novo e sobrevivem a reset/importação de backup.
 - **Crédito e débito pelo sinal e pela coluna**: no Bradesco o valor vem negativo na coluna de débito e positivo na de crédito; as âncoras de borda direita dos números separam `-4.100,00` de um crédito de mesmo tamanho. No Itaú o valor é único (sem sinal de coluna) e o **CNPJ/CPF em coluna própria** não vira histórico duplicado — ele é concatenado depois da razão social, na ordem do extrato.
 - **Lançamento sem data**: linha de continuação (documento + valor + saldo, sem data) herda o dia do lançamento anterior, inclusive na **virada de página** — no extrato do Bradesco 22,08 de 05/10 estava sendo perdido. Faixas de resumo no topo da página (`R$ 2.520,90 R$ 0,00…`) continuam sendo banner, porque só aceitamos a linha numérica quando ela está colada (≤30 pt) acima de um lançamento com data.
 - **Rodapé do extrato não é lançamento**: `novos lançamentos`, `atualizado em …` e o aviso de SAC/0800 do Itaú deixam de entrar como linha (eram 2 linhas de lixo nas 590 do arquivo).
@@ -50,6 +50,30 @@ O diferencial é o motor de **IA Adaptativa de Layouts**: ele infere o papel de 
 - **Aprendizado supervisionado**: ao confirmar/corrigir o mapeamento, o motor reforça ou penaliza os pesos dos tokens (com limites para evitar "explosão" de pesos), atualiza o perfil do layout e registra o evento.
 - **Memória persistente** em `localStorage`, com exportação/importação de `conversor-ia-memoria.json` para versionar no repositório ou compartilhar entre máquinas. Backups inválidos são normalizados/descartados sem quebrar a aplicação.
 - **Conector LLM opcional** (OpenAI ou Gemini, com chave do próprio usuário) para layouts inéditos, com timeout, validação da resposta e fallback para a IA local.
+
+### Conciliação de pagamentos com rateio de apropriação (v1.32.0)
+
+O modelo enviado — **relatório 90ti “Contas a Pagar por Local com Apropriação”**, usado na
+conciliação de pagamentos do Itaú — entrou no **aprendizado de fábrica**. Ele é diferente de um
+extrato: cada pagamento ocupa várias linhas (fornecedor, título, tipo e uma ou mais linhas de
+`LOCAL | CENTRO DE CUSTO | NATUREZA | VALOR APROPRIADO`), o cabeçalho vem em três linhas e o
+último título é **repetido no topo da página seguinte** para não cortar o rateio.
+
+- **Leitor dedicado** (`buildAppropriationTableFromTextLines`, em `src/parsers.js`): reconstrói
+  **uma linha por título pago**, junta o nome do fornecedor e o tipo quebrados em duas linhas,
+  remonta o rateio na ordem vertical e descarta cabeçalho repetido, rodapé, `TOTAL` e
+  `TOTAL GERAL`. A repetição da virada de página é reconhecida e não conta duas vezes.
+- **Data e valor do fato**: usa `DATA PAGAMENTO` e `VALOR PAGO` (saída negativa). `DATA EMISSÃO`,
+  `VALOR ORIGINAL` e `VALOR APROPRIADO` ficam fora da soma — são previsto/rateio, não lançamento.
+- **Perfil treinado** (`seed-contas-pagar-apropriacao`, em `src/seed-profiles.js`): mapeia
+  `FORNECEDOR | TÍTULO | TIPO | APROPRIAÇÃO` como histórico, a data do pagamento como `date` e o
+  valor pago como `value_out`. Qualquer usuário novo já importa o modelo sem treinar à mão.
+- **Sem confusão com o extrato do banco**: uma entrada específica em `src/bank-layouts.js` evita
+  que o “Itaú” do nome do arquivo puxe as regras de `Data | Lançamentos | Saldo` e sugira
+  correções erradas no painel da IA.
+- **Conferido no PDF real de 12 páginas**: a soma dos pagamentos bate exatamente com o
+  `TOTAL GERAL` impresso no próprio arquivo. Nenhum dado de cliente foi versionado: os testes usam a
+  mesma geometria com fornecedores, valores e centros de custo fictícios.
 
 ### Treinador automático de extratos (v1.15.0)
 Todo extrato novo passa pelo mesmo roteiro de análise que um especialista faria à mão — e agora isso roda **dentro do app**, no painel de treino, sem mandar arquivo para ninguém:
@@ -69,7 +93,7 @@ Nos dois extratos usados como referência — **Itaú (567 lançamentos)** e **B
 ### Banco reconhecido na hora: catálogo + comunidade (v1.16.0)
 O treinador passou a **reconhecer de quem é o extrato** antes de pedir qualquer coisa ao usuário. Três camadas, nesta ordem:
 
-1. **Catálogo embutido — 18 bancos brasileiros** (`src/bank-layouts.js`): Itaú, Bradesco, Banco do Brasil, Caixa, Santander, Sicoob, Sicredi, Nubank, Inter, C6, BTG, Safra, Banrisul, Mercado Pago, PagBank, Stone, Original e Agibank. Cada um traz o apelido usado no cabeçalho (`Itaú Unibanco`, `CAIXA ECONÔMICA FEDERAL`…) e as regras de coluna do seu extrato. Se o banco e a estrutura de colunas batem, o layout **entra mapeado na primeira importação** — sem treino, sem LLM.
+1. **Catálogo embutido — 18 bancos brasileiros + 1 modelo de relatório** (`src/bank-layouts.js`): Itaú, Bradesco, Banco do Brasil, Caixa, Santander, Sicoob, Sicredi, Nubank, Inter, C6, BTG, Safra, Banrisul, Mercado Pago, PagBank, Stone, Original e Agibank, além da conciliação de pagamentos com rateio de apropriação. Cada entrada traz o apelido usado no cabeçalho (`Itaú Unibanco`, `CAIXA ECONÔMICA FEDERAL`, `90ti`…) e as regras de coluna do seu layout. Se o nome e a estrutura de colunas batem, o layout **entra mapeado na primeira importação** — sem treino, sem LLM.
 2. **Assinaturas aprendidas**: todo perfil memorizado guarda também a assinatura dos cabeçalhos (`layoutSignatures`, até 120, sem nenhum valor do extrato). Um extrato com o mesmo formato de um banco que você já treinou é reconhecido por semelhança de cabeçalhos (≥ 70%) e ganha o selo *Layout reaproveitado de um treino anterior*.
 3. **Sinônimos genéricos**: quando não é banco conhecido, vale a heurística de sempre (`Dt. Mov.` → data, `Histórico` → histórico, `Nº Doc`/`Dcto.` → documento, `Valor` → valor, `Saldo` → conferência).
 
@@ -82,7 +106,7 @@ Atualizar um layout de banco **não exige publicar versão nova do app**: o cat�
 
 - **Três fontes, com failover automático.** A primeira tentativa é o **próprio site** (`layouts/comunidade.json`, caminho relativo): mesma origem, zero CORS, zero terceiros — funciona no Pages oficial, em qualquer fork e em auto-hospedagem. (O workflow de deploy publica `layouts/` junto com `src/` e `vendor/`; um teste em `test/ui-contract.test.mjs` impede que essa cópia desapareça do deploy.) Se não responder, o app tenta o espelho **jsDelivr** e, por último, o **raw.githubusercontent**. A fonte que funcionou é lembrada e tentada primeiro na próxima vez. Em `file://` (HTML aberto do disco) só o GitHub raw é usado, porque CDN e mesma origem não valem nesse contexto.
 - **Sempre atualizado, sem atrapalhar.** Revalida **sozinho ao abrir** o app, **de hora em hora** enquanto estiver em uso, **quando a aba volta a ficar visível** e **quando a internet volta** — sempre em segundo plano, 1,2 s depois do primeiro desenho. Como o pedido manda `Accept: application/json` e `cache: 'no-cache'`, o navegador revalida por ETag: catálogo igual custa um **304**, não um download. O status no painel mostra `N layouts • fonte: próprio site • verificado há 12 min`.
-- **Nunca depende da rede para funcionar.** Os 18 bancos embutidos estão no pacote; o catálogo baixado é complemento. Sem internet, sem o arquivo no repositório ou com o `fetch` bloqueado, o reconhecimento continua igual. O catálogo salvo tem **cópia de segurança** em outra chave do `localStorage` (registro corrompido não zera nada) e uma falha de rede **nunca apaga** o catálogo bom.
+- **Nunca depende da rede para funcionar.** Os 18 bancos e o modelo de relatório embutidos estão no pacote; o catálogo baixado é complemento. Sem internet, sem o arquivo no repositório ou com o `fetch` bloqueado, o reconhecimento continua igual. O catálogo salvo tem **cópia de segurança** em outra chave do `localStorage` (registro corrompido não zera nada) e uma falha de rede **nunca apaga** o catálogo bom.
 - **Portátil de verdade.** **Importar catálogo (.json)** e **Exportar catálogo** permitem levar a lista de um navegador para outro, distribuir um kit para a equipe ou atualizar uma máquina sem internet. A exportação leva só `id`, `name`, `updatedAt`, colunas e quirks — nenhum lançamento.
 - **Merge determinístico**: catálogos se juntam por `id`; em empate vale o publicado e, com `updatedAt` diferentes, o mais novo vence. Um layout do catálogo só substitui um **embutido** de mesmo `id` quando declara `"override": true` — o catálogo pode corrigir um banco sem publicar versão, mas um JSON qualquer não sequestra o layout que já funciona.
 
@@ -572,9 +596,9 @@ conversor/
 │   ├── ocr.js                    # OCR offline de PDFs digitalizados (Tesseract.js)
 │   ├── manual.js                 # Manual: versão/ano do "Sobre" e sumário ativo
 │   ├── ai-engine.js              # Classificação, treino e memória da IA
-│   ├── seed-profiles.js          # Perfis de fábrica (extratos Itaú e Bradesco)
+│   ├── seed-profiles.js          # Perfis de fábrica (Itaú, Bradesco e rateio de pagamentos)
 │   ├── training-coach.js         # Treinador automático (diagnóstico + conferência de saldo)
-│   ├── bank-layouts.js           # Catálogo de 18 bancos, reconhecimento e assinaturas
+│   ├── bank-layouts.js           # Catálogo de 18 bancos + 1 relatório, reconhecimento e assinaturas
 │   ├── layout-registry.js        # Catálogo público da comunidade (download + cache)
 │   ├── export-scope.js           # Regra de exportação (seleção → tudo)
 │   ├── counterparty.js           # Conciliação clientes/fornecedores (cadastro Questor)

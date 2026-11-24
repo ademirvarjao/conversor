@@ -1,8 +1,9 @@
 /**
  * Conversor — Catálogo de layouts bancários e reconhecimento por estrutura
  *
- * Objetivo: reconhecer o layout de **qualquer** extrato, não só dos dois que já
- * vêm treinados. São três camadas, nesta ordem de confiança:
+ * Objetivo: reconhecer o layout de **qualquer** extrato ou relatório de
+ * pagamentos, não só dos que já vêm treinados. São três camadas, nesta ordem de
+ * confiança:
  *
  *  1. **Catálogo de bancos** (`BANK_LAYOUTS`): nome do banco (banner, nome do
  *     arquivo ou cabeçalho) + regras de coluna daquele banco. É o que resolve
@@ -53,7 +54,7 @@ export const GENERIC_COLUMN_RULES = [
   { match: 'lancamento|descricao|historico|detalhe|complemento|observacao|razao social|favorecido|pagador|beneficiario|cnpj|cpf', role: LAYOUT_ROLES.HISTORY },
 ];
 
-/** Mesma coisa, mas para linhas de texto (banner) — detecta o banco. */
+/** Apelidos para linhas de texto (banner, nome do arquivo ou cabeçalho). */
 const BANK_ALIASES = {
   itau: 'itau|ita[uú] unibanco',
   bradesco: 'bradesco',
@@ -73,6 +74,11 @@ const BANK_ALIASES = {
   stone: 'stone pagamentos|\\bstone\\b',
   original: 'banco original',
   agibank: 'agibank|agipag',
+  // Não é um banco: é o relatório de conciliação de pagamentos com rateio.
+  // O apelido específico evita que o "Itaú" do nome do arquivo puxe as regras
+  // do extrato bancário e sugira correções erradas no painel da IA.
+  'contas-pagar-apropriacao':
+    'contas a pagar por local com apropriacao|rateio da apropriacao|90ti',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -110,6 +116,25 @@ export const BANK_LAYOUTS = [
       blockLines: 3,
       sections: ['saldo total disponivel dia'],
     },
+  },
+  {
+    // Modelo de RELATÓRIO (não extrato): o leitor dedicado em `parsers.js`
+    // entrega estas 8 colunas. As regras ficam no catálogo só para o treinador
+    // não confundir o arquivo com um extrato bancário do Itaú.
+    id: 'contas-pagar-apropriacao',
+    name: 'Relatório 90ti — Contas a Pagar por Local com Apropriação',
+    kind: 'relatorio-contas-pagar',
+    columns: [
+      { match: '^fornecedor', role: LAYOUT_ROLES.HISTORY },
+      { match: '^titulo', role: LAYOUT_ROLES.HISTORY },
+      { match: '^data emissao', role: LAYOUT_ROLES.IGNORE },
+      { match: '^data pagamento', role: LAYOUT_ROLES.DATE },
+      { match: '^valor original', role: LAYOUT_ROLES.IGNORE },
+      { match: '^valor pago', role: LAYOUT_ROLES.VALUE_OUT },
+      { match: '^tipo', role: LAYOUT_ROLES.HISTORY },
+      { match: '^apropriacao', role: LAYOUT_ROLES.HISTORY },
+    ],
+    quirks: { saldo: 'sem-saldo' },
   },
   {
     id: 'bradesco',

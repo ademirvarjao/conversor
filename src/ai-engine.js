@@ -246,14 +246,14 @@ function createDefaultMemory() {
   return {
     version: MEMORY_VERSION,
     tokenWeights: JSON.parse(JSON.stringify(BASE_TOKEN_WEIGHTS)),
-    // Layouts de extrato que já vêm treinados (Itaú e Bradesco).
+    // Layouts que já vêm treinados (Itaú, Bradesco e conciliação com rateio).
     learnedProfiles: sanitizeSeedProfiles(),
     learningLog: [
       {
         id: 'init-1',
         timestamp: new Date().toISOString(),
         type: 'system_init',
-        message: `Motor de IA Adaptativa inicializado com ontologia financeira PT-BR e ${SEED_PROFILES.length} layout(s) de extrato já treinado(s).`,
+        message: `Motor de IA Adaptativa inicializado com ontologia financeira PT-BR e ${SEED_PROFILES.length} layout(s) já treinado(s).`,
         details: 'Pronto para detectar novos layouts, aprender correções e memorizar regras.',
       },
     ],

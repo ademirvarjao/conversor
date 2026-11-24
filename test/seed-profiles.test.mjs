@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { analyzeFileLayout, loadAiMemory, normalizeMemory, transformRowsWithConfig } from '../src/ai-engine.js';
-import { buildTableFromTextLines } from '../src/parsers.js';
+import { APPROPRIATION_REPORT_HEADERS, buildTableFromTextLines } from '../src/parsers.js';
 import { SEED_LOG_LAYOUTS } from './helpers/seed-fixtures.mjs';
 import { SEED_PROFILES } from '../src/seed-profiles.js';
 
 /**
- * Geometria real dos dois extratos, com valores fictícios.
+ * Geometria real dos layouts de extrato, com valores fictícios.
  *
  * Os layouts abaixo reproduzem o que o PDF.js entrega para:
  *  - extrato do Itaú (conta PJ): bloco de 3 linhas, data no MEIO;
@@ -19,15 +19,24 @@ import { SEED_PROFILES } from '../src/seed-profiles.js';
 const asPdfFile = (table, fileName) => ({ ...table, fileName, fileType: 'pdf' });
 
 describe('layouts de fábrica (treinados com extratos reais)', () => {
-  it('existem dois perfis embutidos, com papéis coerentes', () => {
-    assert.equal(SEED_PROFILES.length, 2);
+  it('existem três perfis embutidos, com papéis coerentes', () => {
+    assert.equal(SEED_PROFILES.length, 3);
 
     const itau = SEED_PROFILES.find((profile) => profile.id === 'seed-extrato-itau');
     const bradesco = SEED_PROFILES.find((profile) => profile.id === 'seed-extrato-bradesco');
-    assert.ok(itau && bradesco);
+    const apropriacao = SEED_PROFILES.find((profile) => profile.id === 'seed-contas-pagar-apropriacao');
+    assert.ok(itau && bradesco && apropriacao);
 
     const roleOf = (profile, header) =>
       profile.mappings.find((mapping) => mapping.header === header)?.role;
+
+    assert.deepEqual(apropriacao.headers, APPROPRIATION_REPORT_HEADERS);
+    assert.equal(roleOf(apropriacao, 'DATA PAGAMENTO'), 'date');
+    assert.equal(roleOf(apropriacao, 'VALOR PAGO'), 'value_out');
+    assert.equal(roleOf(apropriacao, 'DATA EMISSÃO'), 'ignore');
+    assert.equal(roleOf(apropriacao, 'VALOR ORIGINAL'), 'ignore');
+    assert.equal(roleOf(apropriacao, 'APROPRIAÇÃO'), 'history');
+    assert.equal(apropriacao.rules.defaultSign, 'negative');
 
     assert.deepEqual(itau.headers, ['Data', 'Lançamentos', 'Razão Social', 'CNPJ/CPF', 'Valor (R$)', 'Saldo (R$)']);
     assert.equal(roleOf(itau, 'Data'), 'date');
@@ -45,11 +54,15 @@ describe('layouts de fábrica (treinados com extratos reais)', () => {
   it('todo perfil de fábrica chega à memória de um usuário novo', () => {
     const memory = loadAiMemory();
     const seeds = memory.learnedProfiles.filter((profile) => profile.builtIn).map((profile) => profile.id);
-    assert.deepEqual(seeds.sort(), ['seed-extrato-bradesco', 'seed-extrato-itau']);
+    assert.deepEqual(seeds.sort(), [
+      'seed-contas-pagar-apropriacao',
+      'seed-extrato-bradesco',
+      'seed-extrato-itau',
+    ]);
 
     // Importar um backup antigo não pode duplicar nem apagar os de fábrica.
     const imported = normalizeMemory({ learnedProfiles: memory.learnedProfiles });
-    assert.equal(imported.learnedProfiles.filter((profile) => profile.builtIn).length, 2);
+    assert.equal(imported.learnedProfiles.filter((profile) => profile.builtIn).length, 3);
   });
 
   it('reconhece o extrato do Bradesco na primeira importação', () => {
