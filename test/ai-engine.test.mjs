@@ -569,7 +569,7 @@ describe('memória da IA', () => {
   it('já vem com os layouts de fábrica treinados', () => {
     const memory = loadAiMemory();
     const seeds = memory.learnedProfiles.filter((profile) => profile.builtIn);
-    assert.equal(seeds.length, 4);
+    assert.equal(seeds.length, 5);
     assert.deepEqual(
       seeds.map((profile) => profile.id).sort(),
       [
@@ -577,6 +577,7 @@ describe('memória da IA', () => {
         'seed-extrato-bradesco',
         'seed-extrato-itau',
         'seed-extrato-itau-mensal',
+        'seed-recebimentos-conta-bancaria',
       ]
     );
     for (const seed of seeds) {
@@ -615,16 +616,17 @@ describe('memória da IA', () => {
       'seed-extrato-bradesco',
       'seed-extrato-itau',
       'seed-extrato-itau-mensal',
+      'seed-recebimentos-conta-bancaria',
     ]);
     assert.equal(memory.learnedProfiles.filter((profile) => !profile.builtIn).length, 1);
     // Gravar de novo não duplica os de fábrica.
     saveAiMemory(memory);
-    assert.equal(loadAiMemory().learnedProfiles.filter((profile) => profile.builtIn).length, 4);
+    assert.equal(loadAiMemory().learnedProfiles.filter((profile) => profile.builtIn).length, 5);
   });
 
   it('importar backup antigo não apaga os layouts de fábrica', () => {
     const memory = normalizeMemory({ learnedProfiles: [] });
-    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 4);
+    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 5);
   });
 
   it('adota a memória guardada em chave de versão anterior (migração)', () => {
@@ -674,7 +676,7 @@ describe('memória da IA', () => {
     const memory = resetAiMemory();
     assert.equal(learnedProfilesOf(memory).length, 0);
     assert.equal(learnedProfilesOf(loadAiMemory()).length, 0);
-    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 4);
+    assert.equal(memory.learnedProfiles.filter((profile) => profile.builtIn).length, 5);
   });
 
   it('normaliza payloads importados e descarta lixo', () => {

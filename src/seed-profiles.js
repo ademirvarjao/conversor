@@ -104,6 +104,39 @@ export const SEED_PROFILES = [
     rules: { defaultSign: 'negative', removePipes: true, collapseSpaces: true },
     builtIn: true,
   },
+  {
+    id: 'seed-recebimentos-conta-bancaria',
+    name: 'Conciliação de recebimentos Itaú — Recebimentos por Conta Bancária (90ti)',
+    fileType: 'pdf',
+    // O leitor dedicado em `parsers.js` separa o código da conta ("01/01/0445")
+    // e descarta o subtotal puramente numérico e o TOTAL geral. O fato é
+    // Data Recebimento / Vr. Recebido (entrada positiva); amortizado,
+    // acréscimo e dedução ficam fora da soma.
+    headers: [
+      'Cliente',
+      'No.Título',
+      'Local',
+      'Data Recebimento',
+      'Forma Pagto.',
+      'Vr. Amortizado',
+      'Vr. Acréscimo',
+      'Vr. Dedução',
+      'Vr. Recebido',
+    ],
+    mappings: [
+      { header: 'Cliente', role: 'history', historyOrder: 1 },
+      { header: 'No.Título', role: 'history', historyOrder: 2 },
+      { header: 'Local', role: 'history', historyOrder: 3 },
+      { header: 'Data Recebimento', role: 'date', historyOrder: 0 },
+      { header: 'Forma Pagto.', role: 'history', historyOrder: 4 },
+      { header: 'Vr. Amortizado', role: 'ignore', historyOrder: 0 },
+      { header: 'Vr. Acréscimo', role: 'ignore', historyOrder: 0 },
+      { header: 'Vr. Dedução', role: 'ignore', historyOrder: 0 },
+      { header: 'Vr. Recebido', role: 'value_in', historyOrder: 0 },
+    ],
+    rules: { defaultSign: 'positive', removePipes: true, collapseSpaces: true },
+    builtIn: true,
+  },
 ];
 
 export const SEED_PROFILE_IDS = SEED_PROFILES.map((profile) => profile.id);
