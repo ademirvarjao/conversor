@@ -75,7 +75,7 @@
     <label class="cp-file" for="cp-contacts-input">
       <span class="cp-file-step">1</span>
       <span class="cp-file-title">Cadastro Cliente e Fornecedores</span>
-      <span class="cp-file-hint">Um ou mais PDF/.xlsx do Questor (<code>contactb</code>, <code>nomepessoa</code>, <code>natureza</code>) — pode juntar vários cadastros</span>
+      <span class="cp-file-hint">Opcional se conciliar só pelo Plano de Contas — PDF/.xlsx do Questor (<code>contactb</code>, <code>nomepessoa</code>, <code>natureza</code>)</span>
       <input id="cp-contacts-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-contacts-status" class="cp-file-status">Nenhum arquivo selecionado</span>
     </label>
@@ -87,10 +87,26 @@
       <input id="cp-ledger-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-ledger-status" class="cp-file-status">Nenhum arquivo selecionado</span>
     </label>
+
+    <div class="cp-file cp-file-chart" id="cp-chart-card">
+      <span class="cp-file-step">3</span>
+      <span class="cp-file-title">Plano de Contas Questor (I.A.)</span>
+      <span class="cp-file-hint">Salvo no banco de dados — preenche pela coluna <code>Conta</code> com I.A. ou manual (exceto Clientes e Fornecedores)</span>
+      <div class="cp-chart-actions">
+        <select id="cp-chart-plan-select" class="cp-chart-select hidden" aria-label="Plano de Contas salvo no banco"></select>
+        <input id="cp-chart-input" type="file" accept=".pdf,.xlsx" class="sr-only" />
+        <button id="btn-cp-chart-update" class="btn btn-sm btn-primary" type="button">Atualizar banco de dados</button>
+      </div>
+      <span id="cp-chart-status" class="cp-file-status">Consultando banco de dados…</span>
+    </div>
     </div>
 
     <div class="cp-run-row">
     <button id="btn-cp-run" class="btn btn-primary" type="button" disabled>Conciliar agora</button>
+    <label class="checkbox-label">
+      <input id="cp-use-chart-ai" type="checkbox" checked />
+      <span>Conciliar automaticamente pelo Plano de Contas com I.A. (exceto Clientes/Fornecedores)</span>
+    </label>
     <label class="checkbox-label">
       <input id="cp-include-unmatched" type="checkbox" checked />
       <span>Mostrar também os lançamentos sem correspondência</span>
@@ -217,6 +233,7 @@
         <div class="filter-pills" role="group" aria-label="Filtrar conciliação">
           <button class="pill active" data-cp-filter="all" type="button" aria-pressed="true">Todos</button>
           <button class="pill" data-cp-filter="matched" type="button" aria-pressed="false">Conciliados</button>
+          <button class="pill" data-cp-filter="chart" type="button" aria-pressed="false" title="Lançamentos conciliados ou sugeridos pela I.A. do Plano de Contas">Plano de Contas</button>
           <button class="pill" data-cp-filter="review" type="button" aria-pressed="false">Revisar</button>
           <button class="pill" data-cp-filter="unmatched" type="button" aria-pressed="false">Sem contato</button>
           <button class="pill" data-cp-filter="document" type="button" aria-pressed="false" title="Lançamentos vinculados pelo CPF/CNPJ que veio no histórico">CPF/CNPJ</button>
@@ -294,12 +311,26 @@
           </p>
         </div>
 
-        <div class="search-box">
-          <label for="cp-link-search" class="sr-only">Buscar contato no cadastro</label>
-          <input id="cp-link-search" type="search" placeholder="Buscar fornecedor/cliente pelo nome, código ou CPF/CNPJ…" />
+        <div id="cp-link-chart-box" class="cp-link-chart-box">
+          <h4 class="cp-link-sub">Plano de Contas Questor (preencher coluna Conta e ensinar a I.A.)</h4>
+          <div class="search-box">
+            <label for="cp-link-chart-search" class="sr-only">Buscar conta no Plano de Contas</label>
+            <input id="cp-link-chart-search" type="search" placeholder="Buscar no Plano de Contas por nome, código (Conta), apelido ou classificação…" />
+          </div>
+          <ul id="cp-link-chart-candidates" class="cp-candidates"></ul>
         </div>
-        <ul id="cp-link-candidates" class="cp-candidates"></ul>
+
+        <div id="cp-link-contacts-box" class="cp-link-contacts-box">
+          <h4 class="cp-link-sub">Clientes e Fornecedores (cadastro à parte)</h4>
+          <div class="search-box">
+            <label for="cp-link-search" class="sr-only">Buscar contato no cadastro</label>
+            <input id="cp-link-search" type="search" placeholder="Buscar fornecedor/cliente pelo nome, código ou CPF/CNPJ…" />
+          </div>
+          <ul id="cp-link-candidates" class="cp-candidates"></ul>
+        </div>
       </div>
+
+      <div id="cp-chart-autocomplete" class="cp-chart-autocomplete hidden" role="listbox" aria-label="Contas do Plano de Contas"></div>
 
       <div class="cp-export-row">
         <p id="cp-learned" class="cp-learned" role="status"></p>
