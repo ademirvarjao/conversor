@@ -1679,6 +1679,359 @@ export function buildAppropriationTableFromTextLines(allPageLines) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/*          Relatório "Recebimentos por Conta Bancária" (90ti)                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cabeçalho padronizado entregue à IA para este modelo de relatório.
+ *
+ * O PDF traz o código da conta bancária ("01/01/0445") logo acima do cabeçalho,
+ * a linha de período/emissão acima disso e uma linha de subtotal puramente
+ * numérica (sem a palavra "TOTAL:") logo abaixo do último lançamento da conta.
+ * A geometria genérica colava o código da conta no nome da 1ª coluna e
+ * transformava o subtotal em mais um lançamento, dobrando o total do relatório.
+ * Este leitor dedicado entrega uma linha por título recebido.
+ *
+ * Nenhum dado de cliente é gravado aqui: só os nomes das colunas.
+ */
+export const BANK_RECEIPTS_REPORT_HEADERS = [
+  'Cliente',
+  'No.Título',
+  'Local',
+  'Data Recebimento',
+  'Forma Pagto.',
+  'Vr. Amortizado',
+  'Vr. Acréscimo',
+  'Vr. Dedução',
+  'Vr. Recebido',
+];
+
+const BANK_RECEIPTS_HEADER_TOKENS = [
+  'cliente',
+  'titulo',
+  'local',
+  'recebimento',
+  'pagto',
+  'amortizado',
+  'acrescimo',
+  'deducao',
+  'recebido',
+];
+
+function findBankReceiptsHeaderBlocks(allPageLines) {
+  const blocks = [];
+  const seenPages = new Set();
+
+  const ordered = [...allPageLines].sort((a, b) => a.page - b.page || b.y - a.y);
+  for (const anchor of ordered) {
+    if (seenPages.has(anchor.page)) continue;
+    const anchorNorm = appropriationLineNorm(anchor);
+    if (!/\bcliente\b/.test(anchorNorm) || !/\btitulo\b/.test(anchorNorm)) continue;
+
+    const block = ordered.filter(
+      (line) =>
+        line.page === anchor.page &&
+        Math.abs(line.y - anchor.y) <= 12 &&
+        line.items.length >= 2 &&
+        line.items.every(
+          (item) => parseMoneyValue(item.str) === null && parseDateValue(item.str) === null
+        )
+    );
+    const signature = normalizeText(block.map(appropriationLineNorm).join(' '));
+    const hits = BANK_RECEIPTS_HEADER_TOKENS.filter((token) => signature.includes(token)).length;
+    if (
+      hits < 7 ||
+      !signature.includes('cliente') ||
+      !signature.includes('titulo') ||
+      !signature.includes('amortizado') ||
+      !signature.includes('recebido')
+    ) {
+      continue;
+    }
+
+    const items = [];
+    for (const line of block) {
+      for (const item of line.items) {
+        items.push({
+          str: item.str,
+          norm: normalizeText(item.str),
+          x: item.x,
+          right: item.x + (item.w || 0),
+          y: line.y,
+        });
+      }
+    }
+
+    const pick = (predicate) =>
+      items.filter((item) => predicate(item.norm)).sort((a, b) => a.x - b.x)[0] ?? null;
+
+    const cCliente = pick((s) => s === 'cliente');
+    const cTitulo = pick((s) => s.includes('titulo'));
+    const cLocal = pick((s) => s === 'local');
+    const cData = pick((s) => s.includes('recebimento')) || pick((s) => s === 'data');
+    const cForma = pick((s) => s.includes('pagto')) || pick((s) => s === 'forma');
+    const cAmort = pick((s) => s.includes('amortizado'));
+    const cAcresc = pick((s) => s.includes('acrescimo'));
+    const cDeduc = pick((s) => s.includes('deducao'));
+    const cReceb = pick((s) => s.includes('recebido'));
+
+    const cols = [cCliente, cTitulo, cLocal, cData, cForma, cAmort, cAcresc, cDeduc, cReceb];
+    if (cols.some((c) => c === null)) continue;
+    if (cols.some((c, idx) => idx > 0 && c.x <= cols[idx - 1].x)) continue;
+
+    const maxHeaderY = Math.max(...block.map((line) => line.y));
+    const minHeaderY = Math.min(...block.map((line) => line.y));
+    const textBounds = [
+      Math.max((cCliente.x + cTitulo.x) / 2, cTitulo.x - 14),
+      Math.max((cTitulo.x + cLocal.x) / 2, cLocal.x - 10),
+      Math.max((cLocal.x + cData.x) / 2, cData.x - 12),
+      (cData.x + cForma.x) / 2,
+      Math.min(cAmort.x - 10, Math.max((cForma.right + cAmort.x) / 2, (cForma.x + cAmort.x) / 2)),
+    ];
+
+    seenPages.add(anchor.page);
+    blocks.push({
+      page: anchor.page,
+      maxHeaderY,
+      minHeaderY,
+      signatures: new Set(block.map(appropriationLineNorm)),
+      textBounds,
+      moneyStarts: [cAmort.x, cAcresc.x, cDeduc.x, cReceb.x],
+      moneyRights: [cAmort.right, cAcresc.right, cDeduc.right, cReceb.right],
+      hasHeaderWidths: cAmort.right > cAmort.x && cReceb.right > cReceb.x,
+      numericZoneX: textBounds[4],
+      bannerLines: ordered
+        .filter((line) => line.page === anchor.page && line.y > maxHeaderY + 1)
+        .map(lineText)
+        .filter(Boolean),
+    });
+  }
+
+  return blocks;
+}
+
+function bankReceiptsBandOf(item, header) {
+  const itemRight = item.numRight ?? item.x + (item.w || 0);
+  if (
+    parseMoneyValue(item.str) !== null &&
+    (item.x >= header.numericZoneX - 15 || itemRight >= header.moneyStarts[0] - 5)
+  ) {
+    const useRight = header.hasHeaderWidths && (item.w || 0) > 0;
+    const ref = useRight ? itemRight : item.x;
+    const anchors = useRight ? header.moneyRights : header.moneyStarts;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let k = 0; k < anchors.length; k++) {
+      const dist = Math.abs(ref - anchors[k]);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = k;
+      }
+    }
+    return 5 + bestIdx;
+  }
+
+  for (let idx = 0; idx < header.textBounds.length; idx++) {
+    if (item.x < header.textBounds[idx]) return idx;
+  }
+
+  let bestIdx = 5;
+  let bestDist = Infinity;
+  for (let k = 0; k < header.moneyStarts.length; k++) {
+    const dist = Math.abs(item.x - header.moneyStarts[k]);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = 5 + k;
+    }
+  }
+  return bestIdx;
+}
+
+function bankReceiptsCellsOf(line, header) {
+  const cells = Array.from({ length: BANK_RECEIPTS_REPORT_HEADERS.length }, () => []);
+  for (const item of line.items) cells[bankReceiptsBandOf(item, header)].push(item.str);
+  return cells.map((parts) => cleanWhitespace(parts.join(' ')));
+}
+
+function isBankReceiptsNoiseLine(line, pageHeader, allSignatures) {
+  const text = lineText(line);
+  const norm = appropriationLineNorm(line);
+  if (!norm) return true;
+  if (pageHeader && line.y >= pageHeader.minHeaderY - 2) return true;
+  if (allSignatures.has(norm)) return true;
+  if (
+    line.y <= 40 &&
+    !line.items.some(
+      (item) => parseDateValue(item.str) !== null || parseMoneyValue(item.str) !== null
+    )
+  ) {
+    return true;
+  }
+  if (/^(?:page|pagina)\s+\d+\s+(?:of|de)\s+\d+/.test(norm)) return true;
+  if (isPeriodBanner(text) || isStatementNoise(text)) return true;
+  // Código da conta bancária agrupadora (ex.: "01/01/0445") fora da área de dados.
+  if (
+    /^\d{2}\/\d{2}\/\d{4}(?:\s*-\s*.*)?$/.test(text) &&
+    parseDateValue(text) === null &&
+    !line.items.some((item) => parseMoneyValue(item.str) !== null)
+  ) {
+    return true;
+  }
+  const totalNorm = normalizeText(text.replace(/\.+/g, ' '));
+  if (
+    /^(?:total|subtotal|totais)(?:\s+geral)?\b/i.test(totalNorm) &&
+    !line.items.some((item) => parseDateValue(item.str) !== null)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function bankReceiptsMainRow(cells) {
+  const date = parseDateValue(cells[3]);
+  const received = parseMoneyValue(cells[8]);
+  const anchor = cells[0] || cells[1] || cells[4];
+  if (!date || received === null || !anchor) return null;
+  return { cells, date, received: received.value };
+}
+
+function appendBankReceiptsLines(record, entries) {
+  for (const entry of entries) {
+    record.lines.push({
+      page: entry.line.page,
+      y: entry.line.y,
+      cells: entry.cells.slice(0, BANK_RECEIPTS_REPORT_HEADERS.length),
+    });
+  }
+}
+
+function aggregateBankReceiptsRecord(record) {
+  const parts = [...record.lines].sort((a, b) => a.page - b.page || b.y - a.y);
+  const cells = Array.from({ length: BANK_RECEIPTS_REPORT_HEADERS.length }, () => '');
+  for (const part of parts) {
+    for (let col = 0; col < cells.length; col++) {
+      const value = part.cells[col];
+      if (value) cells[col] = cleanWhitespace(`${cells[col]} ${value}`);
+    }
+  }
+  return cells;
+}
+
+/**
+ * Reconstrói a tabela do relatório "Recebimentos por Conta Bancária" (90ti).
+ * Retorna `null` quando o PDF não é deste modelo, para cair no parser genérico.
+ */
+export function buildBankReceiptsTableFromTextLines(allPageLines) {
+  const headerBlocks = findBankReceiptsHeaderBlocks(allPageLines);
+  if (headerBlocks.length === 0) return null;
+
+  const firstHeader = headerBlocks[0];
+  const headerByPage = new Map(headerBlocks.map((block) => [block.page, block]));
+  const allSignatures = new Set();
+  for (const block of headerBlocks) {
+    for (const sig of block.signatures) allSignatures.add(sig);
+  }
+
+  const ordered = [...allPageLines].sort((a, b) => a.page - b.page || b.y - a.y);
+  let current = null;
+  let pending = [];
+  const records = [];
+  let skipped = 0;
+
+  for (const line of ordered) {
+    const pageHeader = headerByPage.get(line.page) || null;
+    const activeHeader = pageHeader || firstHeader;
+
+    if (isBankReceiptsNoiseLine(line, pageHeader, allSignatures)) {
+      skipped += 1;
+      continue;
+    }
+
+    const cells = bankReceiptsCellsOf(line, activeHeader);
+    const main = bankReceiptsMainRow(cells);
+    if (!main) {
+      // Subtotais puramente numéricos (ex.: "898.002,45 | 0,00 | 0,00 | 898.002,45")
+      // e linhas com data/valor soltos nunca são continuação de texto.
+      const hasDateOrMoney = line.items.some(
+        (item) => parseDateValue(item.str) !== null || parseMoneyValue(item.str) !== null
+      );
+      const hasTextCols = cells.slice(0, 5).some(Boolean);
+      const hasMoneyCols = cells.slice(5).some(Boolean);
+      if (hasDateOrMoney || hasMoneyCols || !hasTextCols) {
+        skipped += 1;
+        continue;
+      }
+      pending.push({ line, cells });
+      continue;
+    }
+
+    // Quebra de linha em Cliente / Local / Forma Pagto.: junta ao lançamento
+    // mais próximo (até 12 pt) na mesma página.
+    const preAnchor = [];
+    const postAnchor = [];
+    for (const entry of pending) {
+      if (entry.line.page !== line.page) {
+        if (current && entry.line.page === current.lastPage && current.lastY - entry.line.y <= 12) {
+          postAnchor.push(entry);
+        } else {
+          skipped += 1;
+        }
+        continue;
+      }
+      const distToNext = entry.line.y - line.y;
+      const distToPrev =
+        current && current.lastPage === line.page ? current.lastY - entry.line.y : Infinity;
+
+      if (distToNext >= 0 && distToNext <= 12 && distToNext <= distToPrev) {
+        preAnchor.push(entry);
+      } else if (distToPrev >= 0 && distToPrev <= 12) {
+        postAnchor.push(entry);
+      } else {
+        skipped += 1;
+      }
+    }
+
+    if (current) {
+      appendBankReceiptsLines(current, postAnchor);
+      records.push(current);
+    }
+
+    current = { page: line.page, lastPage: line.page, lastY: line.y, lines: [] };
+    appendBankReceiptsLines(current, [{ line, cells }]);
+    appendBankReceiptsLines(current, preAnchor);
+    pending = [];
+  }
+
+  if (current) {
+    const trailing = [];
+    for (const entry of pending) {
+      if (
+        entry.line.page === current.lastPage &&
+        current.lastY - entry.line.y >= 0 &&
+        current.lastY - entry.line.y <= 12
+      ) {
+        trailing.push(entry);
+      } else {
+        skipped += 1;
+      }
+    }
+    appendBankReceiptsLines(current, trailing);
+    records.push(current);
+  }
+
+  if (records.length === 0) return null;
+
+  return {
+    headers: [...BANK_RECEIPTS_REPORT_HEADERS],
+    rows: records.map(aggregateBankReceiptsRecord),
+    bannerLines: firstHeader.bannerLines,
+    skippedRows: skipped,
+    columnCount: BANK_RECEIPTS_REPORT_HEADERS.length,
+    checkpoints: [],
+  };
+}
+
 export function buildTableFromTextLines(allPageLines) {
   if (!Array.isArray(allPageLines) || allPageLines.length === 0) {
     throw new Error('Nenhum texto extraível encontrado no PDF (pode ser um documento digitalizado).');
@@ -1688,6 +2041,9 @@ export function buildTableFromTextLines(allPageLines) {
   // relatório de rateio tem várias linhas por pagamento e cabeçalho em 3 linhas.
   const appropriation = buildAppropriationTableFromTextLines(allPageLines);
   if (appropriation) return appropriation;
+
+  const bankReceipts = buildBankReceiptsTableFromTextLines(allPageLines);
+  if (bankReceipts) return bankReceipts;
 
   // 0a. Datas "dd/mm" ganham o ano do documento (extrato mensal do Itaú).
   completeShortDates(allPageLines);

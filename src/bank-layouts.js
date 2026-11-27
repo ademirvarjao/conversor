@@ -74,11 +74,13 @@ const BANK_ALIASES = {
   stone: 'stone pagamentos|\\bstone\\b',
   original: 'banco original',
   agibank: 'agibank|agipag',
-  // Não é um banco: é o relatório de conciliação de pagamentos com rateio.
-  // O apelido específico evita que o "Itaú" do nome do arquivo puxe as regras
-  // do extrato bancário e sugira correções erradas no painel da IA.
+  // Não é um banco: são relatórios 90ti de conciliação.
+  // Os apelidos específicos evitam que o "Itaú" do nome do arquivo puxe as
+  // regras do extrato bancário e sugira correções erradas no painel da IA.
   'contas-pagar-apropriacao':
-    'contas a pagar por local com apropriacao|rateio da apropriacao|90ti',
+    'contas a pagar por local com apropriacao|rateio da apropriacao|90ti(?!\\s*-\\s*recebimentos)',
+  'recebimentos-conta-bancaria':
+    'recebimentos por conta bancaria|90ti\\s*-\\s*recebimentos',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -133,6 +135,26 @@ export const BANK_LAYOUTS = [
       { match: '^valor pago', role: LAYOUT_ROLES.VALUE_OUT },
       { match: '^tipo', role: LAYOUT_ROLES.HISTORY },
       { match: '^apropriacao', role: LAYOUT_ROLES.HISTORY },
+    ],
+    quirks: { saldo: 'sem-saldo' },
+  },
+  {
+    // Modelo de RELATÓRIO (não extrato): o leitor dedicado em `parsers.js`
+    // entrega estas 9 colunas. As regras ficam no catálogo só para o treinador
+    // não confundir o arquivo com um extrato bancário do Itaú.
+    id: 'recebimentos-conta-bancaria',
+    name: 'Relatório 90ti — Recebimentos por Conta Bancária',
+    kind: 'relatorio-recebimentos',
+    columns: [
+      { match: '^cliente$', role: LAYOUT_ROLES.HISTORY },
+      { match: 'titulo', role: LAYOUT_ROLES.HISTORY },
+      { match: '^local$', role: LAYOUT_ROLES.HISTORY },
+      { match: '^data recebimento', role: LAYOUT_ROLES.DATE },
+      { match: '^forma pagto', role: LAYOUT_ROLES.HISTORY },
+      { match: '^vr\\.?\\s*amortizado', role: LAYOUT_ROLES.IGNORE },
+      { match: '^vr\\.?\\s*acrescimo', role: LAYOUT_ROLES.IGNORE },
+      { match: '^vr\\.?\\s*deducao', role: LAYOUT_ROLES.IGNORE },
+      { match: '^vr\\.?\\s*recebido', role: LAYOUT_ROLES.VALUE_IN },
     ],
     quirks: { saldo: 'sem-saldo' },
   },
