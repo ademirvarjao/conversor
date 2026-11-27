@@ -63,10 +63,35 @@
       <span id="processing-text">Processando…</span>
     </div>
 
+    <section class="card cp-chart-section" aria-labelledby="cp-chart-title">
+      <div class="section-header">
+        <div>
+          <span class="step-tag">PASSO 1 • PLANO DE CONTAS</span>
+          <h2 id="cp-chart-title">Plano de Contas Questor (I.A.)</h2>
+        </div>
+      </div>
+
+      <div class="cp-file cp-file-chart" id="cp-chart-card">
+        <span class="cp-file-step">1</span>
+        <div class="cp-chart-card-row">
+          <div class="cp-chart-card-info">
+            <span class="cp-file-title">Plano de Contas salvo no banco de dados</span>
+            <span class="cp-file-hint">Carregado automaticamente do banco — preenche pela coluna <code>Conta</code> com I.A. ou manual (exceto Clientes e Fornecedores). Envie um novo PDF/.xlsx apenas quando houver atualização.</span>
+            <span id="cp-chart-status" class="cp-file-status">Consultando banco de dados…</span>
+          </div>
+          <div class="cp-chart-actions">
+            <select id="cp-chart-plan-select" class="cp-chart-select hidden" aria-label="Plano de Contas salvo no banco"></select>
+            <input id="cp-chart-input" type="file" accept=".pdf,.xlsx" class="sr-only" />
+            <button id="btn-cp-chart-update" class="btn btn-sm btn-primary" type="button">Atualizar banco de dados</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="card cp-files-card" aria-labelledby="cp-files-title">
       <div class="section-header">
         <div>
-          <span class="step-tag">PASSO 1 • ARQUIVOS</span>
+          <span class="step-tag">PASSO 2 • ARQUIVOS</span>
           <h2 id="cp-files-title">Carregue o cadastro e a conciliação bancária</h2>
         </div>
       </div>
@@ -87,18 +112,6 @@
       <input id="cp-ledger-input" type="file" accept=".pdf,.xlsx" class="cp-file-input" multiple />
       <span id="cp-ledger-status" class="cp-file-status">Nenhum arquivo selecionado</span>
     </label>
-
-    <div class="cp-file cp-file-chart" id="cp-chart-card">
-      <span class="cp-file-step">3</span>
-      <span class="cp-file-title">Plano de Contas Questor (I.A.)</span>
-      <span class="cp-file-hint">Salvo no banco de dados — preenche pela coluna <code>Conta</code> com I.A. ou manual (exceto Clientes e Fornecedores)</span>
-      <div class="cp-chart-actions">
-        <select id="cp-chart-plan-select" class="cp-chart-select hidden" aria-label="Plano de Contas salvo no banco"></select>
-        <input id="cp-chart-input" type="file" accept=".pdf,.xlsx" class="sr-only" />
-        <button id="btn-cp-chart-update" class="btn btn-sm btn-primary" type="button">Atualizar banco de dados</button>
-      </div>
-      <span id="cp-chart-status" class="cp-file-status">Consultando banco de dados…</span>
-    </div>
     </div>
 
     <div class="cp-run-row">
@@ -119,7 +132,7 @@
   <section id="cp-result" class="card cp-result-card hidden" aria-labelledby="cp-result-title">
       <div class="section-header">
         <div>
-          <span class="step-tag step-out">PASSO 2 • RESULTADO</span>
+          <span class="step-tag step-out">PASSO 3 • RESULTADO</span>
           <h2 id="cp-result-title">Conciliação (data | débito | crédito | valor | histórico)</h2>
         </div>
         <div class="cp-result-actions">

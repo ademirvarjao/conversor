@@ -343,6 +343,14 @@ describe('Contrato de UI e SQL do Plano de Contas no Conciliador', () => {
     }
 
     assert.match(html, /data-cp-filter="chart"/);
+    assert.match(html, /PASSO 1 • PLANO DE CONTAS/);
+    assert.match(html, /PASSO 2 • ARQUIVOS/);
+    assert.match(html, /PASSO 3 • RESULTADO/);
+    assert.ok(
+      html.indexOf('id="cp-chart-card"') < html.indexOf('id="cp-contacts-input"') &&
+        html.indexOf('id="cp-contacts-input"') < html.indexOf('id="cp-result"'),
+      'Plano de Contas deve aparecer como primeira etapa antes dos arquivos e do resultado'
+    );
     assert.match(js, /reconcileWithChart/);
     assert.match(js, /initChartFromDatabase/);
     assert.match(js, /uploadAndSyncChart/);
