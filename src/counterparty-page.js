@@ -51,6 +51,23 @@ import {
   exportCounterpartiesPdf,
   exportCounterpartiesXlsx,
 } from './exporters.js';
+import {
+  diffChartAccounts,
+  parseQuestorChartPdf,
+  parseQuestorChartTable,
+  reconcileWithChart,
+  recordChartLearning,
+  scoreChartCandidates,
+  searchChartAccounts,
+} from './chart-of-accounts.js';
+import {
+  loadChartCache,
+  loadChartFromDb,
+  mergeChartLearning,
+  saveChartCache,
+  saveChartLearningToDb,
+  syncChartPlanToDb,
+} from './chart-sync.js';
 import { formatValueGroupedBr, formatValuePlainBr } from './format.js';
 import { extractPdfLines, normalizeText, parsePdfFile, parseXlsxFile } from './parsers.js';
 import { formatAccessCode } from './sync-crypto.js';
@@ -87,10 +104,17 @@ const state = {
   page: 1,
   linkingId: null,
   linkSearch: '',
+  chartLinkSearch: '',
   learnedCount: 0,
   selected: new Set(),
   pageSize: DEFAULT_PAGE_SIZE,
   busy: false,
+  chartPlans: [],
+  chartPlan: null,
+  chartAccounts: [],
+  chartRules: [],
+  chartTokens: [],
+  chartDbConnected: false,
 };
 
 const cloud = {
@@ -106,6 +130,12 @@ const REQUIRED_IDS = [
   'cp-contacts-status',
   'cp-ledger-input',
   'cp-ledger-status',
+  'cp-chart-card',
+  'cp-chart-plan-select',
+  'cp-chart-input',
+  'btn-cp-chart-update',
+  'cp-chart-status',
+  'cp-use-chart-ai',
   'btn-cp-run',
   'btn-cp-rerun',
   'cp-include-unmatched',
@@ -140,8 +170,13 @@ const REQUIRED_IDS = [
   'cp-link-panel',
   'btn-cp-link-close',
   'cp-link-history',
+  'cp-link-chart-box',
+  'cp-link-chart-search',
+  'cp-link-chart-candidates',
+  'cp-link-contacts-box',
   'cp-link-search',
   'cp-link-candidates',
+  'cp-chart-autocomplete',
   'cp-learned',
   'btn-cp-export-xlsx',
   'btn-cp-export-pdf',
@@ -494,7 +529,308 @@ function fileExtension(name) {
 function updateRunButton() {
   const button = dom['btn-cp-run'];
   if (!button) return;
-  button.disabled = state.busy || state.contacts.length === 0 || state.transactions.length === 0;
+  const hasSource = state.contacts.length > 0 || state.chartAccounts.length > 0;
+  button.disabled = state.busy || !hasSource || state.transactions.length === 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     Plano de Contas Questor (Banco + I.A.)                 */
+/* -------------------------------------------------------------------------- */
+
+function activeChartAccountsCount() {
+  return state.chartAccounts.filter((a) => !a.is_synthetic && !a.is_counterparty).length;
+}
+
+function findChartAccountByCode(conta) {
+  const clean = String(conta ?? '').trim();
+  if (!clean) return null;
+  return state.chartAccounts.find((a) => a.conta === clean) || null;
+}
+
+function renderChartStatus() {
+  const statusEl = dom['cp-chart-status'];
+  const cardEl = dom['cp-chart-card'];
+  const selectEl = dom['cp-chart-plan-select'];
+
+  if (selectEl) {
+    if (state.chartPlans.length > 1) {
+      selectEl.innerHTML = state.chartPlans
+        .map((p) => {
+          const label = `${p.company_code ? `${p.company_code} ` : ''}${p.company_name}${p.cnpj ? ` (${p.cnpj})` : ''}`;
+          return `<option value="${escapeHtml(p.id)}" ${p.id === state.chartPlan?.id ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+        })
+        .join('');
+      selectEl.classList.remove('hidden');
+    } else {
+      selectEl.classList.add('hidden');
+      selectEl.innerHTML = '';
+    }
+  }
+
+  if (!statusEl) return;
+
+  if (!state.chartPlan || state.chartAccounts.length === 0) {
+    statusEl.textContent = 'Nenhum plano salvo no banco — clique em "Atualizar banco de dados" para subir o PDF do Questor';
+    cardEl?.classList.remove('is-loaded');
+    return;
+  }
+
+  const analytic = activeChartAccountsCount();
+  const excluded = state.chartAccounts.filter((a) => !a.is_synthetic && a.is_counterparty).length;
+  const rulesCount = state.chartRules.length;
+  const label = `${state.chartPlan.company_code ? `${state.chartPlan.company_code} ` : ''}${state.chartPlan.company_name}`;
+  statusEl.textContent =
+    `${label} (v${state.chartPlan.version || 1}) • ${analytic} contas analíticas` +
+    (excluded ? ` • ${excluded} Clientes/Fornecedores excluídas` : '') +
+    ` • ${rulesCount} regra(s) I.A.${state.chartDbConnected ? ' • banco conectado' : ' • cache local'}`;
+  cardEl?.classList.add('is-loaded');
+}
+
+function persistChartCacheLocal() {
+  saveChartCache({
+    plans: state.chartPlans,
+    plan: state.chartPlan,
+    accounts: state.chartAccounts,
+    rules: state.chartRules,
+    tokens: state.chartTokens,
+  });
+}
+
+async function initChartFromDatabase(planId = null) {
+  const cached = loadChartCache();
+  if (cached && cached.accounts.length > 0 && (!planId || cached.plan?.id === planId)) {
+    state.chartPlans = cached.plans;
+    state.chartPlan = cached.plan;
+    state.chartAccounts = cached.accounts;
+    state.chartRules = cached.rules;
+    state.chartTokens = cached.tokens;
+    renderChartStatus();
+    updateRunButton();
+  }
+
+  if (!cloud.config) {
+    renderChartStatus();
+    return;
+  }
+
+  try {
+    const remote = await loadChartFromDb(cloud.config, { planId });
+    state.chartDbConnected = true;
+    const samePlan = !planId || remote.plan?.id === cached?.plan?.id;
+    const mergedLearning = samePlan
+      ? mergeChartLearning(remote, cached || {})
+      : { rules: remote.rules, tokens: remote.tokens };
+
+    state.chartPlans = remote.plans;
+    state.chartPlan = remote.plan;
+    state.chartAccounts = remote.accounts;
+    state.chartRules = mergedLearning.rules;
+    state.chartTokens = mergedLearning.tokens;
+    persistChartCacheLocal();
+  } catch (error) {
+    console.warn('[Conciliador] Falha ao carregar Plano de Contas do banco:', error);
+    state.chartDbConnected = false;
+  }
+
+  renderChartStatus();
+  updateRunButton();
+}
+
+async function readChartFile(file, onProgress) {
+  const extension = fileExtension(file.name);
+  const buffer = await file.arrayBuffer();
+
+  if (extension === 'pdf') {
+    return parseQuestorChartPdf(new Uint8Array(buffer), file.name, pdfjsLib, { onProgress });
+  }
+
+  const ExcelJSRef = typeof window !== 'undefined' ? window.ExcelJS : undefined;
+  if (!ExcelJSRef) throw new Error('Biblioteca ExcelJS não carregada.');
+  const parsed = await parseXlsxFile(buffer, file.name, ExcelJSRef);
+  return parseQuestorChartTable(parsed.headers, parsed.rows, { sourceFile: file.name });
+}
+
+async function uploadAndSyncChart(file) {
+  if (!file) return;
+  const statusEl = dom['cp-chart-status'];
+  if (statusEl) statusEl.textContent = `Lendo ${file.name}…`;
+  setProcessing(true, `Lendo Plano de Contas (${file.name}) e atualizando banco de dados…`);
+
+  try {
+    const parsed = await readChartFile(file, (page, total) => {
+      if (statusEl) statusEl.textContent = `${file.name} — página ${page} de ${total}…`;
+    });
+
+    const localDiff =
+      state.chartPlan?.id === parsed.plan.id
+        ? diffChartAccounts(state.chartAccounts, parsed.accounts)
+        : {
+            inserted: parsed.accounts.length,
+            updated: 0,
+            unchanged: 0,
+            deactivated: 0,
+          };
+
+    let syncSummary = {
+      ...localDiff,
+      version: state.chartPlan?.id === parsed.plan.id ? (state.chartPlan.version || 1) + 1 : 1,
+      analytic_accounts: parsed.plan.analytic_accounts,
+      excluded_counterparties: parsed.plan.excluded_counterparties,
+    };
+
+    const noChanges =
+      state.chartPlan?.id === parsed.plan.id &&
+      localDiff.inserted === 0 &&
+      localDiff.updated === 0 &&
+      localDiff.deactivated === 0;
+
+    if (noChanges && state.chartDbConnected) {
+      renderChartStatus();
+      updateRunButton();
+      const unchangedMsg =
+        `Nenhuma alteração encontrada em ${state.chartPlan.company_name} (v${state.chartPlan.version || 1}) — ` +
+        `${parsed.plan.analytic_accounts} conta(s) analítica(s) já estão atualizadas no banco.`;
+      cpAlert(`<strong>Plano de Contas já atualizado.</strong> ${escapeHtml(unchangedMsg)}`, 'info');
+      showToast(unchangedMsg);
+      return;
+    }
+
+    if (cloud.config) {
+      if (statusEl) statusEl.textContent = 'Gravando atualizações no banco de dados…';
+      syncSummary = await syncChartPlanToDb(cloud.config, {
+        plan: parsed.plan,
+        accounts: parsed.accounts,
+      });
+      state.chartDbConnected = true;
+
+      const reloaded = await loadChartFromDb(cloud.config, { planId: parsed.plan.id });
+      state.chartPlans = reloaded.plans;
+      state.chartPlan = reloaded.plan || { ...parsed.plan, version: syncSummary.version };
+      state.chartAccounts = reloaded.accounts.length > 0 ? reloaded.accounts : parsed.accounts;
+      state.chartRules = reloaded.rules;
+      state.chartTokens = reloaded.tokens;
+    } else {
+      state.chartPlan = { ...parsed.plan, version: syncSummary.version };
+      state.chartAccounts = parsed.accounts;
+      if (!state.chartPlans.some((p) => p.id === state.chartPlan.id)) {
+        state.chartPlans = [state.chartPlan, ...state.chartPlans];
+      }
+    }
+
+    persistChartCacheLocal();
+    renderChartStatus();
+    updateRunButton();
+
+    const msg =
+      `Banco de dados atualizado (${state.chartPlan.company_name}, v${syncSummary.version}): ` +
+      `+${syncSummary.inserted} nova(s), ${syncSummary.updated} alterada(s), ` +
+      `${syncSummary.deactivated} desativada(s) • ${syncSummary.analytic_accounts} conta(s) analítica(s) ativa(s) ` +
+      `(${syncSummary.excluded_counterparties} de Clientes/Fornecedores excluídas).`;
+    cpAlert(`<strong>Plano de Contas atualizado no banco.</strong> ${escapeHtml(msg)}`, 'info');
+    showToast(msg);
+    track('plano_contas', 'Plano de Contas atualizado no banco', `v${syncSummary.version} • +${syncSummary.inserted} / ~${syncSummary.updated}`, 'chartUpdates');
+  } catch (error) {
+    console.error(error);
+    cpAlert(`<strong>Não foi possível atualizar o Plano de Contas.</strong> ${escapeHtml(error.message)}`, 'error');
+    showToast(`Falha ao atualizar Plano de Contas: ${error.message}`, 'error');
+    renderChartStatus();
+  } finally {
+    setProcessing(false);
+  }
+}
+
+const pendingChartLearning = {
+  rules: new Map(),
+  tokens: new Map(),
+  timer: null,
+};
+
+function flushChartLearning() {
+  if (pendingChartLearning.timer) {
+    clearTimeout(pendingChartLearning.timer);
+    pendingChartLearning.timer = null;
+  }
+  const rules = [...pendingChartLearning.rules.values()];
+  const tokens = [...pendingChartLearning.tokens.values()];
+  pendingChartLearning.rules.clear();
+  pendingChartLearning.tokens.clear();
+
+  if ((rules.length === 0 && tokens.length === 0) || !state.chartPlan?.id || !cloud.config) return;
+  saveChartLearningToDb(cloud.config, {
+    planId: state.chartPlan.id,
+    rules,
+    tokens,
+  })
+    .then(() => {
+      renderChartStatus();
+    })
+    .catch((err) => {
+      console.warn('[Conciliador] Falha ao gravar aprendizado no banco:', err);
+    });
+}
+
+function scheduleChartLearningSync(delay = 350) {
+  if (pendingChartLearning.timer) clearTimeout(pendingChartLearning.timer);
+  pendingChartLearning.timer = setTimeout(() => {
+    flushChartLearning();
+  }, delay);
+}
+
+/**
+ * Grava aprendizado da I.A. (cache local + fila para o banco Supabase) sempre
+ * que uma conta é preenchida manualmente, aceita de uma sugestão ou escolhida
+ * no Plano de Contas.
+ */
+function rememberChartAssignment(row, side, conta, accountName = '', source = 'manual') {
+  if (!row || !conta) return;
+  const cleanConta = String(conta).trim();
+  if (!cleanConta) return;
+
+  const resolvedName = accountName || findChartAccountByCode(cleanConta)?.name || '';
+  const learningStore = {
+    rules: state.chartRules,
+    tokens: state.chartTokens,
+  };
+  const learned = recordChartLearning(learningStore, {
+    history: row.rawHistory || row.history,
+    direction: row.direction,
+    side,
+    conta: cleanConta,
+    accountName: resolvedName,
+    source,
+  });
+  if (!learned) return;
+
+  persistChartCacheLocal();
+  renderChartStatus();
+
+  const r = learned.rule;
+  pendingChartLearning.rules.set(`${r.history_key}|${r.direction}|${r.side}`, r);
+  for (const t of learned.tokens) {
+    const tKey = `${t.token}|${t.conta}|${t.direction}`;
+    const prev = pendingChartLearning.tokens.get(tKey);
+    pendingChartLearning.tokens.set(tKey, {
+      ...t,
+      weight: (prev?.weight || 0) + t.weight,
+      hits: (prev?.hits || 0) + t.hits,
+    });
+  }
+  scheduleChartLearningSync();
+}
+
+function reinforceExportedChartMatches(rows) {
+  for (const row of rows || []) {
+    if (row.chartMatch && row.chartMatch.source === 'ai') {
+      rememberChartAssignment(
+        row,
+        row.chartMatch.side,
+        row.chartMatch.conta,
+        row.chartMatch.name,
+        'ai_accepted'
+      );
+    }
+  }
+  flushChartLearning();
 }
 
 /** Lê um arquivo de cadastro e devolve os contatos crus. */
@@ -697,34 +1033,49 @@ async function loadLedger(fileList) {
 
 async function runReconciliation() {
   if (state.busy) return;
-  if (state.contacts.length === 0 || state.transactions.length === 0) {
-    showToast('Carregue o cadastro e o extrato antes de conciliar.', 'warn');
+  const hasContacts = state.contacts.length > 0;
+  const hasChart = state.chartAccounts.length > 0;
+  if ((!hasContacts && !hasChart) || state.transactions.length === 0) {
+    showToast('Carregue a conciliação bancária e um cadastro ou Plano de Contas antes de conciliar.', 'warn');
     return;
   }
 
   state.busy = true;
   updateRunButton();
-  setProcessing(true, 'Conciliando clientes e fornecedores…');
+  setProcessing(true, 'Conciliando lançamentos com I.A.…');
 
   try {
-    const { rows, stats } = reconcileCounterparties(state.transactions, state.contacts, {
+    const { rows } = reconcileCounterparties(state.transactions, state.contacts, {
       memory: state.memory,
     });
     rows.forEach((row, index) => {
       row.id = index;
     });
 
+    const useChartAi = dom['cp-use-chart-ai']?.checked !== false;
+    let chartStats = { matchedCount: 0, memoryCount: 0, suggestedCount: 0 };
+    if (useChartAi && hasChart) {
+      chartStats = reconcileWithChart(rows, state.chartAccounts, {
+        rules: state.chartRules,
+        tokens: state.chartTokens,
+      });
+    }
+
+    const stats = summarizeReconciliation(rows);
     state.rows = rows;
     state.stats = stats;
     state.page = 1;
     state.filter = 'all';
     state.search = '';
     state.linkSearch = '';
+    state.chartLinkSearch = '';
     state.linkingId = null;
     state.selected = new Set();
     if (dom['cp-search']) dom['cp-search'].value = '';
     if (dom['cp-link-search']) dom['cp-link-search'].value = '';
+    if (dom['cp-link-chart-search']) dom['cp-link-chart-search'].value = '';
     dom['cp-link-panel']?.classList.add('hidden');
+    hideChartAutocomplete();
 
     // A IA aprende a cada uso: os vínculos aceitos viram apelidos persistentes.
     // A estatística conta só o que é **novo** — refazer a conciliação não pode
@@ -733,7 +1084,7 @@ async function runReconciliation() {
     const learned = learnFromReconciliation(state.memory, rows);
     const after = Object.keys(learned.counterparties.aliases).length;
     state.memory.counterparties = learned.counterparties;
-    state.learnedCount = learned.learnedCount;
+    state.learnedCount = learned.learnedCount + chartStats.memoryCount;
     state.memory.stats.correctionsLearned =
       (state.memory.stats.correctionsLearned || 0) + Math.max(0, after - before);
     persistMemory();
@@ -744,7 +1095,7 @@ async function runReconciliation() {
     track(
       'conciliacao',
       `Conciliação: ${stats.matched} de ${stats.total} vinculados`,
-      `${stats.byDocument || 0} por CPF/CNPJ • ${stats.ambiguous} para revisar • ${stats.unmatched} sem contato`,
+      `${stats.byDocument || 0} por CPF/CNPJ • ${chartStats.matchedCount} pelo Plano de Contas • ${stats.ambiguous} para revisar`,
       'reconciliations'
     );
     // Soma os números da rodada (linhas, não eventos).
@@ -752,12 +1103,13 @@ async function runReconciliation() {
     trackCount('rowsReview', stats.ambiguous);
     trackCount('rowsUnmatched', stats.unmatched);
 
-    const suggested = rows.filter((row) => row.accountSuggestion).length;
-    const fromMemory = rows.filter((row) => row.counterpartSource === 'memory').length;
+    const suggested = rows.filter((row) => row.accountSuggestion || row.chartSuggestion).length;
+    const fromMemory = rows.filter((row) => row.counterpartSource === 'memory').length + chartStats.memoryCount;
     cpAlert('');
     showToast(
       `Conciliação concluída: ${stats.matched} de ${stats.total} lançamentos vinculados (${stats.ambiguous} para revisar).` +
         (stats.byDocument ? ` ${stats.byDocument} pelo CPF/CNPJ do histórico.` : '') +
+        (chartStats.matchedCount ? ` ${chartStats.matchedCount} pelo Plano de Contas (I.A.).` : '') +
         (fromMemory ? ` ${fromMemory} conta(s) da memória.` : '') +
         (suggested ? ` ${suggested} conta(s) sugerida(s).` : '')
     );
@@ -777,20 +1129,23 @@ function visibleRows() {
   const includeUnmatched = dom['cp-include-unmatched']?.checked !== false;
 
   return state.rows.filter((row) => {
-    if (!includeUnmatched && !row.contact) return false;
-    if (state.filter === 'matched' && !['matched', 'manual'].includes(row.status)) return false;
+    if (!includeUnmatched && !row.contact && !row.chartMatch) return false;
+    if (state.filter === 'matched' && !['matched', 'manual', 'learned'].includes(row.status)) return false;
+    if (state.filter === 'chart' && !row.chartMatch && !row.chartSuggestion) return false;
     if (state.filter === 'review' && row.status !== 'ambiguous') return false;
-    if (state.filter === 'unmatched' && row.contact) return false;
+    if (state.filter === 'unmatched' && (row.contact || row.chartMatch)) return false;
     if (state.filter === 'document' && row.matchReason !== 'document') return false;
     if (!term) return true;
     // A busca vale para tudo o que está na linha: histórico, contato, código,
-    // CPF/CNPJ, data e as contas de débito/crédito. Procurar a conta
-    // "5086959" é o jeito mais rápido de auditar onde ela foi usada.
+    // CPF/CNPJ, data, contas de débito/crédito e conta do Plano de Contas.
     const haystack = [
       row.history,
       row.contact?.name,
       row.contact?.code,
       row.contact?.document,
+      row.chartMatch?.name,
+      row.chartMatch?.conta,
+      row.chartMatch?.classification,
       row.date,
       row.debitAccount,
       row.creditAccount,
@@ -804,12 +1159,21 @@ function visibleRows() {
 /**
  * Selo do vínculo, com a explicação no `title`.
  *
- * Saber **por que** a linha casou (nome, memória ou CPF/CNPJ) é o que permite
- * revisar rápido: um vínculo por nome a 62% merece conferência; um vínculo por
- * CPF/CNPJ, não.
+ * Saber **por que** a linha casou (nome, memória, Plano de Contas ou CPF/CNPJ)
+ * é o que permite revisar rápido.
  */
 function statusBadge(row) {
   const score = row.score ? `${Math.round(row.score * 100)}% de semelhança` : 'sem semelhança';
+  if (row.chartMatch) {
+    const pct = row.chartMatch.score ? `${Math.round(row.chartMatch.score * 100)}%` : '';
+    if (row.chartMatch.source === 'memory') {
+      return `<span class="cp-badge" title="Conta do Plano de Contas aplicada pela memória da I.A. (${escapeHtml(row.chartMatch.reason || '')})">memória I.A.</span>`;
+    }
+    if (row.chartMatch.source === 'manual' || row.chartMatch.source === 'accepted') {
+      return '<span class="cp-badge" title="Conta do Plano de Contas escolhida manualmente (I.A. aprendeu)">manual</span>';
+    }
+    return `<span class="cp-badge" title="Conciliado automaticamente pela I.A. (${escapeHtml(row.chartMatch.reason || '')} — ${pct})">I.A. ${pct}</span>`;
+  }
   if (row.status === 'manual') return '<span class="cp-badge" title="Vínculo escolhido à mão">manual</span>';
   if (row.learnedAlias) {
     return '<span class="cp-badge" title="Histórico já vinculado numa conciliação anterior">memória</span>';
@@ -819,34 +1183,45 @@ function statusBadge(row) {
     return `<span class="cp-badge" title="Vínculo automático por ${escapeHtml(why)}">conciliado</span>`;
   }
   if (row.status === 'ambiguous') {
-    return `<span class="cp-badge is-review" title="Há mais de um contato parecido (${escapeHtml(score)}) — confira antes de exportar">revisar</span>`;
+    const hint = row.chartSuggestion
+      ? `Sugestão I.A. (${Math.round(row.chartSuggestion.score * 100)}%): ${row.chartSuggestion.conta} • ${row.chartSuggestion.name}`
+      : `Há mais de um contato parecido (${score})`;
+    return `<span class="cp-badge is-review" title="${escapeHtml(hint)} — confira antes de exportar">revisar</span>`;
   }
-  return '<span class="cp-badge is-none" title="Nenhum contato do cadastro bateu com este histórico">sem contato</span>';
+  return '<span class="cp-badge is-none" title="Nenhum contato ou conta do Plano bateu com este histórico">sem conta</span>';
 }
 
-/** Célula de débito/crédito: vazia vira campo para digitar a conta à mão. */
+/** Célula de débito/crédito: vazia ou preenchida pelo Plano de Contas vira campo editável com busca. */
 function accountCell(row, side) {
   const filled = side === 'credit' ? row.creditAccount : row.debitAccount;
-  const editable = !filled || isManualAccountCell(row, side);
+  const editable =
+    !filled ||
+    isManualAccountCell(row, side) ||
+    (!row.contact && row.chartMatch?.side === side);
   const label = side === 'credit' ? 'crédito' : 'débito';
 
   if (!editable) return `<td class="col-account">${escapeHtml(filled)}</td>`;
+
+  const matchedAccount = filled ? findChartAccountByCode(filled) : null;
+  const title = matchedAccount
+    ? `Conta ${filled} — ${matchedAccount.name} (${matchedAccount.classification}). Digite código ou nome para trocar.`
+    : `Digite o código (Conta) ou busque pelo nome no Plano de Contas`;
 
   return `
             <td class="col-account col-account-editable">
               <input
                 class="cp-cell-account"
                 type="text"
-                inputmode="numeric"
+                inputmode="text"
                 autocomplete="off"
                 spellcheck="false"
-                maxlength="24"
+                maxlength="48"
                 placeholder="—"
                 value="${escapeHtml(filled || '')}"
                 data-cp-cell="${side}"
                 data-cp-row="${row.id}"
-                aria-label="Conta do ${label} deste lançamento (célula vazia, digite para preencher)"
-                title="Digite a conta do ${label} — só preenche o que está vazio"
+                aria-label="Conta do ${label} deste lançamento (digite o código ou busque no Plano de Contas)"
+                title="${escapeHtml(title)}"
               />
             </td>`;
 }
@@ -856,18 +1231,33 @@ function rowsPerPage() {
   return state.pageSize === 'all' ? Infinity : Number(state.pageSize) || DEFAULT_PAGE_SIZE;
 }
 
-/** Chip clicável com a conta que a memória sugere para a linha. */
+/** Chip clicável com a conta que a memória ou a I.A. do Plano de Contas sugere para a linha. */
 function suggestionChip(row) {
+  const parts = [];
   const suggestion = row?.accountSuggestion;
-  if (!suggestion) return '';
-
-  const label = suggestion.side === 'credit' ? 'crédito' : 'débito';
-  return `<button
+  if (suggestion) {
+    const label = suggestion.side === 'credit' ? 'crédito' : 'débito';
+    parts.push(`<button
       class="cp-suggest"
       type="button"
       data-cp-suggest="${row.id}"
       title="Conta ${suggestion.account} memorizada pelo ${suggestion.source} — clique para preencher o ${label}"
-    >sugestão: ${suggestion.account} no ${label}</button>`;
+    >sugestão: ${suggestion.account} no ${label}</button>`);
+  }
+
+  const chartSug = row?.chartSuggestion;
+  if (chartSug) {
+    const label = chartSug.side === 'credit' ? 'crédito' : 'débito';
+    const pct = Math.round((chartSug.score || 0) * 100);
+    parts.push(`<button
+      class="cp-suggest"
+      type="button"
+      data-cp-chart-suggest="${row.id}"
+      title="Sugestão I.A. (${pct}%): ${escapeHtml(chartSug.name)} (${escapeHtml(chartSug.classification)}) — clique para preencher ${escapeHtml(chartSug.conta)} no ${label}"
+    >sugestão I.A.: ${escapeHtml(chartSug.conta)} (${escapeHtml(chartSug.name)})</button>`);
+  }
+
+  return parts.join('');
 }
 
 function renderRows() {
@@ -908,13 +1298,18 @@ function renderRows() {
                 ? '<span class="cp-badge is-doc" title="Vínculo pelo CPF/CNPJ que veio no histórico do lançamento">CPF/CNPJ</span>'
                 : ''
             }
+            ${
+              row.chartMatch
+                ? `<span class="cp-badge is-chart" title="${escapeHtml(row.chartMatch.classification || '')}">${escapeHtml(row.chartMatch.conta)} • ${escapeHtml(row.chartMatch.name)}</span>`
+                : ''
+            }
             ${row.counterpartSource === 'memory' ? '<span class="cp-badge is-memory" title="Conta preenchida pela memória da IA">conta da memória</span>' : ''}
             ${row.contact ? `<span class="cp-contact">${escapeHtml(row.contact.name)}</span>` : ''}
             ${suggestionChip(row)}
           </td>
           <td class="col-cp-link">
-            <button class="cp-link-btn" type="button" data-cp-link="${row.id}" title="Vincular este lançamento a outro contato">
-              ${row.contact ? 'Trocar' : 'Vincular'}
+            <button class="cp-link-btn" type="button" data-cp-link="${row.id}" title="Escolher conta do Plano de Contas ou vincular contato">
+              ${row.contact || row.chartMatch ? 'Trocar' : 'Vincular'}
             </button>
           </td>
         </tr>`
@@ -939,7 +1334,7 @@ function renderSuggestionButton() {
   const button = dom['btn-cp-apply-suggestions'];
   if (!button) return;
 
-  const pending = visibleRows().filter((row) => row.accountSuggestion).length;
+  const pending = visibleRows().filter((row) => row.accountSuggestion || row.chartSuggestion).length;
   button.disabled = pending === 0;
   button.textContent = pending > 0 ? `Aplicar ${pending} sugerida(s)` : 'Aplicar sugeridas';
 }
@@ -1054,6 +1449,7 @@ async function exportXlsx() {
   if (!guardExport()) return;
   try {
     const rows = exportRows();
+    reinforceExportedChartMatches(rows);
     await exportCounterpartiesXlsx(rows, exportName('xlsx'), window.ExcelJS);
     track('exportacao', `Planilha .xlsx gerada`, `${rows.length} lançamento(s)`, 'exports');
     showToast(
@@ -1070,6 +1466,7 @@ function exportPdf() {
   if (!guardExport()) return;
   try {
     const rows = exportRows();
+    reinforceExportedChartMatches(rows);
     exportCounterpartiesPdf(rows, summarizeReconciliation(rows), exportName('pdf'));
     track('exportacao', 'PDF gerado', `${rows.length} lançamento(s)`, 'exports');
     showToast(
@@ -1086,6 +1483,7 @@ function exportCsv() {
   if (!guardExport()) return;
   try {
     const rows = exportRows();
+    reinforceExportedChartMatches(rows);
     exportCounterpartiesCsv(rows, exportName('csv'));
     track('exportacao', 'CSV gerado', `${rows.length} lançamento(s)`, 'exports');
     showToast(
@@ -1135,6 +1533,9 @@ function applySuggestion(rowId) {
   setRowCellAccount(row, suggestion.side, suggestion.account);
   delete row.accountSuggestion;
   rememberAccount(row, suggestion.side, suggestion.account);
+  if (state.chartAccounts.length > 0) {
+    rememberChartAssignment(row, suggestion.side, suggestion.account, '', 'ai_accepted');
+  }
 
   state.stats = summarizeReconciliation(state.rows);
   render();
@@ -1145,28 +1546,50 @@ function applySuggestion(rowId) {
   );
 }
 
+/** Aplica a conta sugerida pela I.A. do Plano de Contas em um único lançamento. */
+function applyChartSuggestion(rowId) {
+  const row = state.rows.find((item) => item.id === Number(rowId));
+  const suggestion = row?.chartSuggestion;
+  if (!row || !suggestion) return;
+
+  assignChartAccountToRow(row, suggestion.side, suggestion.conta, suggestion.name, 'ai_accepted');
+  state.stats = summarizeReconciliation(state.rows);
+  render();
+  track('conta', 'Sugestão Plano de Contas aceita', `conta ${suggestion.conta} (${suggestion.name})`, 'suggestionsApplied');
+  showToast(
+    `Conta ${suggestion.conta} (${suggestion.name}) aplicada no ${suggestion.side === 'credit' ? 'crédito' : 'débito'} — I.A. memorizou no banco.`
+  );
+}
+
 /** Aplica de uma vez todas as contas sugeridas no filtro atual. */
 function applySuggestionsBatch() {
-  const targets = visibleRows().filter((row) => row.accountSuggestion);
+  const targets = visibleRows().filter((row) => row.accountSuggestion || row.chartSuggestion);
   if (targets.length === 0) {
     showToast('Nenhuma conta sugerida neste filtro.', 'warn');
     return;
   }
 
   for (const row of targets) {
-    const suggestion = row.accountSuggestion;
-    setRowCellAccount(row, suggestion.side, suggestion.account);
-    delete row.accountSuggestion;
-    rememberAccount(row, suggestion.side, suggestion.account, { persist: false });
+    if (row.accountSuggestion) {
+      const suggestion = row.accountSuggestion;
+      setRowCellAccount(row, suggestion.side, suggestion.account);
+      delete row.accountSuggestion;
+      rememberAccount(row, suggestion.side, suggestion.account, { persist: false });
+    }
+    if (row.chartSuggestion) {
+      const chartSug = row.chartSuggestion;
+      assignChartAccountToRow(row, chartSug.side, chartSug.conta, chartSug.name, 'ai_accepted');
+    }
   }
 
   persistMemory();
   scheduleCloudPush();
+  flushChartLearning();
 
   state.stats = summarizeReconciliation(state.rows);
   render();
   track('conta', 'Sugestões aplicadas em lote', `${targets.length} conta(s)`, 'suggestionsApplied', targets.length);
-  showToast(`${targets.length} conta(s) sugerida(s) aplicada(s) — a memória foi reforçada.`);
+  showToast(`${targets.length} conta(s) sugerida(s) aplicada(s) — a memória foi reforçada no banco.`);
 }
 
 /**
@@ -1212,8 +1635,11 @@ function applyAccountBatch() {
       const after = side === 'credit' ? row.creditAccount : row.debitAccount;
       if (before !== after) {
         changed += 1;
-        // Cada conta aplicada vira treino: histórico + contato.
+        // Cada conta aplicada vira treino: histórico + contato + Plano de Contas.
         rememberAccount(row, side, account, { persist: false });
+        if (account && state.chartAccounts.length > 0) {
+          rememberChartAssignment(row, side, account, '', 'batch');
+        }
       }
     }
 
@@ -1252,26 +1678,207 @@ function applyAccountBatch() {
 }
 
 /**
+ * Atribui uma conta do Plano de Contas (ou digitada à mão) em uma célula da lista
+ * e grava o aprendizado na I.A. (local + banco de dados).
+ */
+function assignChartAccountToRow(row, side, conta, accountName = '', source = 'manual') {
+  if (!row) return;
+  const cleanConta = String(conta ?? '').trim();
+  const key = side === 'credit' ? 'creditAccount' : 'debitAccount';
+  const matched = cleanConta ? findChartAccountByCode(cleanConta) : null;
+  const resolvedName = accountName || matched?.name || '';
+
+  if (!cleanConta) {
+    if (row.chartMatch?.side === side) {
+      delete row.chartMatch;
+      if (!row.contact) row.status = 'unmatched';
+    }
+    setRowCellAccount(row, side, '');
+    return;
+  }
+
+  // Permite substituir células vazias, manuais ou preenchidas anteriormente pelo Plano de Contas.
+  row[key] = cleanConta;
+  row.manualCells = { ...(row.manualCells || {}), [side]: true };
+  delete row.accountSuggestion;
+  delete row.chartSuggestion;
+
+  const primarySide = row.direction === DIRECTION.RECEIPT ? 'credit' : 'debit';
+  if (!row.contact && (side === primarySide || !row.chartMatch)) {
+    row.chartMatch = {
+      conta: cleanConta,
+      name: resolvedName || `Conta ${cleanConta}`,
+      classification: matched?.classification || '',
+      side,
+      score: 1,
+      source: source === 'ai_accepted' ? 'accepted' : 'manual',
+      reason: source === 'ai_accepted' ? 'sugestão aceita' : 'preenchido à mão',
+    };
+    row.status = 'manual';
+  }
+
+  rememberAccount(row, side, cleanConta, { persist: false });
+  rememberChartAssignment(row, side, cleanConta, resolvedName, source);
+  persistMemory();
+  scheduleCloudPush();
+}
+
+/* -------------------------------------------------------------------------- */
+/*                  Autocomplete do Plano de Contas na célula                 */
+/* -------------------------------------------------------------------------- */
+
+const cellAutocomplete = {
+  input: null,
+  rowId: null,
+  side: null,
+  items: [],
+  activeIndex: -1,
+};
+
+function hideChartAutocomplete() {
+  const menu = dom['cp-chart-autocomplete'];
+  if (menu) {
+    menu.classList.add('hidden');
+    menu.innerHTML = '';
+  }
+  cellAutocomplete.input = null;
+  cellAutocomplete.rowId = null;
+  cellAutocomplete.side = null;
+  cellAutocomplete.items = [];
+  cellAutocomplete.activeIndex = -1;
+}
+
+function showChartAutocomplete(input) {
+  const menu = dom['cp-chart-autocomplete'];
+  if (!menu || state.chartAccounts.length === 0) {
+    hideChartAutocomplete();
+    return;
+  }
+
+  const rowId = Number(input.dataset.cpRow);
+  const side = input.dataset.cpCell === 'credit' ? 'credit' : 'debit';
+  const row = state.rows.find((item) => item.id === rowId);
+  if (!row) return;
+
+  const query = String(input.value ?? '').trim();
+  let accounts;
+  if (!query) {
+    accounts = scoreChartCandidates(row.rawHistory || row.history, row.direction, state.chartAccounts, {
+      side,
+      rules: state.chartRules,
+      tokens: state.chartTokens,
+      limit: 6,
+    }).map((entry) => entry.account);
+    if (accounts.length === 0) {
+      accounts = searchChartAccounts(state.chartAccounts, '', { limit: 6 });
+    }
+  } else {
+    accounts = searchChartAccounts(state.chartAccounts, query, { limit: 8 });
+  }
+
+  if (accounts.length === 0) {
+    hideChartAutocomplete();
+    return;
+  }
+
+  cellAutocomplete.input = input;
+  cellAutocomplete.rowId = rowId;
+  cellAutocomplete.side = side;
+  cellAutocomplete.items = accounts;
+  cellAutocomplete.activeIndex = -1;
+
+  const rect = input.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 340))}px`;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  if (spaceBelow >= 220 || spaceBelow >= rect.top) {
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.bottom = 'auto';
+  } else {
+    menu.style.top = 'auto';
+    menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+  }
+
+  menu.innerHTML = accounts
+    .map(
+      (acc, index) => `
+      <button
+        type="button"
+        class="cp-chart-ac-item"
+        role="option"
+        data-cp-ac-index="${index}"
+      >
+        <span class="cp-chart-ac-top">
+          <span class="cp-chart-ac-code">${escapeHtml(acc.conta)}</span>
+          <span>${escapeHtml(acc.name)}</span>
+        </span>
+        <span class="cp-chart-ac-meta">${escapeHtml(acc.classification)}${acc.alias ? ` • ${escapeHtml(acc.alias)}` : ''}</span>
+      </button>`
+    )
+    .join('');
+
+  menu.classList.remove('hidden');
+}
+
+function pickAutocompleteAccount(index) {
+  const acc = cellAutocomplete.items[index];
+  const row = state.rows.find((item) => item.id === cellAutocomplete.rowId);
+  const side = cellAutocomplete.side;
+  const input = cellAutocomplete.input;
+  if (!acc || !row || !side) {
+    hideChartAutocomplete();
+    return;
+  }
+
+  if (input) input.dataset.cpPicked = '1';
+  hideChartAutocomplete();
+
+  assignChartAccountToRow(row, side, acc.conta, acc.name, 'manual');
+  trackCount('accountEdits');
+  state.stats = summarizeReconciliation(state.rows);
+  render();
+
+  const label = side === 'credit' ? 'crédito' : 'débito';
+  showToast(`Conta ${acc.conta} (${acc.name}) aplicada no ${label} — I.A. memorizou no banco.`);
+}
+
+/**
  * Preenche a conta de uma célula (débito/crédito) direto na tabela.
  *
  * A célula só aceita valor quando está vazia (ou quando o próprio usuário
- * digitou ali), então a conta vinda do cadastro do contato nunca é trocada
- * por engano. Vale para completar o outro lado — a contrapartida — ou para
- * preencher a conta do contato num lançamento que ficou "sem contato".
+ * digitou ali ou veio do Plano de Contas), então a conta vinda do cadastro
+ * do contato nunca é trocada por engano.
  */
 function applyCellAccount(input) {
+  if (input.dataset.cpPicked) {
+    delete input.dataset.cpPicked;
+    return;
+  }
+
   const row = state.rows.find((item) => item.id === Number(input.dataset.cpRow));
   if (!row) return;
 
   const side = input.dataset.cpCell === 'credit' ? 'credit' : 'debit';
   const label = side === 'credit' ? 'crédito' : 'débito';
-  const account = contactCode(input.value);
+  const rawValue = String(input.value ?? '').trim();
+  let account = contactCode(rawValue);
   const current = side === 'credit' ? row.creditAccount : row.debitAccount;
 
   if (input.dataset.cpCancelled) {
     delete input.dataset.cpCancelled;
     input.value = current || '';
     return;
+  }
+
+  // Se o usuário digitou texto (nome da conta) e não escolheu no menu, tenta casar 1 único resultado exato.
+  if (rawValue && /[a-zA-ZÀ-ÿ]/.test(rawValue) && state.chartAccounts.length > 0) {
+    const found = searchChartAccounts(state.chartAccounts, rawValue, { limit: 1 });
+    if (found.length > 0) {
+      account = found[0].conta;
+    } else {
+      input.value = current || '';
+      showToast(`Nenhuma conta encontrada para "${rawValue}".`, 'warn');
+      return;
+    }
   }
 
   // Célula vazia e nada digitado: não há o que fazer.
@@ -1281,15 +1888,17 @@ function applyCellAccount(input) {
   }
 
   // Conta vinda do cadastro do contato não é substituída por aqui.
-  if (current && !isManualAccountCell(row, side)) {
+  const canEdit = !current || isManualAccountCell(row, side) || (!row.contact && row.chartMatch?.side === side);
+  if (!canEdit) {
     input.value = current;
     showToast(`A conta do ${label} veio do cadastro do contato e não é substituída por aqui.`, 'warn');
     return;
   }
 
-  setRowCellAccount(row, side, account);
-  delete row.accountSuggestion;
-  rememberAccount(row, side, account);
+  if (account === current) return;
+
+  const matchedAcc = account ? findChartAccountByCode(account) : null;
+  assignChartAccountToRow(row, side, account, matchedAcc?.name || '', 'manual');
   trackCount('accountEdits');
   state.stats = summarizeReconciliation(state.rows);
   render();
@@ -1300,9 +1909,11 @@ function applyCellAccount(input) {
   }
 
   showToast(
-    row.counterpartAccount === account
-      ? `Conta ${account} preenchida no ${label} — contrapartida deste lançamento.`
-      : `Conta ${account} preenchida no ${label} deste lançamento.`
+    matchedAcc
+      ? `Conta ${account} (${matchedAcc.name}) preenchida no ${label} — I.A. memorizou no banco.`
+      : row.counterpartAccount === account
+        ? `Conta ${account} preenchida no ${label} — contrapartida deste lançamento.`
+        : `Conta ${account} preenchida no ${label} deste lançamento.`
   );
 }
 
@@ -1316,7 +1927,11 @@ function applyAccountToLinkingRow() {
 
   applyRowAccount(row, account);
   if (account) {
-    rememberAccount(row, row.direction === DIRECTION.PAYMENT ? 'credit' : 'debit', account);
+    const side = row.direction === DIRECTION.PAYMENT ? 'credit' : 'debit';
+    rememberAccount(row, side, account);
+    if (state.chartAccounts.length > 0) {
+      rememberChartAssignment(row, side, account, '', 'manual');
+    }
   }
   state.stats = summarizeReconciliation(state.rows);
   state.linkingId = null;
@@ -1340,10 +1955,108 @@ function currentLinkingRow() {
   return state.rows.find((row) => row.id === state.linkingId) || null;
 }
 
+function renderChartCandidates() {
+  const box = dom['cp-link-chart-box'];
+  const list = dom['cp-link-chart-candidates'];
+  const row = currentLinkingRow();
+  if (!list || !row) return;
+
+  if (state.chartAccounts.length === 0) {
+    box?.classList.add('hidden');
+    return;
+  }
+  box?.classList.remove('hidden');
+
+  const term = String(state.chartLinkSearch || '').trim();
+  const primarySide = row.direction === DIRECTION.RECEIPT ? 'credit' : 'debit';
+  let entries;
+
+  if (term) {
+    entries = searchChartAccounts(state.chartAccounts, term, { limit: 12 }).map((account) => ({
+      account,
+      score: 0,
+      reason: '',
+    }));
+  } else {
+    entries = scoreChartCandidates(row.rawHistory || row.history, row.direction, state.chartAccounts, {
+      side: primarySide,
+      rules: state.chartRules,
+      tokens: state.chartTokens,
+      limit: 10,
+    });
+    if (entries.length === 0) {
+      entries = searchChartAccounts(state.chartAccounts, '', { limit: 10 }).map((account) => ({
+        account,
+        score: 0,
+        reason: '',
+      }));
+    }
+  }
+
+  if (entries.length === 0) {
+    list.innerHTML =
+      '<li class="cp-candidate"><span class="cp-candidate-info"><span class="cp-candidate-name">Nenhuma conta encontrada no Plano de Contas</span><span class="cp-candidate-meta">Tente buscar pelo nome, código (Conta), apelido ou classificação.</span></span></li>';
+    return;
+  }
+
+  list.innerHTML = entries
+    .map(({ account, score, reason }) => {
+      const pct = score ? ` • ${Math.round(score * 100)}%` : '';
+      const why = reason ? ` • ${reason}` : '';
+      return `
+      <li class="cp-candidate">
+        <span class="cp-candidate-info">
+          <span class="cp-candidate-name">${escapeHtml(account.conta)} — ${escapeHtml(account.name)}</span>
+          <span class="cp-candidate-meta">
+            ${escapeHtml(account.classification)}${account.alias ? ` • ${escapeHtml(account.alias)}` : ''}${escapeHtml(pct)}${escapeHtml(why)}
+          </span>
+        </span>
+        <span class="cp-candidate-actions">
+          <button
+            class="btn btn-sm ${primarySide === 'debit' ? 'btn-primary' : 'btn-ghost-dark'}"
+            type="button"
+            data-cp-chart-pick="${escapeHtml(account.conta)}"
+            data-cp-chart-side="debit"
+          >Débito</button>
+          <button
+            class="btn btn-sm ${primarySide === 'credit' ? 'btn-primary' : 'btn-ghost-dark'}"
+            type="button"
+            data-cp-chart-pick="${escapeHtml(account.conta)}"
+            data-cp-chart-side="credit"
+          >Crédito</button>
+        </span>
+      </li>`;
+    })
+    .join('');
+}
+
+function applyChartAccountFromPanel(conta, side) {
+  const row = currentLinkingRow();
+  const acc = findChartAccountByCode(conta);
+  if (!row || !acc) return;
+
+  assignChartAccountToRow(row, side, acc.conta, acc.name, 'manual');
+  state.stats = summarizeReconciliation(state.rows);
+  state.linkingId = null;
+  dom['cp-link-panel']?.classList.add('hidden');
+  render();
+  track('plano_contas', 'Conta escolhida no painel', `${acc.conta} (${acc.name})`, 'manualLinks');
+  showToast(
+    `Conta ${acc.conta} (${acc.name}) aplicada no ${side === 'credit' ? 'crédito' : 'débito'} — I.A. memorizou no banco.`
+  );
+}
+
 function renderCandidates() {
+  const box = dom['cp-link-contacts-box'];
   const list = dom['cp-link-candidates'];
   const row = currentLinkingRow();
   if (!list || !row) return;
+
+  if (state.contacts.length === 0) {
+    box?.classList.add('hidden');
+    return;
+  }
+  box?.classList.remove('hidden');
 
   const pool = candidatesFor(state.contacts, row.direction);
   const term = normalizeText(state.linkSearch);
@@ -1401,7 +2114,9 @@ function openLinkPanel(rowId) {
 
   state.linkingId = rowId;
   state.linkSearch = '';
+  state.chartLinkSearch = '';
   if (dom['cp-link-search']) dom['cp-link-search'].value = '';
+  if (dom['cp-link-chart-search']) dom['cp-link-chart-search'].value = '';
   if (dom['cp-link-history']) {
     // Quando o histórico traz o CPF/CNPJ, isso vai junto: é a pista mais forte
     // para o usuário escolher o contato certo na lista abaixo.
@@ -1438,8 +2153,9 @@ function openLinkPanel(rowId) {
       : 'Este é um recebimento: o crédito tem o cliente, então a contrapartida vai para o débito.';
   }
   panel.classList.remove('hidden');
+  renderChartCandidates();
   renderCandidates();
-  dom['cp-link-search']?.focus();
+  (state.chartAccounts.length > 0 ? dom['cp-link-chart-search'] : dom['cp-link-search'])?.focus();
   panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -1455,6 +2171,8 @@ function applyLink(code) {
     natureza: contact.natureza,
     classification: contact.classification,
   };
+  delete row.chartMatch;
+  delete row.chartSuggestion;
   row.status = 'manual';
   row.score = 1;
   row.learnedAlias = false;
@@ -1509,6 +2227,22 @@ function bindEvents() {
     }
   });
 
+  dom['btn-cp-chart-update']?.addEventListener('click', () => {
+    dom['cp-chart-input']?.click();
+  });
+
+  dom['cp-chart-input']?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    await uploadAndSyncChart(file);
+  });
+
+  dom['cp-chart-plan-select']?.addEventListener('change', (event) => {
+    const planId = event.target.value;
+    if (planId) void initChartFromDatabase(planId);
+  });
+
   dom['btn-cp-run']?.addEventListener('click', () => void runReconciliation());
   dom['btn-cp-rerun']?.addEventListener('click', () => void runReconciliation());
 
@@ -1543,20 +2277,76 @@ function bindEvents() {
     renderRows();
   });
 
+  dom['cp-tbody']?.addEventListener('focusin', (event) => {
+    const cell = event.target.closest('[data-cp-cell]');
+    if (!cell) return;
+    showChartAutocomplete(cell);
+  });
+
+  dom['cp-tbody']?.addEventListener('input', (event) => {
+    const cell = event.target.closest('[data-cp-cell]');
+    if (!cell) return;
+    showChartAutocomplete(cell);
+  });
+
+  dom['cp-tbody']?.addEventListener('focusout', (event) => {
+    const cell = event.target.closest('[data-cp-cell]');
+    if (!cell) return;
+    setTimeout(() => {
+      if (cellAutocomplete.input === cell && document.activeElement !== cell) {
+        hideChartAutocomplete();
+      }
+    }, 120);
+  });
+
   dom['cp-tbody']?.addEventListener('keydown', (event) => {
     const cell = event.target.closest('[data-cp-cell]');
     if (!cell) return;
+    const menuOpen = !dom['cp-chart-autocomplete']?.classList.contains('hidden');
+    if (menuOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault();
+      const max = cellAutocomplete.items.length - 1;
+      if (max >= 0) {
+        cellAutocomplete.activeIndex =
+          event.key === 'ArrowDown'
+            ? (cellAutocomplete.activeIndex + 1) % cellAutocomplete.items.length
+            : (cellAutocomplete.activeIndex - 1 + cellAutocomplete.items.length) % cellAutocomplete.items.length;
+        dom['cp-chart-autocomplete']?.querySelectorAll('[data-cp-ac-index]').forEach((el, idx) => {
+          el.classList.toggle('is-active', idx === cellAutocomplete.activeIndex);
+        });
+      }
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
+      if (menuOpen && cellAutocomplete.activeIndex >= 0) {
+        pickAutocompleteAccount(cellAutocomplete.activeIndex);
+        return;
+      }
+      hideChartAutocomplete();
       cell.blur();
     } else if (event.key === 'Escape') {
       event.preventDefault();
+      hideChartAutocomplete();
       cell.dataset.cpCancelled = '1';
       cell.blur();
     }
   });
 
+  dom['cp-chart-autocomplete']?.addEventListener('mousedown', (event) => {
+    const item = event.target.closest('[data-cp-ac-index]');
+    if (!item) return;
+    event.preventDefault();
+    pickAutocompleteAccount(Number(item.dataset.cpAcIndex));
+  });
+
   dom['cp-tbody']?.addEventListener('click', (event) => {
+    const chartSuggest = event.target.closest('[data-cp-chart-suggest]');
+    if (chartSuggest) {
+      applyChartSuggestion(chartSuggest.dataset.cpChartSuggest);
+      return;
+    }
+
     const suggestion = event.target.closest('[data-cp-suggest]');
     if (suggestion) {
       applySuggestion(suggestion.dataset.cpSuggest);
@@ -1632,6 +2422,20 @@ function bindEvents() {
     dom['cp-link-panel']?.classList.add('hidden');
   });
 
+  dom['cp-link-chart-search']?.addEventListener(
+    'input',
+    debounce((event) => {
+      state.chartLinkSearch = event.target.value;
+      renderChartCandidates();
+    }, SEARCH_DEBOUNCE_MS)
+  );
+
+  dom['cp-link-chart-candidates']?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-cp-chart-pick]');
+    if (!button) return;
+    applyChartAccountFromPanel(button.dataset.cpChartPick, button.dataset.cpChartSide || 'debit');
+  });
+
   dom['cp-link-search']?.addEventListener(
     'input',
     debounce((event) => {
@@ -1686,6 +2490,7 @@ function init() {
   adminConsole.mount();
   bindEvents();
   render();
+  void initChartFromDatabase();
   // Sem botão de sincronizar: puxa a nuvem sozinho na abertura e ao voltar o foco.
   scheduleCloudPull();
   document.addEventListener('visibilitychange', () => {
