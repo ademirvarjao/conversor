@@ -4056,8 +4056,28 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
 }
 
 /* Plano de Contas Questor (banco de dados, I.A. e preenchimento manual) */
+.cp-chart-section {
+  margin-bottom: 18px;
+}
+
 .cp-file-chart {
   cursor: default;
+}
+
+.cp-chart-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 18px;
+}
+
+.cp-chart-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
 .cp-chart-actions {
@@ -4065,7 +4085,7 @@ body:has(#cp-admin-panel:not(.hidden)) .toast-container {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  flex-shrink: 0;
 }
 
 .cp-chart-select {
